@@ -33,7 +33,7 @@ rodio = { version = "0.20.1", default-features = false, features = ["symphonia-a
 # length, so seeking in FLAC failed and M4A files did not open (see `player::decoder`).
 # It is already in the graph as a rodio dependency. To the symphonia-all formats we add the
 # `ogg` container (symphonia-format-ogg), without which the `.ogg` files served by the backend did not open.
-symphonia = { version = "0.5", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "vorbis", "ogg", "wav", "pcm", "adpcm"] }
+symphonia = { version = "0.6", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "vorbis", "ogg", "wav", "pcm", "adpcm"] }
 # HTTP to the backend: TLS with rustls, no dependency on the system OpenSSL.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Search debounce and asynchronous writing of configuration and downloads. `net`: the Clerk

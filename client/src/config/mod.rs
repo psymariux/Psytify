@@ -23,7 +23,11 @@ pub const DEFAULT_API_URL: &str = match option_env!("PSYTIFY_DEFAULT_API_URL") {
     Some(url) if !url.is_empty() => url,
     _ => "http://127.0.0.1:8080",
 };
-/// Variabile d'ambiente che sostituisce `api_base_url` senza toccare il file.
+/// Indirizzi predefiniti delle build di sviluppo (desktop ed emulatore Android). Le versioni
+/// precedenti li salvavano nel file anche senza una scelta dell'utente: letti lì, non valgono come
+/// scelta.
+const BUILTIN_API_URLS: [&str; 2] = ["http://127.0.0.1:8080", "http://10.0.2.2:8080"];
+/// Variabile d'ambiente che sostituisce il backend senza toccare il file.
 pub const API_URL_ENV: &str = "PSYTIFY_API_URL";
 /// Variabili d'ambiente che sostituiscono `clerk_issuer` e `clerk_client_id`.
 pub const CLERK_ISSUER_ENV: &str = "PSYTIFY_CLERK_ISSUER";
@@ -131,7 +135,13 @@ pub fn clean_name(raw: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub api_base_url: String,
+    /// Backend scelto dall'utente nelle impostazioni; `None` = quello predefinito della build.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+    /// Chiave delle versioni precedenti, che scrivevano sempre il backend in uso: un indirizzo
+    /// vecchio sopravviveva così a ogni aggiornamento. Si legge soltanto, per la migrazione.
+    #[serde(rename = "api_base_url", skip_serializing)]
+    pub(crate) legacy_api: Option<String>,
     pub volume: f32,
     pub last_screen: SavedScreen,
     pub queue: Queue,
@@ -180,7 +190,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            api_base_url: DEFAULT_API.get().map_or(DEFAULT_API_URL, String::as_str).into(),
+            server: None,
+            legacy_api: None,
             volume: 0.8,
             last_screen: SavedScreen::Home,
             queue: Queue::default(),
@@ -256,6 +267,15 @@ impl Config {
         }
         self.volume = self.volume.clamp(0.0, 1.0);
         self.queue.sanitize();
+        // Il backend scritto dalle versioni precedenti resta solo se era una scelta: sul telefono
+        // non c'era modo di cambiarlo, quindi era sempre il predefinito di una build passata.
+        if let Some(legacy) = self.legacy_api.take()
+            && self.server.is_none()
+            && !cfg!(target_os = "android")
+            && !BUILTIN_API_URLS.contains(&legacy.trim().trim_end_matches('/'))
+        {
+            self.server = normalize_server(&legacy);
+        }
         // Le porte sotto 1024 richiedono privilegi: si torna al default.
         if self.oauth_port < 1024 {
             self.oauth_port = DEFAULT_OAUTH_PORT;
@@ -273,11 +293,31 @@ impl Config {
 }
 
 /// Backend predefinito scelto da chi avvia l'app (Android: fissato alla compilazione, perché sul
-/// telefono il backend non è su `127.0.0.1`). Vale solo per una configurazione nuova.
+/// telefono il backend non è su `127.0.0.1`). Vale finché l'utente non ne sceglie un altro.
 static DEFAULT_API: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn set_default_api_url(url: String) {
     let _ = DEFAULT_API.set(url);
+}
+
+/// Il backend predefinito di questa build.
+pub fn default_api_url() -> &'static str {
+    DEFAULT_API.get().map_or(DEFAULT_API_URL, String::as_str)
+}
+
+/// Il backend da usare: la variabile d'ambiente, poi la scelta dell'utente, poi il predefinito.
+pub fn api_url(server: Option<&str>) -> String {
+    std::env::var(API_URL_ENV)
+        .ok()
+        .filter(|url| !url.trim().is_empty())
+        .or_else(|| server.map(str::to_owned))
+        .unwrap_or_else(|| default_api_url().to_owned())
+}
+
+/// Ripulisce l'indirizzo scritto dall'utente; vuoto o uguale al predefinito vuol dire nessuna scelta.
+pub fn normalize_server(input: &str) -> Option<String> {
+    let url = input.trim().trim_end_matches('/');
+    (!url.is_empty() && url != default_api_url()).then(|| url.to_owned())
 }
 
 /// Cartella dei dati scelta da chi avvia l'app (Android: la cartella privata dell'app), al posto di
@@ -316,11 +356,6 @@ pub fn path() -> Option<PathBuf> {
 /// parte come `config.json.broken` e si riparte dai default, senza perdere i dati dell'utente.
 pub fn load() -> Config {
     let mut config = path().map_or_else(Config::default, |p| load_from(&p));
-    if let Ok(url) = std::env::var(API_URL_ENV)
-        && !url.trim().is_empty()
-    {
-        config.api_base_url = url;
-    }
     for (var, field) in
         [(CLERK_ISSUER_ENV, &mut config.clerk_issuer), (CLERK_CLIENT_ID_ENV, &mut config.clerk_client_id)]
     {
@@ -471,7 +506,36 @@ mod tests {
     #[test]
     fn unknown_fields_and_missing_fields_are_tolerated() {
         let config: Config = serde_json::from_str(r#"{"volume": 0.5, "future": true}"#).unwrap();
-        assert_eq!((config.volume, config.api_base_url.as_str()), (0.5, DEFAULT_API_URL));
+        assert_eq!((config.volume, config.server), (0.5, None));
+    }
+
+    #[test]
+    fn a_legacy_default_address_is_not_a_choice() {
+        for url in BUILTIN_API_URLS {
+            let json = format!(r#"{{"api_base_url": "{url}/"}}"#);
+            let config = serde_json::from_str::<Config>(&json).unwrap().sanitize();
+            assert_eq!(config.server, None, "{url}");
+        }
+    }
+
+    #[test]
+    fn a_legacy_custom_address_becomes_the_user_choice() {
+        let json = r#"{"api_base_url": "https://music.example.org/"}"#;
+        let config = serde_json::from_str::<Config>(json).unwrap().sanitize();
+        assert_eq!(config.server.as_deref(), Some("https://music.example.org"));
+        // Riscritto, il file non ha più la chiave vecchia: la scelta sta in `server`.
+        let saved = serde_json::to_value(&config).unwrap();
+        assert_eq!(saved.get("api_base_url"), None);
+        assert_eq!(saved["server"], "https://music.example.org");
+    }
+
+    #[test]
+    fn no_choice_means_the_build_default() {
+        let saved = serde_json::to_value(Config::default()).unwrap();
+        assert_eq!(saved.get("server"), None);
+        assert_eq!(normalize_server("  "), None);
+        assert_eq!(normalize_server(&format!("{}/", default_api_url())), None);
+        assert_eq!(normalize_server(" http://10.0.0.5:8080/ ").as_deref(), Some("http://10.0.0.5:8080"));
     }
 
     #[test]

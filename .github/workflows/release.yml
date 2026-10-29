@@ -53,7 +53,7 @@ jobs:
           persist-credentials: false
       - run: rustup show
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: Build (without video clips: the runner has no GStreamer)
+      - name: "Build (without video clips, the runner has no GStreamer)"
         env:
           PSYTIFY_DEFAULT_API_URL: ${{ vars.PSYTIFY_DEFAULT_API_URL }}
         run: cargo build -p psytify --release --locked --no-default-features

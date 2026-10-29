@@ -26,7 +26,7 @@ path = "src/main.rs"
 iced = { version = "0.13.1", default-features = false, features = ["wgpu", "tiny-skia", "tokio", "svg", "lazy", "image-without-codecs"] }
 # Internet Archive covers: the same `image` 0.24 Iced already uses, with only the codecs of
 # the item images (JPEG, PNG, GIF, WebP) instead of the sixteen of `iced/image`.
-image = { version = "0.24", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 # Audio: OutputStream, Sink and Decoder. symphonia-all covers flac, mp3, ogg/vorbis, wav and m4a (AAC).
 rodio = { version = "0.20.1", default-features = false, features = ["symphonia-all"] }
 # Direct decoding of every format: rodio 0.20's decoder does not tell Symphonia the stream

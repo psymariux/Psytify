@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageInstaller;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Icon;
 import android.media.MediaMetadata;
@@ -18,6 +19,12 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.Log;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 /**
  * La sessione multimediale di Psytify: il brano sulla schermata di blocco, nella notifica e nei
@@ -32,6 +39,8 @@ public final class PsytifyMedia extends MediaSession.Callback {
     private static final String CHANNEL = "playback";
     private static final int NOTIFICATION = 1;
     private static final String ACTION = "dev.psytify.app.MEDIA";
+    private static final String INSTALL_ACTION = "dev.psytify.app.INSTALL";
+    private static final String TAG = "Psytify";
     private static final String CODE = "code";
     /** Gli stessi codici di `phone_command` nel client. */
     private static final int PLAY = 0, PAUSE = 1, NEXT = 2, PREVIOUS = 3, SEEK = 4, TOGGLE = 5;
@@ -114,6 +123,66 @@ public final class PsytifyMedia extends MediaSession.Callback {
             activity.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
             activity.registerReceiver(receiver, filter);
+        }
+        // Il risultato dell'installazione: se Android chiede la conferma, la si mostra qui.
+        BroadcastReceiver installResult = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+                if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                    Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+                    if (confirm != null) {
+                        confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        context.startActivity(confirm);
+                    }
+                } else if (status != PackageInstaller.STATUS_SUCCESS) {
+                    Log.w(TAG, "Aggiornamento non installato: " + intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE));
+                }
+            }
+        };
+        IntentFilter installFilter = new IntentFilter(INSTALL_ACTION);
+        if (Build.VERSION.SDK_INT >= 33) {
+            activity.registerReceiver(installResult, installFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            activity.registerReceiver(installResult, installFilter);
+        }
+    }
+
+    /** Passa l'APK scaricato a `PackageInstaller`: Android chiede la conferma all'utente. */
+    public static void install(final String path) {
+        MAIN.post(() -> {
+            if (instance == null) {
+                return;
+            }
+            try {
+                instance.installPackage(path);
+            } catch (IOException e) {
+                Log.w(TAG, "Installazione non avviata", e);
+            }
+        });
+    }
+
+    private void installPackage(String path) throws IOException {
+        PackageInstaller installer = activity.getPackageManager().getPackageInstaller();
+        int id = installer.createSession(
+                new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL));
+        try (PackageInstaller.Session session = installer.openSession(id)) {
+            try (InputStream in = new FileInputStream(path); OutputStream out = session.openWrite("psytify", 0, -1)) {
+                byte[] buffer = new byte[64 * 1024];
+                for (int read; (read = in.read(buffer)) != -1; ) {
+                    out.write(buffer, 0, read);
+                }
+                session.fsync(out);
+            }
+            // Il sistema riempie il risultato: serve un PendingIntent mutabile da Android 12.
+            Intent result = new Intent(INSTALL_ACTION).setPackage(activity.getPackageName());
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                    | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+            PendingIntent pending = PendingIntent.getBroadcast(activity, id, result, flags);
+            session.commit(pending.getIntentSender());
+        } catch (IOException | RuntimeException e) {
+            installer.abandonSession(id);
+            throw e instanceof IOException ? (IOException) e : new IOException(e);
         }
     }
 

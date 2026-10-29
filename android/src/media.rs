@@ -5,6 +5,7 @@
 //! La copertina si converte in pixel ARGB e si manda solo quando cambia il brano o arriva la
 //! copertina: gli aggiornamenti di posizione e Play/Pausa sono solo testi e numeri.
 
+use std::path::Path;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use jni::objects::{GlobalRef, JClass, JObject, JValue};
@@ -136,6 +137,25 @@ fn argb<'local>(
     let array = env.new_int_array(i32::try_from(ints.len()).unwrap_or(0))?;
     env.set_int_array_region(&array, 0, &ints)?;
     Ok(array)
+}
+
+/// Passa l'APK scaricato a `PsytifyMedia.install`: Android mostra la conferma e installa.
+pub fn install(path: &Path) {
+    let (Some(app), Some(class)) = (APP.get(), CLASS_REF.get()) else { return };
+    let Some(vm) = vm(app) else { return };
+    let Ok(mut env) = vm.attach_current_thread() else { return };
+    let result = env.with_local_frame(16, |env| -> jni::errors::Result<()> {
+        let class = JClass::from(env.new_local_ref(class.as_obj())?);
+        let text = path.to_string_lossy();
+        let path = env.new_string(text.as_ref() as &str)?;
+        env.call_static_method(&class, "install", "(Ljava/lang/String;)V", &[JValue::Object(&path)])?;
+        Ok(())
+    });
+    if let Err(err) = &result {
+        log::warn!("Installazione dell'aggiornamento non avviata: {err}");
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+    }
 }
 
 fn vm(app: &AndroidApp) -> Option<JavaVM> {

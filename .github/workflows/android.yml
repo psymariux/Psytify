@@ -74,6 +74,7 @@ jobs:
           # The Clerk login (issuer and OAuth client ID): public values, kept as repository variables.
           PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
           PSYTIFY_DEFAULT_DISCORD_APP_ID: ${{ vars.PSYTIFY_DEFAULT_DISCORD_APP_ID }}
+          PSYTIFY_BUILD_TAG: ${{ github.ref_name }}
         run: scripts/android-apk.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -57,6 +57,9 @@ name = "android.permission.INTERNET"
 # La notifica dei comandi multimediali (schermata di blocco): da Android 13 si chiede a runtime
 # (`PsytifyMedia.start`).
 [[package.metadata.android.uses_permission]]
+name = "android.permission.REQUEST_INSTALL_PACKAGES"
+
+[[package.metadata.android.uses_permission]]
 name = "android.permission.POST_NOTIFICATIONS"
 
 [package.metadata.android.application]

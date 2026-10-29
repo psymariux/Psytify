@@ -60,7 +60,10 @@ pub use other::{Handle, subscription};
 #[cfg(target_os = "android")]
 pub use phone::{Handle, subscription};
 #[cfg(target_os = "android")]
-pub use phone::{command as phone_command, register as set_phone_media};
+pub use phone::{
+    command as phone_command, install as phone_install, register as set_phone_media,
+    register_install as set_phone_installer,
+};
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -188,6 +191,7 @@ mod linux {
 /// Pausa, Successivo, Precedente, salto) con `command`.
 #[cfg(target_os = "android")]
 mod phone {
+    use std::path::Path;
     use std::sync::{Mutex, OnceLock, PoisonError};
     use std::time::Duration;
 
@@ -200,6 +204,7 @@ mod phone {
     type Commands = (UnboundedSender<Event>, Mutex<Option<UnboundedReceiver<Event>>>);
 
     static SHOW: OnceLock<Show> = OnceLock::new();
+    static INSTALL: OnceLock<Box<dyn Fn(&Path) + Send + Sync>> = OnceLock::new();
     static COMMANDS: OnceLock<Commands> = OnceLock::new();
 
     fn commands() -> &'static Commands {
@@ -212,6 +217,18 @@ mod phone {
     /// Registra chi mostra il brano al sistema. Vale la prima chiamata.
     pub fn register(show: impl Fn(Option<&NowPlaying<'_>>) + Send + Sync + 'static) {
         let _ = SHOW.set(Box::new(show));
+    }
+
+    /// Il guscio Android registra come si installa un pacchetto scaricato dall'app.
+    pub fn register_install(install: impl Fn(&Path) + Send + Sync + 'static) {
+        let _ = INSTALL.set(Box::new(install));
+    }
+
+    /// Passa il pacchetto al sistema, che chiede la conferma all'utente e installa.
+    pub fn install(path: &Path) {
+        if let Some(install) = INSTALL.get() {
+            install(path);
+        }
     }
 
     /// Un comando dal sistema: 0 Play, 1 Pausa, 2 Successivo, 3 Precedente, 4 salto a `value` ms,

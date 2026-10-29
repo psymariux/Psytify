@@ -166,6 +166,18 @@ Sentence case everywhere.
   - **Settings**: each control goes under its explanation.
   - **Gestures**: a long press opens the context menu. Android's Back button closes whatever is on
     top, otherwise it goes back to the previous page.
+- **Sign-in** (`pages/sign_in.rs`): one centered column of `SIGN_IN_WIDTH` on black, tinted with
+  the brand color from the top. The lime mark, "Psytify" and a line that changes with the step;
+  below, the two modes (Sign in, Create an account) as a pill, three outlined provider buttons with
+  the brand's monochrome icon (Simple Icons, in white), "or" between two hairlines, fields of
+  `FIELD_HEIGHT` and the filled button. The email code has a single, larger field. Errors sit in
+  `NEGATIVE` under the button, never in a toast that disappears.
+- **Friends and profile** (`pages/friends.rs`, `pages/profile.rs`): the avatar is the Clerk photo or
+  the initial on a color derived from the username (`AVATAR_ROW` in rows, `AVATAR_PROFILE` on the
+  profile). The profile takes its tint from the avatar, like an album from its cover. "Listening
+  now" is a raised card with cover, lime kicker and "Listen"; top artists are pills, recent listens
+  rows with covers. A request is accepted or declined from its row; the sidebar and the phone icon
+  mark pending requests with a count or a lime dot.
 - **Frameless window**: the top bar drags (double click: maximize); minimize, full screen (also F11) and
   close are on the right. Resizing has handles on the right and bottom edges and on the corner: on
   Wayland the window origin cannot be moved.

@@ -126,6 +126,23 @@ pub fn touch_icon<'a>(glyph: Icon, color: iced::Color, on_press: Message) -> Ele
         .into()
 }
 
+/// Gli amici, dalla Home e dalla Libreria; un punto lime se c'è una richiesta da guardare.
+pub fn friends_icon(app: &App) -> Element<'_, Message> {
+    let glyph = touch_icon(Icon::Account, theme::TEXT, Message::Navigate(Screen::Friends));
+    if app.friend_requests() == 0 {
+        return glyph;
+    }
+    iced::widget::stack![
+        glyph,
+        container(container(Space::new(7.0, 7.0)).style(theme::bar(theme::ACCENT, 3.5))).padding(Padding {
+            top: 9.0,
+            left: 29.0,
+            ..Padding::ZERO
+        }),
+    ]
+    .into()
+}
+
 /// Le impostazioni, dall'angolo in alto a destra della Home e della Libreria.
 pub fn settings_icon<'a>() -> Element<'a, Message> {
     touch_icon(Icon::Settings, theme::TEXT, Message::Navigate(Screen::Settings))

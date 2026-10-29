@@ -8,6 +8,8 @@ mod api;
 mod app;
 mod auth;
 mod config;
+#[cfg(not(target_os = "android"))]
+mod discord;
 mod error;
 mod feed;
 mod jam;

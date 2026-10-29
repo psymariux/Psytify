@@ -9,5 +9,7 @@
   next, previous, shuffle, repeat, repeat-one, queue, library, plus, close, minimize, fullscreen,
   fullscreen-exit, chevron-right, chevron-left, chevron-down, keyboard, check, more, note, list, mark, bell, bell-fill, moon, expand, copy,
   radio, sparkle, user-plus, chart.
+- **Simple Icons** 13.21.0 (CC0 1.0, https://simpleicons.org/): brand-google, brand-github,
+  brand-discord, only for the sign-in buttons. The trademarks belong to their owners.
 
 The icons are white: Iced tints them when drawing (`ui/icons.rs`).

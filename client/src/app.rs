@@ -9,6 +9,7 @@ mod external;
 mod library;
 mod listening;
 mod menu;
+mod social;
 #[cfg(feature = "tour")]
 mod tour;
 mod video;
@@ -18,6 +19,7 @@ pub use chrome::ResizeEdge;
 pub use external::{ArtistExtras, ExternalState, ImportTarget};
 pub use listening::{Feed, HERO_PERIOD, HERO_SWAP, Hero, SleepChoice, SleepTimer};
 pub use menu::{ContextMenu, Dialog, MenuTarget, OpenDialog, TrackSource};
+pub use social::{AuthField, AuthMode, SignInForm, SocialState};
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -31,13 +33,14 @@ use iced::{Element, Point, Size, Subscription, Task, Theme, event, mouse, window
 use uuid::Uuid;
 
 use crate::Platform;
+use crate::api::social::{Friends, MyProfile, Profile, PublicPlaylist, Relation, UserPage};
 use crate::api::{
     self, Album, AlbumSummary, ApiClient, ArtistPage, DiscoverImport, DiscoverItem, DiscoverLibrary,
     DiscoverPage, DownloadQuality, LibraryPage, Lyrics, Me, MetaArtist, MetaArtistPage, MetaSearch, Page,
     Quality, SearchResults, Sort, SourceItem, SourceKind, SourcePlaylist, SourcePlaylistPage, Track,
     TrackQuery,
 };
-use crate::auth::{self, ClerkApp, Tokens};
+use crate::auth::{ClerkApp, ClerkUser, CodeStep, Provider, Session, Step};
 use crate::config::{self, Config, FollowedArtist, PlayStat, Playlist, SavedAlbum, SavedScreen};
 use crate::error::AppError;
 use crate::jam::{self, Event, Link, Member, Remote, Sent, Snapshot, Target};
@@ -112,6 +115,14 @@ pub enum Screen {
     SourcePlaylist,
     /// La libreria personale come schermata (telefono): sul desktop sta nella barra laterale.
     Collection,
+    /// «Accedi a Psytify»: password, codice via email, GitHub, Google e Discord.
+    SignIn,
+    /// Gli amici, le richieste e la ricerca di persone.
+    Friends,
+    /// Il profilo aperto (`SocialState::open`).
+    Profile,
+    /// La playlist pubblica di un amico (`SocialState::playlist`).
+    FriendPlaylist,
 }
 
 impl From<SavedScreen> for Screen {
@@ -147,6 +158,8 @@ impl From<Screen> for SavedScreen {
             Screen::Liked => Self::Liked,
             Screen::News => Self::News,
             Screen::Collection => Self::Collection,
+            // Profili e accesso dipendono dalla rete: alla riapertura si parte dalla Home.
+            Screen::SignIn | Screen::Friends | Screen::Profile | Screen::FriendPlaylist => Self::Home,
         }
     }
 }
@@ -628,14 +641,47 @@ pub enum Message {
     Exit(window::Id),
     SetQuality(Quality),
     /// Ricerca YouTube: tenere remix ed edit (`true`) o preferire l'originale.
+    /// Apre «Accedi a Psytify».
     SignIn,
+    AuthMode(AuthMode),
+    AuthInput(AuthField, String),
+    AuthSubmit,
+    AuthProvider(Provider),
+    AuthStepped(Result<Step, AppError>),
+    AuthResend,
+    AuthResent(Result<CodeStep, AppError>),
+    /// Dal codice torna ai campi.
+    AuthBack,
     /// `restored`: ripristino silenzioso all'avvio, senza avvisi se la sessione è scaduta.
     SignedIn {
         restored: bool,
-        result: Result<(Tokens, Me), AppError>,
+        result: Result<(Session, ClerkUser, Me), AppError>,
     },
     SignOut,
     SessionStored(Result<(), AppError>),
+    /// Nome utente o nome visibile del proprio profilo, nelle impostazioni.
+    ProfileHandle(String),
+    ProfileName(String),
+    /// Salva il profilo; con `Some` cambia anche la condivisione dell'attività.
+    ProfileSave(Option<bool>),
+    ProfileSaved(Result<MyProfile, AppError>),
+    FriendsLoaded(Result<Friends, AppError>),
+    UserQuery(String),
+    UserSearch,
+    UsersFound(Result<Vec<Profile>, AppError>),
+    OpenProfile(String),
+    ProfileLoaded(String, Result<UserPage, AppError>),
+    /// Chiede o accetta l'amicizia (`true`), oppure la toglie, la ritira o la rifiuta.
+    FriendAction(String, bool),
+    FriendChanged(String, Result<Relation, AppError>),
+    OpenFriendPlaylist(String, Uuid),
+    FriendPlaylistLoaded(Result<Arc<PublicPlaylist>, AppError>),
+    /// Rende pubblica o privata una playlist locale.
+    PlaylistPublic(Uuid, bool),
+    /// Esito di un invio al server che non mostra nulla (brano in ascolto, ascolti, playlist).
+    SocialSynced(Result<(), AppError>),
+    /// Mostra su Discord cosa si ascolta.
+    SetDiscord(bool),
     /// Nel pannello «In riproduzione» il videoclip (`true`) o la copertina (`false`).
     SetPanelVideo(bool),
     /// Riprova il videoclip che non si era aperto.
@@ -837,7 +883,12 @@ pub struct App {
     /// Vedi `Config::download_quality`.
     pub download_quality: DownloadQuality,
     pub account: Account,
-    tokens: Option<Tokens>,
+    pub social: SocialState,
+    /// Il collegamento a Discord, se acceso e con un Application ID.
+    #[cfg(not(target_os = "android"))]
+    discord: Option<crate::discord::Presence>,
+    pub discord_presence: bool,
+    discord_app_id: String,
     clerk_app: Option<ClerkApp>,
     clerk_issuer: String,
     clerk_client_id: String,
@@ -955,7 +1006,11 @@ impl App {
             quality: config.quality,
             download_quality: config.download_quality,
             account: if clerk_app.is_some() { Account::SignedOut } else { Account::Unavailable },
-            tokens: None,
+            social: SocialState::default(),
+            #[cfg(not(target_os = "android"))]
+            discord: None,
+            discord_presence: config.discord_presence,
+            discord_app_id: config.discord_app_id,
             clerk_app,
             clerk_issuer: config.clerk_issuer,
             clerk_client_id: config.clerk_client_id,
@@ -976,6 +1031,7 @@ impl App {
         let restore = app.open(screen);
         let search = if screen == Screen::Search { app.run_search() } else { Task::none() };
         let session = app.restore_session();
+        app.start_discord();
         // Le playlist salvate con brani ancora da importare riprendono da dove erano.
         let imports = app.next_import();
         // La coda ripresa dall'ultima sessione: le sue copertine servono subito.
@@ -1101,7 +1157,10 @@ impl App {
     /// avviso. Così nessun punto che cambia schermata o avviso deve ricordarsi dell'animazione.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let before = self.observed();
-        let task = self.handle(message);
+        let mut task = self.handle(message);
+        if let Some(sync) = self.social_sync() {
+            task = Task::batch([task, sync]);
+        }
         let after = self.observed();
         if before == after {
             return task;
@@ -1986,12 +2045,38 @@ impl App {
                 }
                 self.persist()
             }
-            Message::SignIn => self.sign_in(),
+            Message::SignIn => self.open_sign_in(),
+            Message::AuthMode(mode) => self.auth_mode(mode),
+            Message::AuthInput(field, value) => self.auth_input(field, value),
+            Message::AuthSubmit => self.auth_submit(),
+            Message::AuthProvider(provider) => self.auth_provider(provider),
+            Message::AuthStepped(result) => self.auth_stepped(result),
+            Message::AuthResend => self.auth_resend(),
+            Message::AuthResent(result) => self.auth_resent(result),
+            Message::AuthBack => self.auth_back(),
             Message::SignedIn { restored, result } => self.signed_in(restored, result),
-            Message::SignOut => {
-                self.tokens = None;
-                self.account = Account::SignedOut;
-                Task::perform(auth::forget_session(), Message::SessionStored)
+            Message::SignOut => self.sign_out(),
+            Message::ProfileHandle(handle) => self.profile_input(Some(handle), None),
+            Message::ProfileName(name) => self.profile_input(None, Some(name)),
+            Message::ProfileSave(share) => self.save_profile(share),
+            Message::ProfileSaved(result) => self.profile_saved(result),
+            Message::FriendsLoaded(result) => self.friends_loaded(result),
+            Message::UserQuery(query) => self.user_query(query),
+            Message::UserSearch => self.search_users(),
+            Message::UsersFound(result) => self.users_found(result),
+            Message::OpenProfile(handle) => self.open_profile(handle),
+            Message::ProfileLoaded(handle, result) => self.profile_loaded(handle, result),
+            Message::FriendAction(handle, add) => self.friend_action(handle, add),
+            Message::FriendChanged(handle, result) => self.friend_changed(handle, result),
+            Message::OpenFriendPlaylist(handle, id) => self.open_friend_playlist(handle, id),
+            Message::FriendPlaylistLoaded(result) => self.friend_playlist_loaded(result),
+            Message::PlaylistPublic(id, public) => self.set_playlist_public(id, public),
+            Message::SocialSynced(result) => self.social_synced(result),
+            Message::SetDiscord(on) => {
+                self.discord_presence = on;
+                self.start_discord();
+                self.publish_media();
+                self.persist()
             }
             Message::SessionStored(result) => {
                 if let Err(err) = result {
@@ -2051,69 +2136,6 @@ impl App {
 
     // ---------- Account ----------
 
-    /// All'avvio: con un refresh token salvato si rientra senza aprire il browser.
-    fn restore_session(&mut self) -> Task<Message> {
-        let Some(app) = self.clerk_app.clone() else { return Task::none() };
-        let Some(refresh_token) = auth::load_refresh_token() else { return Task::none() };
-        self.account = Account::Working;
-        let api = self.api();
-        Task::perform(
-            async move {
-                let tokens = auth::refresh(app, refresh_token).await?;
-                let me = api?.me(&tokens.access_token).await?;
-                Ok((tokens, me))
-            },
-            |result| Message::SignedIn { restored: true, result },
-        )
-    }
-
-    fn sign_in(&mut self) -> Task<Message> {
-        let Some(app) = self.clerk_app.clone() else {
-            self.notice = Some(Notice::Error(AppError::AuthNotConfigured.to_string()));
-            return Task::none();
-        };
-        if self.account == Account::Working {
-            return Task::none();
-        }
-        self.account = Account::Working;
-        let api = self.api();
-        Task::perform(
-            async move {
-                let tokens = auth::login(app).await?;
-                let me = api?.me(&tokens.access_token).await?;
-                Ok((tokens, me))
-            },
-            |result| Message::SignedIn { restored: false, result },
-        )
-    }
-
-    fn signed_in(&mut self, restored: bool, result: Result<(Tokens, Me), AppError>) -> Task<Message> {
-        match result {
-            Ok((tokens, me)) => {
-                let store = tokens.refresh_token.clone();
-                self.notice = (!restored).then(|| Notice::Info("Accesso eseguito".into()));
-                self.account = Account::SignedIn(me);
-                self.tokens = Some(tokens);
-                match store {
-                    Some(token) => Task::perform(auth::save_refresh_token(token), Message::SessionStored),
-                    None => Task::none(),
-                }
-            }
-            Err(err) => {
-                self.account = Account::SignedOut;
-                self.tokens = None;
-                if !restored || err != AppError::AuthExpired {
-                    self.notice = Some(Notice::Error(err.to_string()));
-                }
-                // Un refresh token rifiutato non serve più: lo si toglie dal disco.
-                if err == AppError::AuthExpired {
-                    return Task::perform(auth::forget_session(), Message::SessionStored);
-                }
-                Task::none()
-            }
-        }
-    }
-
     // ---------- Navigazione e caricamenti ----------
 
     /// Va a una schermata e la ricorda per «Indietro».
@@ -2171,6 +2193,10 @@ impl App {
         match screen {
             Screen::Playlist(id) => self.playlist(id).is_some(),
             Screen::SourcePlaylist => self.external.open.is_some(),
+            Screen::Profile => self.social.open.is_some(),
+            Screen::FriendPlaylist => self.social.playlist.is_some(),
+            // Si torna al modulo solo se non si è già entrati.
+            Screen::SignIn => !matches!(self.account, Account::SignedIn(_)),
             _ => true,
         }
     }
@@ -2211,6 +2237,7 @@ impl App {
                 _ => self.open_artist(id),
             },
             Screen::Search => text_input::focus(text_input::Id::new(SEARCH_INPUT)),
+            Screen::Friends => self.load_friends(),
             _ => Task::none(),
         }
     }
@@ -2231,12 +2258,19 @@ impl App {
                 }
                 None => Task::none(),
             },
+            Screen::Friends => self.load_friends(),
+            Screen::Profile => match self.social.open.take() {
+                Some((handle, _)) => self.open_profile(handle),
+                None => Task::none(),
+            },
             Screen::Playlist(_)
             | Screen::Settings
             | Screen::Jam
             | Screen::Liked
             | Screen::News
-            | Screen::Collection => Task::none(),
+            | Screen::Collection
+            | Screen::SignIn
+            | Screen::FriendPlaylist => Task::none(),
         }
     }
 
@@ -2784,6 +2818,7 @@ impl App {
 
     /// Dice al sistema cosa suona, a che punto e se è in pausa.
     fn publish_media(&self) {
+        self.publish_discord();
         let Some(handle) = &self.system_media else { return };
         let now = self.queue.current().filter(|_| self.playback.is_active()).map(|track| {
             system_media::NowPlaying {
@@ -3095,6 +3130,8 @@ impl App {
             download_quality: self.download_quality,
             clerk_issuer: self.clerk_issuer.clone(),
             clerk_client_id: self.clerk_client_id.clone(),
+            discord_presence: self.discord_presence,
+            discord_app_id: self.discord_app_id.clone(),
             oauth_port: self.oauth_port,
         }
     }
@@ -3160,7 +3197,14 @@ pub fn phone_tab_of(screen: Screen) -> Option<Screen> {
             Some(Screen::Collection)
         }
         Screen::News => Some(Screen::News),
-        Screen::Album(_) | Screen::Artist(_) | Screen::Settings | Screen::Jam => None,
+        Screen::Album(_)
+        | Screen::Artist(_)
+        | Screen::Settings
+        | Screen::Jam
+        | Screen::SignIn
+        | Screen::Friends
+        | Screen::Profile
+        | Screen::FriendPlaylist => None,
     }
 }
 

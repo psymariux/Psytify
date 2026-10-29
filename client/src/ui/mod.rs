@@ -143,6 +143,10 @@ pub(crate) fn page(app: &App, width: f32) -> Element<'_, Message> {
         Screen::News => pages::news::view(app, width),
         Screen::SourcePlaylist => pages::source_playlist::view(app, width),
         Screen::Collection => phone::library::view(app, width),
+        Screen::SignIn => pages::sign_in::view(app, width),
+        Screen::Friends => pages::friends::view(app, width),
+        Screen::Profile => pages::profile::view(app, width),
+        Screen::FriendPlaylist => pages::profile::playlist_view(app, width),
     }
 }
 
@@ -167,7 +171,22 @@ fn page_tint(app: &App) -> Color {
             Some(release) => app.covers.tint_of(shelf::release_art(release)),
             None => current(),
         },
-        Screen::News | Screen::Collection => theme::BRAND_TINT,
+        Screen::News | Screen::Collection | Screen::SignIn | Screen::Friends => theme::BRAND_TINT,
+        Screen::Profile => match &app.social.open {
+            Some((handle, Load::Ready(open))) => app.covers.tint_of(Art {
+                id: pages::search::art_id(handle),
+                title: &open.page.profile.display_name,
+                url: open.page.profile.avatar_url.as_deref(),
+            }),
+            _ => theme::BRAND_TINT,
+        },
+        Screen::FriendPlaylist => match &app.social.playlist {
+            Some(Load::Ready(playlist)) => match playlist.tracks.first() {
+                Some(first) => app.covers.tint_of(art_of(first)),
+                None => cover::color_for(playlist.id),
+            },
+            _ => theme::NEUTRAL_TINT,
+        },
         Screen::SourcePlaylist => match &app.external.open {
             Some(open) => cover::color_for(pages::search::art_id(&open.playlist.id)),
             None => theme::NEUTRAL_TINT,

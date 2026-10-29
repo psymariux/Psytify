@@ -127,20 +127,35 @@ fn control(glyph: Icon, message: Message, close: bool) -> Element<'static, Messa
         .into()
 }
 
-/// L'account: accedere se si è ospiti, altrimenti aprire le impostazioni dove c'è il resto.
-/// Senza login configurato non si mostra nulla.
+/// L'account: accedere se si è ospiti, altrimenti il proprio avatar, che apre il profilo (o le
+/// impostazioni, finché non c'è un nome utente). Senza login configurato non si mostra nulla.
 fn account(app: &App) -> Element<'_, Message> {
     match &app.account {
         Account::Unavailable => Space::with_width(0.0).into(),
         Account::SignedOut => primary_button("Accedi", None, Message::SignIn),
         Account::Working => muted("Accesso in corso…").into(),
-        Account::SignedIn(_) => {
-            button(container(icon(Icon::Account, 18.0, theme::TEXT)).center(Length::Fill))
+        Account::SignedIn(me) => {
+            let (face, open): (Element<'_, Message>, Message) = match &me.profile {
+                Some(profile) => (
+                    crate::ui::cover::cover_round(
+                        &app.covers,
+                        crate::ui::cover::Art {
+                            id: crate::ui::pages::search::art_id(&profile.handle),
+                            title: &profile.display_name,
+                            url: profile.avatar_url.as_deref(),
+                        },
+                        ROUND - 6.0,
+                    ),
+                    Message::OpenProfile(profile.handle.clone()),
+                ),
+                None => (icon(Icon::Account, 18.0, theme::TEXT).into(), Message::Navigate(Screen::Settings)),
+            };
+            button(container(face).center(Length::Fill))
                 .width(ROUND)
                 .height(ROUND)
                 .padding(0)
-                .style(theme::round_button(app.screen == Screen::Settings))
-                .on_press(Message::Navigate(Screen::Settings))
+                .style(theme::round_button(matches!(app.screen, Screen::Settings | Screen::Profile)))
+                .on_press(open)
                 .into()
         }
     }

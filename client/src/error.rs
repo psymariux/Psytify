@@ -25,13 +25,16 @@ pub enum AppError {
     Io(String),
     #[error("Accesso non riuscito. Riprova.")]
     AuthFailed,
+    /// Errore spiegato da Clerk (password errata, codice scaduto...), già in italiano.
+    #[error("{0}")]
+    Auth(String),
     #[error("Accesso annullato.")]
     AuthCancelled,
     #[error("La sessione è scaduta: accedi di nuovo.")]
     AuthExpired,
     #[error("La porta {0} è occupata: chiudi l'altro programma o cambia oauth_port.")]
     AuthPortBusy(u16),
-    #[error("Il login non è configurato: imposta clerk_issuer e clerk_client_id.")]
+    #[error("Il login non è configurato: imposta clerk_issuer.")]
     AuthNotConfigured,
     #[cfg(feature = "video")]
     #[error("Videoclip non disponibile.")]

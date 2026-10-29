@@ -36,7 +36,7 @@ const TOP: usize = 5;
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     let inner = width - 2.0 * theme::PHONE_GUTTER;
     let feed = &app.home.feed;
-    let mut page = column![padded(header())].spacing(28);
+    let mut page = column![padded(header(app))].spacing(28);
 
     if let Some(grid) = pages::home::shortcuts(app, inner) {
         page = page.push(padded(grid));
@@ -118,12 +118,13 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     page.into()
 }
 
-/// Il marchio a sinistra, le impostazioni a destra.
-fn header<'a>() -> Element<'a, Message> {
+/// Il marchio a sinistra, gli amici e le impostazioni a destra.
+fn header(app: &App) -> Element<'_, Message> {
     row![
         mark(26.0),
         text("Psytify").size(theme::FS_PHONE_TITLE - 4.0).font(theme::FONT_SEMIBOLD),
         Space::with_width(Length::Fill),
+        super::friends_icon(app),
         settings_icon(),
     ]
     .spacing(10)

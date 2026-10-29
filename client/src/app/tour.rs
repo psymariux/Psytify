@@ -9,7 +9,7 @@ use std::time::Duration;
 use iced::{Size, Task, window};
 
 use super::menu::Dialog;
-use super::{App, Load, Message, Screen, SettingsTab, SideTab};
+use super::{App, AuthField, AuthMode, Load, Message, Screen, SettingsTab, SideTab};
 
 /// A che punto è il giro.
 pub struct Tour {
@@ -56,6 +56,52 @@ const STEPS: &[Step] = &[
     ("settings-account", 2000, |app| app.update(Message::OpenSettingsTab(SettingsTab::Account))),
     ("settings-about", 2000, |app| app.update(Message::OpenSettingsTab(SettingsTab::About))),
     ("jam", 2000, |app| app.update(Message::Navigate(Screen::Jam))),
+    ("sign-in", 2000, |app| go(app, [Message::SignIn, Message::AuthMode(AuthMode::SignIn)])),
+    ("sign-up", 2000, |app| app.update(Message::AuthMode(AuthMode::SignUp))),
+    // Con `PSYTIFY_TOUR_LOGIN=<nome utente>` e `PSYTIFY_TOUR_PASSWORD` di un account di test di
+    // Clerk (il codice è sempre 424242) il giro entra davvero e mostra amici e profilo.
+    ("sign-in-code", 7000, |app| {
+        let (Ok(login), Ok(password)) =
+            (std::env::var("PSYTIFY_TOUR_LOGIN"), std::env::var("PSYTIFY_TOUR_PASSWORD"))
+        else {
+            return Task::none();
+        };
+        go(
+            app,
+            [
+                Message::AuthMode(AuthMode::SignIn),
+                Message::AuthInput(AuthField::Identifier, login),
+                Message::AuthInput(AuthField::Password, password),
+                Message::AuthSubmit,
+            ],
+        )
+    }),
+    ("friends", 8000, |app| {
+        let enter = if app.social.form.step.is_some() {
+            vec![Message::AuthInput(AuthField::Code, "424242".into()), Message::AuthSubmit]
+        } else {
+            Vec::new()
+        };
+        let tasks = go(app, enter);
+        Task::batch([tasks, app.update(Message::Navigate(Screen::Friends))])
+    }),
+    // `PSYTIFY_TOUR_PROFILE` apre il profilo di un altro; senza, il proprio.
+    ("profile", 5000, |app| {
+        match std::env::var("PSYTIFY_TOUR_PROFILE")
+            .ok()
+            .or_else(|| app.signed_in_profile().map(|p| p.handle.clone()))
+        {
+            Some(handle) => app.update(Message::OpenProfile(handle)),
+            None => Task::none(),
+        }
+    }),
+    ("friend-playlist", 4000, |app| {
+        let Some((handle, Load::Ready(open))) = app.social.open.as_ref() else { return Task::none() };
+        match open.page.playlists.first().map(|p| (handle.clone(), p.id)) {
+            Some((handle, id)) => app.update(Message::OpenFriendPlaylist(handle, id)),
+            None => Task::none(),
+        }
+    }),
     ("shortcuts", 1500, |app| app.update(Message::ToggleShortcuts)),
     ("search-history", 2000, |app| {
         go(

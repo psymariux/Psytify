@@ -341,6 +341,8 @@ impl App {
         self.play_counted = true;
         let track = track.clone();
         taste::count_play(&mut self.stats, &track, taste::now_secs());
+        // Anche il profilo lo conta, se si è collegati (`App::social_sync`).
+        self.social.listen_due = Some(track.id);
     }
 
     // ---------- Radio ----------

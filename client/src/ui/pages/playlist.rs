@@ -29,7 +29,7 @@ pub fn view(app: &App, id: Uuid, width: f32) -> Element<'_, Message> {
         Some(first) => cover(&app.covers, crate::ui::components::art_of(first), HERO_COVER),
         None => cover(&app.covers, Art::drawn(playlist.id, &playlist.name), HERO_COVER),
     };
-    let extra = vec![
+    let mut extra = vec![
         icon_button(
             Icon::Edit,
             "Rinomina",
@@ -43,8 +43,23 @@ pub fn view(app: &App, id: Uuid, width: f32) -> Element<'_, Message> {
             Some(Message::OpenDialog(Dialog::ConfirmDelete(id))),
         ),
     ];
+    // Con un profilo, la playlist si può mostrare agli altri.
+    if app.signed_in_profile().is_some() {
+        let label = if playlist.public {
+            "Pubblica sul profilo: tocca per renderla privata"
+        } else {
+            "Mostra sul profilo"
+        };
+        extra.push(icon_button(
+            Icon::Account,
+            label,
+            playlist.public,
+            Some(Message::PlaylistPublic(id, !playlist.public)),
+        ));
+    }
+    let kicker = if playlist.public { "Playlist pubblica" } else { "Playlist" };
     let mut page =
-        column![hero(art, "Playlist", &playlist.name, &meta, width), play_bar(&tracks, extra)].spacing(24);
+        column![hero(art, kicker, &playlist.name, &meta, width), play_bar(&tracks, extra)].spacing(24);
     if !playlist.pending.is_empty() {
         let source = playlist.pending[0].source.label();
         page = page.push(small(format!(

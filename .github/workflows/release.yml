@@ -31,7 +31,7 @@ jobs:
         env:
           PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
           PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
-          PSYTIFY_DEFAULT_CLERK_CLIENT_ID: ${{ vars.PSYTIFY_DEFAULT_CLERK_CLIENT_ID }}
+          PSYTIFY_DEFAULT_DISCORD_APP_ID: ${{ vars.PSYTIFY_DEFAULT_DISCORD_APP_ID }}
         run: cargo build -p psytify --release --locked
       - name: Package
         run: |
@@ -59,7 +59,7 @@ jobs:
         env:
           PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
           PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
-          PSYTIFY_DEFAULT_CLERK_CLIENT_ID: ${{ vars.PSYTIFY_DEFAULT_CLERK_CLIENT_ID }}
+          PSYTIFY_DEFAULT_DISCORD_APP_ID: ${{ vars.PSYTIFY_DEFAULT_DISCORD_APP_ID }}
         run: cargo build -p psytify --release --locked --no-default-features
       - name: Package
         shell: pwsh
@@ -93,7 +93,7 @@ jobs:
         env:
           PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
           PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
-          PSYTIFY_DEFAULT_CLERK_CLIENT_ID: ${{ vars.PSYTIFY_DEFAULT_CLERK_CLIENT_ID }}
+          PSYTIFY_DEFAULT_DISCORD_APP_ID: ${{ vars.PSYTIFY_DEFAULT_DISCORD_APP_ID }}
         run: |
           chown -R builder:builder .
           su builder -c 'rustup default stable && CHECK=0 scripts/arch-package.sh'

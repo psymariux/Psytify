@@ -598,6 +598,9 @@ pub struct ArtistPage {
 pub struct Me {
     pub user_id: String,
     pub admin: bool,
+    /// `None` finché l'utente non ha un nome utente: le funzioni social lo chiedono.
+    #[serde(default)]
+    pub profile: Option<super::social::MyProfile>,
 }
 
 /// URL firmato. `Debug` non stampa l'URL: è un segreto temporaneo.

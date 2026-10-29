@@ -17,7 +17,7 @@ The server is not part of this repository.
 - `429` carries `Retry-After` (seconds). `503` means a dependency of the backend is down; the client
   shows a notice and retries on demand.
 - The client sends no cookies. Sign-in is optional and adds `Authorization: Bearer <jwt>` to the
-  few requests that need it (`GET /v1/me`).
+  requests that need it (`/v1/me…`, `/v1/users…`, `/v1/friends…`).
 
 ## Endpoints used by the client
 
@@ -35,7 +35,14 @@ The server is not part of this repository.
 | `GET /v1/tracks/{id}/video-url`, `POST /v1/tracks/{id}/video/prepare` | Optional music video |
 | `GET /v1/tracks/{id}/lyrics` | Lyrics: `synced` (LRC) and/or `plain`; `found: false` is a `200` |
 | `POST /v1/jam`, `GET /v1/jam/{code}/ws?name=` | Shared listening room (WebSocket) |
-| `GET /v1/me` | Optional: who is signed in |
+| `GET /v1/me` | Optional: who is signed in, with their profile (or `null`) |
+| `PUT /v1/me/profile` | Create or update your profile: `handle` (3–30 of `a-z0-9_`, unique), `display_name`, `avatar_url`, `share_activity` |
+| `PUT /v1/me/presence`, `DELETE /v1/me/presence` | What you are playing now (`track_id`, `position_ms`, `paused`); expires on its own |
+| `POST /v1/me/listens` | A track you listened to (feeds recent listens and top artists) |
+| `PUT /v1/me/playlists/{id}`, `DELETE /v1/me/playlists/{id}` | Publish or withdraw a public playlist (`name`, up to 500 `track_ids`) |
+| `GET /v1/users?q=` | Find people by username or name |
+| `GET /v1/users/{handle}`, `GET /v1/users/{handle}/playlists/{id}` | A profile page and one of its public playlists |
+| `GET /v1/friends`, `POST /v1/friends/{handle}`, `DELETE /v1/friends/{handle}` | Friends with what they are playing, incoming and outgoing requests; send or accept, decline or remove |
 | `GET /v1/media?t=…`, `GET /v1/cover?url=…` | Media and cover bytes (see below) |
 
 ## Track
@@ -109,9 +116,18 @@ Server → client: `welcome` (your id, the code, members, last state or `null`),
 
 ## Sign-in
 
-Optional. The desktop client runs OAuth 2.0 with PKCE against an identity provider (Clerk) in the system
-browser and sends the access token as a bearer. The backend validates it (signature, issuer, expiry,
-audience). Browsing and playback do not require sign-in.
+Optional. The client has its own sign-in form and talks to the identity provider (Clerk) as a native
+app: password, email code, or GitHub, Google and Discord through the system browser with a loopback
+redirect. It sends the short-lived session token as a bearer. The backend validates it (signature,
+issuer, expiry, and that it is a native session rather than a web one). Browsing and playback do not
+require sign-in.
+
+## Profiles and friends
+
+A profile page always shows username, name, avatar, friend count, public playlists and mutual
+friends. What someone is playing now, their recent listens and top artists of the last 30 days are
+visible only to their friends, and only while they share activity (`share_activity`). `relation`
+tells the client which button to show: `self`, `friend`, `incoming`, `outgoing` or `none`.
 
 ## Health
 

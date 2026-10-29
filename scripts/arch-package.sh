@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Costruisce il pacchetto Arch del client desktop e il database di un repository pacman.
+# Builds the Arch package of the desktop client and the database of a pacman repository.
 #
-# Uso: [CHECK=0] [SIGN=<chiave GPG>] scripts/arch-package.sh [--install]
-#   --install   installa il pacchetto sul PC (pacman -U, chiede sudo)
-#   CHECK=0     salta `cargo test` (di default `makepkg` lo esegue)
-#   SIGN=ID     firma pacchetto e database con la chiave GPG indicata
+# Usage: [CHECK=0] [SIGN=<GPG key>] scripts/arch-package.sh [--install]
+#   --install   installs the package on this machine (pacman -U, asks for sudo)
+#   CHECK=0     skips `cargo test` (`makepkg` runs it by default)
+#   SIGN=ID     signs the package and the database with the given GPG key
 #
-# Esce in dist/arch/:
-#   psytify-<versione>-<rel>-x86_64.pkg.tar.zst   il pacchetto
-#   psytify.db(.tar.gz) psytify.files             il database del repository (repo-add)
-# Per pubblicare il repository, carica TUTTA la cartella dist/arch/ su un server HTTPS e aggiungi
-# a /etc/pacman.conf dei client:
+# Output in dist/arch/:
+#   psytify-<version>-<rel>-x86_64.pkg.tar.zst    the package
+#   psytify.db(.tar.gz) psytify.files             the repository database (repo-add)
+# To publish the repository, upload the WHOLE dist/arch/ folder to an HTTPS server and add
+# to the clients' /etc/pacman.conf:
 #   [psytify]
-#   SigLevel = Optional TrustAll     # con SIGN=ID: Required DatabaseOptional
-#   Server = https://<il-tuo-host>/arch/$arch
-# (ricorda che pacman cerca i file in <Server>/psytify.db: se il server non ha la sottocartella
-# `x86_64`, usa `Server = https://<host>/arch`).
+#   SigLevel = Optional TrustAll     # with SIGN=ID: Required DatabaseOptional
+#   Server = https://<your-host>/arch/$arch
+# (remember that pacman looks for the files in <Server>/psytify.db: if the server has no
+# `x86_64` subfolder, use `Server = https://<host>/arch`).
 #
-# Il PKGBUILD sta in client/ ma `makepkg` userebbe `client/src` (il codice) come cartella di lavoro:
-# qui BUILDDIR, SRCDEST e PKGDEST puntano altrove.
+# The PKGBUILD lives in client/ but `makepkg` would use `client/src` (the code) as its working folder:
+# here BUILDDIR, SRCDEST and PKGDEST point elsewhere.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -26,7 +26,7 @@ OUT=$ROOT/dist/arch
 WORK=${TMPDIR:-/tmp}/psytify-makepkg
 mkdir -p "$OUT" "$WORK"
 
-# Il backend di distribuzione sta in `.env.build`, fuori dal repository (vedi `.env.build.example`).
+# The distribution backend lives in `.env.build`, outside the repository (see `.env.build.example`).
 if [ -f "$ROOT/.env.build" ]; then
   set -a
   # shellcheck disable=SC1091
@@ -39,9 +39,9 @@ args=(--force --clean --syncdeps --noconfirm)
 [ "${CHECK:-1}" = 0 ] && args+=(--nocheck)
 [ -n "${SIGN:-}" ] && args+=(--sign --key "$SIGN")
 
-# `makepkg` rifiuta di girare da root: va lanciato come utente normale.
+# `makepkg` refuses to run as root: run it as a normal user.
 if [ "$(id -u)" = 0 ]; then
-  echo "Lancia lo script come utente normale, non come root." >&2
+  echo "Run this script as a normal user, not as root." >&2
   exit 1
 fi
 
@@ -54,7 +54,7 @@ repo_args=(--new --remove)
 (cd "$OUT" && repo-add "${repo_args[@]}" psytify.db.tar.gz "$(basename "$pkg")")
 
 echo
-echo "Pacchetto:  $pkg"
+echo "Package:    $pkg"
 echo "Repository: $OUT (psytify.db)"
 
 if [ "${1:-}" = "--install" ]; then

@@ -1,4 +1,4 @@
-# cargo deny check: licenze, advisory, fonti delle dipendenze.
+# cargo deny check: licenses, advisories and sources of the dependencies.
 
 [graph]
 all-features = false
@@ -6,12 +6,10 @@ all-features = false
 [advisories]
 version = 2
 yanked = "deny"
-# Le dipendenze dirette non mantenute bloccano il CI; quelle transitive (lo stack di testo di
-# Iced 0.13: rustybuzz, ttf-parser, instant, paste) restano visibili in `cargo audit` e sono
-# tracciate da Dependabot. Spariscono solo con l'aggiornamento di Iced.
+# Unmaintained direct dependencies block CI; transitive ones (Iced 0.13's text stack:
+# rustybuzz, ttf-parser, instant, paste) stay visible in `cargo audit` and are
+# tracked by Dependabot. They go away only with an Iced upgrade.
 unmaintained = "workspace"
-# rsa (RUSTSEC-2023-0071) non compare qui: cargo-deny risolve il grafo con le feature attive e
-# sqlx-mysql non è mai compilato. cargo audit, che legge Cargo.lock, lo ignora in .cargo/audit.toml.
 
 [licenses]
 version = 2
@@ -32,7 +30,7 @@ allow = [
     "Unlicense",
 ]
 
-# Il client stesso.
+# The client itself.
 exceptions = [{ allow = ["AGPL-3.0-only"], crate = "psytify" }]
 
 [bans]

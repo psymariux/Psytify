@@ -1,4 +1,4 @@
-# Chi rivede cosa. Una riga per percorso; l'ultima che corrisponde vince.
+# Who reviews what. One line per path; the last matching line wins.
 *                 @psymariux
 /.github/         @psymariux
 /android/         @psymariux

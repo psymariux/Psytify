@@ -1,6 +1,6 @@
 name: Labeler
 
-# `pull_request_target` serve per etichettare anche le PR da fork; non fa checkout del codice della PR.
+# `pull_request_target` is needed to label PRs from forks too; it does not check out the PR's code.
 on:
   pull_request_target:
 

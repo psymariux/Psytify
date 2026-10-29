@@ -1,6 +1,6 @@
 name: Release
 
-# Si lancia con un tag `vX.Y.Z`: compila Linux, Windows, pacchetto Arch e APK, poi pubblica la release.
+# Triggered by a `vX.Y.Z` tag: builds Linux, Windows, the Arch package and the APK, then publishes the release.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
@@ -29,7 +29,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build
         env:
-          PSYTIFY_DEFAULT_API_URL: ${{ vars.PSYTIFY_DEFAULT_API_URL }}
+          PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
         run: cargo build -p psytify --release --locked
       - name: Package
         run: |
@@ -55,7 +55,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: "Build (without video clips, the runner has no GStreamer)"
         env:
-          PSYTIFY_DEFAULT_API_URL: ${{ vars.PSYTIFY_DEFAULT_API_URL }}
+          PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
         run: cargo build -p psytify --release --locked --no-default-features
       - name: Package
         shell: pwsh
@@ -87,7 +87,7 @@ jobs:
           persist-credentials: false
       - name: Build the package
         env:
-          PSYTIFY_DEFAULT_API_URL: ${{ vars.PSYTIFY_DEFAULT_API_URL }}
+          PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
         run: |
           chown -R builder:builder .
           su builder -c 'rustup default stable && CHECK=0 scripts/arch-package.sh'

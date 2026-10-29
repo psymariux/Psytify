@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Aggiunge all'APK i cambi di configurazione che l'SDK non permette di scrivere per nome.
+"""Adds to the APK the configuration changes the SDK does not let you write by name.
 
-Android ricrea l'activity a ogni cambio di configurazione che il manifest non dichiara. Per una
-NativeActivity in Rust ricrearla vuol dire bloccarsi: `onDestroy` aspetta che `android_main`
-finisca, ma il ciclo di Iced non finisce mai e arriva «L'app non risponde». I nomi pubblici
-(`android:configChanges` in android/Cargo.toml) coprono quasi tutto. Restano fuori due bit nascosti:
+Android recreates the activity on every configuration change the manifest does not declare. For a
+Rust NativeActivity, recreating it means hanging: `onDestroy` waits for `android_main`
+to return, but Iced's loop never ends and "App not responding" arrives. The public names
+(`android:configChanges` in android/Cargo.toml) cover almost everything. Two hidden bits are left out:
 
-- `assetsPaths` (0x80000000): cambiano gli overlay del tema, per esempio i colori dello sfondo su
-  Android 12 e successivi;
-- `windowConfiguration` (0x20000000): finestre multiple e a forma libera.
+- `assetsPaths` (0x80000000): theme overlays change, for example background colors on
+  Android 12 and later;
+- `windowConfiguration` (0x20000000): multi-window and freeform windows.
 
-`aapt` rifiuta sia questi nomi sia un valore numerico. Lo script li somma al valore già compilato
-nel manifest binario e riscrive l'APK senza firma. Poi `scripts/android-apk.sh` lo allinea e lo
-firma di nuovo.
+`aapt` rejects both these names and a numeric value. The script adds them to the value already compiled
+into the binary manifest and rewrites the APK without a signature. Then `scripts/android-apk.sh` aligns
+and signs it again.
 
-Uso: android-manifest.py ENTRATA.apk USCITA.apk
+Usage: android-manifest.py INPUT.apk OUTPUT.apk
 """
 
 import struct
@@ -66,14 +66,14 @@ def main() -> None:
     source, target = sys.argv[1], sys.argv[2]
     with zipfile.ZipFile(source) as apk, zipfile.ZipFile(target, "w") as out:
         for info in apk.infolist():
-            # La vecchia firma v1 non vale più: si rifirma dopo.
+            # The old v1 signature is no longer valid: it is signed again afterwards.
             if info.filename.startswith("META-INF/"):
                 continue
             payload = apk.read(info)
             if info.filename == "AndroidManifest.xml":
                 manifest = bytearray(payload)
                 if patch_manifest(manifest) == 0:
-                    raise SystemExit("configChanges non trovato nel manifest")
+                    raise SystemExit("configChanges not found in the manifest")
                 payload = bytes(manifest)
             out.writestr(info, payload, compress_type=info.compress_type)
 

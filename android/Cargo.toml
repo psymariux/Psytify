@@ -1,10 +1,10 @@
-# Psytify per Android: un guscio sottile che avvia la libreria del client (`../client`) con
-# l'impaginazione da telefono. È un workspace a parte (escluso da quello della radice) perché usa
-# una copia patchata di `iced_winit` (vedi vendor/README.md) che il desktop non deve vedere.
+# Psytify for Android: a thin shell that starts the client library (`../client`) with
+# the phone layout. It is a separate workspace (excluded from the root one) because it uses
+# a patched copy of `iced_winit` (see vendor/README.md) that the desktop must not see.
 #
-# Compilare l'APK: scripts/android-apk.sh (NDK 27, cargo-apk). Vedi docs/ANDROID.md.
+# Build the APK: scripts/android-apk.sh (NDK 27, cargo-apk). See docs/ANDROID.md.
 
-# Workspace proprio: `cargo-apk` non legge l'`exclude` della radice.
+# Its own workspace: `cargo-apk` does not read the root's `exclude`.
 [workspace]
 
 [package]
@@ -15,21 +15,21 @@ license = "AGPL-3.0-only"
 publish = false
 
 [lib]
-# Android carica l'app come libreria nativa (`libpsytify_android.so`) e chiama `android_main`.
+# Android loads the app as a native library (`libpsytify_android.so`) and calls `android_main`.
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
-# Tutta l'app. Senza le feature di default: il videoclip usa GStreamer, che su Android non c'è.
+# The whole app. Without the default features: video clips use GStreamer, which Android lacks.
 psytify = { path = "../client", default-features = false }
-# NativeActivity: la `Activity` di sistema che carica una libreria nativa, senza codice Java.
+# NativeActivity: the system `Activity` that loads a native library, with no Java code.
 winit = { version = "0.30", features = ["android-native-activity"] }
-# La stessa versione che Iced usa già: qui serve per `ANDROID_APP` della patch.
+# The same version Iced already uses: needed here for the patch's `ANDROID_APP`.
 iced_winit = "0.13"
-# I log dell'app (`log::warn!`) finiscono in logcat invece che nel vuoto.
+# The app's logs (`log::warn!`) go to logcat instead of nowhere.
 android_logger = "0.14"
-# Per chiedere ad Android dove stanno le barre del sistema (src/insets.rs). È la versione che
-# l'audio (oboe) porta già: nessuna crate nuova da compilare.
+# To ask Android where the system bars are (src/insets.rs). It is the version
+# audio (oboe) already brings in: no new crate to compile.
 jni = "0.21"
 log = "0.4"
 
@@ -57,12 +57,12 @@ name = "android.permission.INTERNET"
 [package.metadata.android.application]
 label = "Psytify"
 icon = "@mipmap/ic_launcher"
-# Il backend di sviluppo parla HTTP sulla rete locale; in produzione il backend è HTTPS.
+# A development backend speaks HTTP on the local network; in production the backend is HTTPS.
 uses_cleartext_traffic = true
 
 [package.metadata.android.application.activity]
-# Ogni cambio di configurazione dichiarabile: senza, Android ricrea l'activity e una NativeActivity
-# in Rust si blocca (onDestroy aspetta un `android_main` che non finisce). I due bit che l'SDK non
-# accetta per nome li aggiunge scripts/android-manifest.py.
+# Every declarable configuration change: without them, Android recreates the activity and a
+# Rust NativeActivity hangs (onDestroy waits for an `android_main` that never returns). The two bits the SDK does not
+# accept by name are added by scripts/android-manifest.py.
 config_changes = "mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontWeightAdjustment|fontScale"
 orientation = "portrait"

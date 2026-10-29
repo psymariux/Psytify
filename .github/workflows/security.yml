@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Ogni lunedì: gli avvisi RustSec escono anche quando il codice non cambia.
+    # Every Monday: RustSec advisories appear even when the code does not change.
     - cron: "17 5 * * 1"
   workflow_dispatch:
 

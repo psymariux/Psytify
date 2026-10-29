@@ -38,6 +38,7 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
         container(text("In riproduzione").size(theme::FS_SMALL).font(theme::FONT_MEDIUM).color(theme::MUTED))
             .width(Length::Fill)
             .align_x(alignment::Horizontal::Center),
+        touch_icon(Icon::People, theme::TEXT, Message::OpenJam),
         touch_icon(Icon::More, theme::TEXT, Message::OpenMenu(MenuTarget::Player)),
     ]
     .align_y(Alignment::Center);

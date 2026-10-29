@@ -559,6 +559,8 @@ pub enum Message {
     ServerDraft(String),
     ServerApply,
     ServerReset,
+    /// Dal player: chiude il testo a tutto schermo e apre la Jam.
+    OpenJam,
     /// Schermata Jam: nome in stanza, codice da inserire, creazione, ingresso e uscita.
     JamName(String),
     JamCode(String),
@@ -1957,9 +1959,9 @@ impl App {
             }
             Message::UpdateDownloaded(Ok(path)) => {
                 let notice = if cfg!(target_os = "android") {
-                    "Aggiornamento scaricato: conferma l'installazione dal sistema.".to_owned()
+                    "Scaricato. Android ti chiede di confermare l'installazione.".to_owned()
                 } else {
-                    format!("Aggiornamento scaricato in {}. Installalo a mano.", path.display())
+                    format!("Scaricato in {}. Installalo a mano.", path.display())
                 };
                 #[cfg(target_os = "android")]
                 crate::phone_install(&path);
@@ -1968,7 +1970,7 @@ impl App {
             }
             Message::UpdateDownloaded(Err(err)) => {
                 self.update = None;
-                self.show_notice(Some(Notice::Error(format!("Aggiornamento non scaricato: {err}"))))
+                self.show_notice(Some(Notice::Error(format!("Download non riuscito: {err}"))))
             }
             Message::GpuDetected(gpu) => {
                 self.dedicated_gpu = gpu;
@@ -2143,6 +2145,11 @@ impl App {
             Message::UserQuery(query) => self.user_query(query),
             Message::UserSearch => self.search_users(),
             Message::UsersFound(result) => self.users_found(result),
+            Message::OpenJam => {
+                self.focus = false;
+                self.focus_video = false;
+                self.open(Screen::Jam)
+            }
             Message::OpenProfile(handle) => self.open_profile(handle),
             Message::ProfileLoaded(handle, result) => self.profile_loaded(handle, result),
             Message::FriendAction(handle, add) => self.friend_action(handle, add),
@@ -3277,14 +3284,8 @@ pub fn phone_tab_of(screen: Screen) -> Option<Screen> {
             Some(Screen::Collection)
         }
         Screen::News => Some(Screen::News),
-        Screen::Album(_)
-        | Screen::Artist(_)
-        | Screen::Settings
-        | Screen::Jam
-        | Screen::SignIn
-        | Screen::Friends
-        | Screen::Profile
-        | Screen::FriendPlaylist => None,
+        Screen::Album(_) | Screen::Artist(_) | Screen::Settings | Screen::Jam => None,
+        Screen::SignIn | Screen::Friends | Screen::Profile | Screen::FriendPlaylist => Some(Screen::Profile),
     }
 }
 

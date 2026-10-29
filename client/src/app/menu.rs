@@ -74,6 +74,8 @@ pub struct ContextMenu {
     pub playlists: bool,
     /// L'elenco delle qualità di download è aperto accanto al menu ("Scarica in…").
     pub downloads: bool,
+    /// L'elenco dei timer di spegnimento è aperto (telefono: «Timer di spegnimento»).
+    pub timers: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

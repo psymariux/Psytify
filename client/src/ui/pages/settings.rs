@@ -8,7 +8,7 @@
 //! restano a destra, come nelle impostazioni di un telefono.
 
 use iced::widget::{
-    Column, Space, button, column, container, row, text, text_input, toggler, vertical_slider,
+    Column, Space, button, column, container, row, stack, text, text_input, toggler, vertical_slider,
 };
 use iced::{Alignment, Element, Length, Theme};
 
@@ -20,6 +20,7 @@ use crate::player::eq::{self, PRESETS};
 use crate::ui::components::{h1, h2, muted, outlined_button, outlined_button_owned, primary_button, small};
 use crate::ui::icons::Icon;
 use crate::ui::theme;
+use crate::ui::touch_seek::touch_slider_vertical;
 
 /// Frequenze delle bande, come le legge chi regola un equalizzatore.
 const BAND_LABELS: [&str; eq::BANDS] = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
@@ -299,15 +300,22 @@ fn sound(app: &App, fit: Fit) -> Element<'_, Message> {
     .spacing(8)
     .wrap();
     let bands = row(settings.gains.iter().enumerate().map(|(band, &gain)| {
+        // Il dito che scorre arriva come rotella, che lo slider ignora: lo strato sopra lo fa
+        // seguire. Occupa tutta la colonna della banda, larga abbastanza per un dito.
+        let slider = vertical_slider(-eq::MAX_GAIN_DB..=eq::MAX_GAIN_DB, gain, move |value| {
+            Message::EqualizerBand(band, value)
+        })
+        .step(0.5_f32)
+        .height(BAND_HEIGHT)
+        .on_release(Message::EqualizerReleased)
+        .style(theme::volume_slider);
+        let touch = touch_slider_vertical(
+            move |fraction| Message::EqualizerBand(band, band_gain(fraction)),
+            Message::EqualizerReleased,
+        );
         column![
             small(gain_label(gain)),
-            vertical_slider(-eq::MAX_GAIN_DB..=eq::MAX_GAIN_DB, gain, move |value| {
-                Message::EqualizerBand(band, value)
-            })
-            .step(0.5_f32)
-            .height(BAND_HEIGHT)
-            .on_release(Message::EqualizerReleased)
-            .style(theme::volume_slider),
+            stack![container(slider).center_x(Length::Fill).height(BAND_HEIGHT), touch],
             small(BAND_LABELS[band]),
         ]
         .spacing(8)
@@ -336,6 +344,12 @@ fn sound(app: &App, fit: Fit) -> Element<'_, Message> {
         ],
         fit,
     )
+}
+
+/// Il guadagno di una banda sotto il dito: la frazione dello slider (1 in alto), a passi di 0,5 dB.
+fn band_gain(fraction: f32) -> f32 {
+    let gain = -eq::MAX_GAIN_DB + fraction * 2.0 * eq::MAX_GAIN_DB;
+    (gain * 2.0).round() / 2.0
 }
 
 /// "+3", "−6" o "0": il guadagno di una banda in dB.
@@ -530,4 +544,19 @@ fn sleep_control(app: &App) -> Element<'_, Message> {
         None => "Imposta…".to_string(),
     };
     outlined_button_owned(label, Some(Icon::Moon), Message::OpenMenu(MenuTarget::Player))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finger_position_maps_to_half_decibel_steps() {
+        assert_eq!(band_gain(1.0), eq::MAX_GAIN_DB);
+        assert_eq!(band_gain(0.0), -eq::MAX_GAIN_DB);
+        assert_eq!(band_gain(0.5), 0.0);
+        // Un quarto di corsa dall'alto sono 6 dB; un valore fra due passi si arrotonda a mezzo dB.
+        assert_eq!(band_gain(0.75), 6.0);
+        assert_eq!(band_gain(0.52), 0.5);
+    }
 }

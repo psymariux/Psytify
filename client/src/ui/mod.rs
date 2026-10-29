@@ -63,6 +63,11 @@ fn layers(app: &App, window: Size) -> Element<'_, Message> {
     if let Some(toast) = toast::view(app) {
         layers = layers.push(toast);
     }
+    if crate::app::is_phone()
+        && let Some(drawer) = phone::drawer::view(app, window)
+    {
+        layers = layers.push(drawer);
+    }
     if let Some(menu) = context_menu::view(app) {
         layers = layers.push(menu);
     }

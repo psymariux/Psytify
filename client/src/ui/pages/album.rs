@@ -43,7 +43,7 @@ fn loaded<'a>(app: &'a App, album: &'a Album, width: f32) -> Element<'a, Message
         HERO_COVER,
     );
     let mut page =
-        column![hero(art, "Album", &album.title, &meta.join(" · "), width), play_bar(&tracks, vec![])]
+        column![hero(art, "Album", &album.title, &meta.join(" · "), width), play_bar(app, &tracks, vec![])]
             .spacing(24);
     if tracks.is_empty() {
         return page.push(empty_block("Questo album non ha ancora brani pubblicati.")).into();

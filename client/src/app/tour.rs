@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use iced::{Size, Task, window};
 
-use super::menu::Dialog;
+use super::menu::{Dialog, MenuTarget, TrackSource};
 use super::{App, AuthField, AuthMode, Load, Message, Screen, SettingsTab, SideTab};
 
 /// A che punto è il giro.
@@ -32,6 +32,8 @@ type Step = (&'static str, u64, fn(&mut App) -> Task<Message>);
 
 const STEPS: &[Step] = &[
     ("home", 5000, |app| go(app, [Message::ClosePanel, Message::Navigate(Screen::Home)])),
+    ("drawer", 2500, |app| go(app, [Message::Navigate(Screen::Home), Message::OpenDrawer])),
+    ("drawer-close", 500, |app| app.update(Message::CloseDrawer)),
     ("search", 7000, |app| {
         go(app, [Message::Navigate(Screen::Search), Message::SearchInput("eminem".into())])
     }),
@@ -46,6 +48,18 @@ const STEPS: &[Step] = &[
     ("library", 5000, |app| app.update(Message::Navigate(Screen::Library))),
     ("collection", 3000, |app| app.update(Message::Navigate(Screen::Collection))),
     ("liked", 3000, |app| app.update(Message::Navigate(Screen::Liked))),
+    // Con una configurazione nuova non c'è nessuna playlist: se ne crea una con i brani della Home.
+    ("make-playlist", 1500, |app| {
+        let Load::Ready(tracks) = &app.home.recent else { return Task::none() };
+        let seed: Vec<_> = tracks.iter().take(6).cloned().collect();
+        go(
+            app,
+            [
+                Message::OpenDialog(Dialog::NewPlaylist { name: "Allenamento".into(), seed }),
+                Message::DialogSubmit,
+            ],
+        )
+    }),
     ("playlist", 3000, |app| match app.playlists.first().map(|playlist| playlist.id) {
         Some(id) => app.update(Message::Navigate(Screen::Playlist(id))),
         None => Task::none(),
@@ -137,6 +151,17 @@ const STEPS: &[Step] = &[
     ("focus-lyrics", 4000, |app| go(app, [Message::SideTab(SideTab::NowPlaying), Message::ToggleFocus])),
     // Sul telefono: il testo e la coda aperti nel player a schermo intero.
     ("player-lyrics", 4000, |app| app.update(Message::SideTab(SideTab::Lyrics))),
+    // Sul telefono: la sheet del menu sul brano in corso, sul player e con l'elenco dei timer.
+    ("player-open", 2500, |app| app.update(Message::ToggleFocus)),
+    ("menu-track", 2500, |app| {
+        let Some(track) = app.queue.current().cloned() else { return Task::none() };
+        app.update(Message::OpenMenu(MenuTarget::Track {
+            track: Box::new(track),
+            source: TrackSource::Catalogue,
+        }))
+    }),
+    ("menu-player", 2500, |app| go(app, [Message::CloseMenu, Message::OpenMenu(MenuTarget::Player)])),
+    ("menu-timers", 2500, |app| app.update(Message::MenuTimers(true))),
     ("player-queue", 2500, |app| app.update(Message::SideTab(SideTab::Queue))),
     ("focus-video", 6000, |app| app.update(Message::ToggleVideoFocus)),
     ("dialog", 1500, |app| {

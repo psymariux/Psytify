@@ -9,6 +9,7 @@ use iced::widget::{Space, button, column, container, row, slider, stack, text};
 use iced::{Alignment, Color, Element, Length, Padding, Size, alignment};
 
 use super::touch_icon;
+use crate::api::Track;
 use crate::app::{App, MenuTarget, Message, SideTab};
 use crate::player::queue::Repeat;
 use crate::player::seek::{self, format_time, progress as progress_of};
@@ -27,6 +28,19 @@ const PLAY: f32 = 68.0;
 const SKIP: f32 = 56.0;
 /// La copertina piccola sopra il testo e la coda.
 const MINI_COVER: f32 = 52.0;
+
+/// Il download del brano in corso; spento se la licenza non lo permette (il tocco dice perché),
+/// e «…» mentre scarica.
+fn download_button<'a>(app: &App, track: &Track) -> Element<'a, Message> {
+    if app.downloading.contains(&track.id) {
+        return container(text("…").size(theme::FS_TITLE).color(theme::ACCENT))
+            .center_x(Length::Fixed(theme::TOUCH_TARGET))
+            .center_y(Length::Fixed(theme::TOUCH_TARGET))
+            .into();
+    }
+    let tint = if track.downloadable { theme::MUTED } else { theme::DISABLED };
+    touch_icon(Icon::Download, tint, Message::Download(track.clone()))
+}
 
 pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
     let Some(track) = app.queue.current() else {
@@ -52,11 +66,12 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
     let middle: Element<'_, Message> = match app.side_tab {
         SideTab::NowPlaying => {
             let side = (window.height * theme::PHONE_PLAYER_COVER).min(width).max(160.0);
-            let title_width = width - theme::TOUCH_TARGET - 8.0;
+            let title_width = width - 2.0 * theme::TOUCH_TARGET - 8.0;
             let title = row![
                 column![line(&track.title, title_width, H1_LINE), line(&detail, title_width, MUTED_LINE)]
                     .spacing(6)
                     .width(Length::Fill),
+                download_button(app, track),
                 heart(app, track, true),
             ]
             .spacing(8)

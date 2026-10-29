@@ -43,6 +43,8 @@ pub const CONTROL: Color = hex(0x4d4d4d);
 pub const TEXT: Color = hex(0xffffff);
 pub const MUTED: Color = hex(0xb8b8b8);
 pub const FAINT: Color = hex(0x9c9c9c);
+/// Un controllo che non si può usare ora (il download di un brano senza licenza).
+pub const DISABLED: Color = hex(0x636363);
 pub const NAV_IDLE: Color = hex(0xbdbdbd);
 // Marchio, dati e stati
 pub const ACCENT: Color = hex(0xc6f24e);
@@ -97,6 +99,12 @@ pub const GRID_GAP: f32 = 16.0;
 /// Larghezza di un menu contestuale e altezza di una sua voce.
 pub const MENU_WIDTH: f32 = 276.0;
 pub const MENU_ITEM: f32 = 38.0;
+/// Riga di una sheet dal basso (telefono): alta quanto basta a un dito.
+pub const SHEET_ITEM: f32 = 56.0;
+/// Testo delle voci della sheet.
+pub const FS_SHEET: f32 = 16.0;
+/// Angoli superiori della sheet.
+pub const SHEET_RADIUS: f32 = 20.0;
 
 // Telefono (ui/phone/).
 /// Barra di navigazione in basso, mini-player sopra di lei, margine laterale delle pagine.
@@ -381,6 +389,34 @@ pub fn menu_box(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: background(super::motion::fade(RAISED, alpha)),
         border: border(1.0, super::motion::fade(hex(0x3a3a3a), alpha), RADIUS_TILE + 2.0),
+        text_color: Some(super::motion::fade(TEXT, alpha)),
+        shadow: floating_shadow(alpha),
+    }
+}
+
+/// La sheet dal basso del telefono: superficie rialzata con gli angoli superiori tondi.
+pub fn sheet(alpha: f32) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: background(super::motion::fade(hex(0x1c1c1c), alpha)),
+        border: iced::Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: iced::border::Radius::new(0.0).top(SHEET_RADIUS),
+        },
+        text_color: Some(super::motion::fade(TEXT, alpha)),
+        shadow: floating_shadow(alpha),
+    }
+}
+
+/// Il cassetto da destra del telefono: stessa superficie della sheet, angoli tondi sul lato sinistro.
+pub fn drawer(alpha: f32) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: background(super::motion::fade(hex(0x1c1c1c), alpha)),
+        border: iced::Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: iced::border::Radius::new(0.0).top_left(SHEET_RADIUS).bottom_left(SHEET_RADIUS),
+        },
         text_color: Some(super::motion::fade(TEXT, alpha)),
         shadow: floating_shadow(alpha),
     }

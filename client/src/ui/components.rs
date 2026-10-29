@@ -285,24 +285,59 @@ pub fn play_controls<'a>(play: Message, shuffle: Message) -> Element<'a, Message
         .into()
 }
 
-/// La barra sotto la testa di una pagina di brani: Play, Casuale, Scarica e le azioni `extra`.
-pub fn play_bar<'a>(tracks: &Arc<[Track]>, extra: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+/// La barra sotto la testa di una pagina di brani: Play, Casuale, Scarica e le azioni `extra`. Sul
+/// telefono, come in Spotify: a sinistra le azioni, a destra Casuale e il Play grande.
+pub fn play_bar<'a>(
+    app: &App,
+    tracks: &Arc<[Track]>,
+    extra: Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let phone = crate::app::is_phone();
     let mut bar = row![].spacing(10).align_y(Alignment::Center);
-    if !tracks.is_empty() {
-        bar = bar.push(play_fab(Message::PlayTracks(tracks.clone(), 0))).push(icon_button(
+    let mut shuffle = (!tracks.is_empty()).then(|| {
+        icon_button(
             Icon::Shuffle,
             "Riproduci in ordine casuale",
             false,
             Some(Message::ShufflePlay(tracks.clone())),
-        ));
+        )
+    });
+    if !phone && !tracks.is_empty() {
+        bar = bar.push(play_fab(Message::PlayTracks(tracks.clone(), 0)));
+        bar = bar.extend(shuffle.take());
     }
-    let downloadable = tracks.iter().filter(|t| t.downloadable).count();
-    if downloadable > 0 {
-        let label =
-            if downloadable == tracks.len() { "Scarica tutto" } else { "Scarica i brani disponibili" };
-        bar = bar.push(icon_button(Icon::Download, label, false, Some(Message::DownloadAll(tracks.clone()))));
+    if !tracks.is_empty() {
+        let downloadable = tracks.iter().filter(|t| t.downloadable).count();
+        // Il download dell'intera lista: sul telefono c'è sempre, e se nessun brano si può scaricare lo
+        // dice invece di sparire.
+        if downloadable > 0 || phone {
+            let label =
+                if downloadable == tracks.len() { "Scarica tutto" } else { "Scarica i brani disponibili" };
+            bar = bar.push(match app.download_progress() {
+                // Mentre il lotto scarica, al posto dell'icona c'è il conteggio.
+                Some((done, total)) => container(
+                    text(format!("{done}/{total}"))
+                        .size(theme::FS_SMALL)
+                        .font(theme::FONT_MEDIUM)
+                        .color(theme::ACCENT),
+                )
+                .height(ICON_BUTTON)
+                .padding([0, 6])
+                .align_y(alignment::Vertical::Center)
+                .into(),
+                None => icon_button(Icon::Download, label, false, Some(Message::DownloadAll(tracks.clone()))),
+            });
+        }
     }
-    extra.into_iter().fold(bar, iced::widget::Row::push).into()
+    bar = extra.into_iter().fold(bar, iced::widget::Row::push);
+    if phone && !tracks.is_empty() {
+        bar = bar
+            .push(Space::with_width(Length::Fill))
+            .extend(shuffle)
+            .push(play_fab(Message::PlayTracks(tracks.clone(), 0)))
+            .width(Length::Fill);
+    }
+    bar.into()
 }
 
 /// La testa di una pagina: copertina grande con l'ombra, genere, titolo enorme e riga dei dati.

@@ -49,13 +49,18 @@ impl App {
             since: Instant::now(),
             playlists: false,
             downloads: false,
+            timers: false,
         });
         Task::none()
     }
 
     /// Esc chiude ciò che sta sopra, dal più in alto: menu, finestra di dialogo, schermo intero.
     pub(super) fn escape(&mut self) -> Task<Message> {
-        if self.menu.take().is_some() || self.dialog.take().is_some() || self.shortcuts.take().is_some() {
+        if self.menu.take().is_some()
+            || self.drawer.take().is_some()
+            || self.dialog.take().is_some()
+            || self.shortcuts.take().is_some()
+        {
             return Task::none();
         }
         if self.focus {

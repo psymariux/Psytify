@@ -285,7 +285,7 @@ fn banner<'a>(
             }
             bar.into()
         }
-        None => play_bar(tracks, extra),
+        None => play_bar(app, tracks, extra),
     };
 
     let body = column![

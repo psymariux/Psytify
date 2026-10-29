@@ -8,6 +8,8 @@ on:
         required: false
       ANDROID_KEYSTORE_PASSWORD:
         required: false
+      PSYTIFY_DEFAULT_API_URL:
+        required: false
   workflow_dispatch:
   pull_request:
     paths:
@@ -52,8 +54,8 @@ jobs:
       # non si installa sopra una versione firmata con un'altra chiave.
       - name: Restore the signing key
         env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEYSTORE_B64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+          KEYSTORE_PASS: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
         run: |
           if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASS" ]; then
             umask 077
@@ -66,8 +68,9 @@ jobs:
           fi
       - name: Build the APK
         env:
-          # Facoltativo: il backend che l'app usa di default (variabile del repository, non un segreto).
-          PSYTIFY_DEFAULT_API_URL: ${{ vars.PSYTIFY_DEFAULT_API_URL }}
+          # Facoltativo: il backend che l'app usa di default. È un segreto del repository: non compare nei log.
+          # Sulle pull request non si usa: gli artifact di un repository pubblico li scarica chiunque.
+          PSYTIFY_DEFAULT_API_URL: ${{ github.event_name != 'pull_request' && secrets.PSYTIFY_DEFAULT_API_URL || '' }}
         run: scripts/android-apk.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

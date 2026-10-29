@@ -1,8 +1,8 @@
 # Psytify on Android
 
 The APK is the same client as the desktop one (`client/`, used as a library) with the phone layout
-(`client/src/ui/phone.rs`): a bottom navigation bar, a mini player, and a full-screen player with
-synced lyrics and the queue. The `android/` crate is only the shell: it receives the `AndroidApp` from
+(`client/src/ui/phone/`): four tabs at the bottom, a Home and a Library designed for the phone, a mini
+player, and a full-screen player with synced lyrics and the queue. The `android/` crate is only the shell: it receives the `AndroidApp` from
 the NativeActivity, picks the data folder and wires up the system keyboard.
 
 ## Requirements

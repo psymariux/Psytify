@@ -110,6 +110,8 @@ pub enum Screen {
     News,
     /// Una playlist (o un album) di YouTube o Bandcamp, aperta da una ricerca o da un artista.
     SourcePlaylist,
+    /// La libreria personale come schermata (telefono): sul desktop sta nella barra laterale.
+    Collection,
 }
 
 impl From<SavedScreen> for Screen {
@@ -125,6 +127,7 @@ impl From<SavedScreen> for Screen {
             SavedScreen::Jam => Self::Jam,
             SavedScreen::Liked => Self::Liked,
             SavedScreen::News => Self::News,
+            SavedScreen::Collection => Self::Collection,
         }
     }
 }
@@ -143,6 +146,7 @@ impl From<Screen> for SavedScreen {
             Screen::Jam => Self::Jam,
             Screen::Liked => Self::Liked,
             Screen::News => Self::News,
+            Screen::Collection => Self::Collection,
         }
     }
 }
@@ -2150,6 +2154,15 @@ impl App {
         self.back.iter().any(|&screen| self.still_there(screen))
     }
 
+    /// La scheda del telefono accesa: quella della schermata o, per una pagina aperta da un'altra
+    /// (un album, un artista), quella da cui ci si è arrivati.
+    pub fn phone_tab(&self) -> Screen {
+        std::iter::once(&self.screen)
+            .chain(self.back.iter().rev())
+            .find_map(|&screen| phone_tab_of(screen))
+            .unwrap_or(Screen::Home)
+    }
+
     pub fn can_go_forward(&self) -> bool {
         self.forward.iter().any(|&screen| self.still_there(screen))
     }
@@ -2218,9 +2231,12 @@ impl App {
                 }
                 None => Task::none(),
             },
-            Screen::Playlist(_) | Screen::Settings | Screen::Jam | Screen::Liked | Screen::News => {
-                Task::none()
-            }
+            Screen::Playlist(_)
+            | Screen::Settings
+            | Screen::Jam
+            | Screen::Liked
+            | Screen::News
+            | Screen::Collection => Task::none(),
         }
     }
 
@@ -3132,6 +3148,20 @@ pub fn set_platform(platform: Platform) {
 /// L'app gira su un telefono (o lo simula, `PSYTIFY_PHONE=1`): impaginazione compatta.
 pub fn is_phone() -> bool {
     PLATFORM.get() == Some(&Platform::Phone)
+}
+
+/// Le quattro schede del telefono e le schermate che vi appartengono; `None` per le pagine che si
+/// aprono da qualunque scheda (album, artista, impostazioni).
+pub fn phone_tab_of(screen: Screen) -> Option<Screen> {
+    match screen {
+        Screen::Home => Some(Screen::Home),
+        Screen::Search | Screen::SourcePlaylist => Some(Screen::Search),
+        Screen::Collection | Screen::Liked | Screen::Playlist(_) | Screen::Library => {
+            Some(Screen::Collection)
+        }
+        Screen::News => Some(Screen::News),
+        Screen::Album(_) | Screen::Artist(_) | Screen::Settings | Screen::Jam => None,
+    }
 }
 
 pub fn clean_query(raw: &str) -> Option<String> {

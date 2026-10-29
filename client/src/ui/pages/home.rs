@@ -120,7 +120,7 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
 
 /// Le scorciatoie in cima: i brani che piacciono, le playlist, poi gli ultimi ascolti. Due colonne,
 /// al massimo sei.
-fn shortcuts(app: &App, width: f32) -> Option<Element<'_, Message>> {
+pub(crate) fn shortcuts(app: &App, width: f32) -> Option<Element<'_, Message>> {
     let cell = (width - theme::GRID_GAP) / 2.0;
     let mut cards: Vec<Element<'_, Message>> = Vec::new();
     if !app.liked.is_empty() {
@@ -158,6 +158,10 @@ fn shortcuts(app: &App, width: f32) -> Option<Element<'_, Message>> {
             Message::PlayTracks(Arc::from([track.clone()]), 0),
             Some(MenuTarget::track(track, TrackSource::Catalogue)),
         ));
+    }
+    // Sul telefono le righe sono sempre piene: una scorciatoia sola lascerebbe mezza riga vuota.
+    if crate::app::is_phone() {
+        cards.truncate(cards.len() / 2 * 2);
     }
     if cards.is_empty() {
         return None;

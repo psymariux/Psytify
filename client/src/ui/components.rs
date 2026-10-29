@@ -316,14 +316,18 @@ pub fn hero<'a>(
     // Stretta (il telefono), la copertina affiancata lascerebbe al titolo una parola: si impila,
     // e il titolo va a capo invece di tagliarsi.
     if width < HERO_COVER + 24.0 + HERO_TEXT_MIN {
+        let mut heading = column![].spacing(8);
+        // Sul telefono il genere lo dice già la pagina: il titolo resta solo, più grande.
+        if !crate::app::is_phone() {
+            heading = heading
+                .push(text(kicker).size(theme::FS_SMALL).font(theme::FONT_SEMIBOLD).color(theme::TEXT));
+        }
+        let size = if crate::app::is_phone() { theme::FS_PHONE_TITLE } else { theme::FS_PAGE };
         return column![
             container(container(art).style(theme::lifted)).center_x(Length::Fill),
-            column![
-                text(kicker).size(theme::FS_SMALL).font(theme::FONT_SEMIBOLD).color(theme::TEXT),
-                text(title.to_owned()).size(theme::FS_PAGE).font(theme::FONT_SEMIBOLD).color(theme::TEXT),
-                line(meta, width, SUB_LINE),
-            ]
-            .spacing(8),
+            heading
+                .push(text(title.to_owned()).size(size).font(theme::FONT_SEMIBOLD).color(theme::TEXT))
+                .push(line(meta, width, SUB_LINE)),
         ]
         .spacing(20)
         .into();
@@ -1046,8 +1050,13 @@ pub fn shortcut<'a>(
 }
 
 pub(super) fn scroll_row<'a>(tiles: Vec<Element<'a, Message>>) -> Element<'a, Message> {
-    scrollable(container(row(tiles).spacing(6)).padding(Padding::default().bottom(12)))
-        .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new().width(4).scroller_width(4)))
+    // Sul telefono la fila si scorre col dito: la barra non serve e sembrerebbe un carosello.
+    let bar = if crate::app::is_phone() { 0.0 } else { 4.0 };
+    let gap = if crate::app::is_phone() { 0.0 } else { 12.0 };
+    scrollable(container(row(tiles).spacing(6)).padding(Padding::default().bottom(gap)))
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::new().width(bar).scroller_width(bar),
+        ))
         .style(theme::scroll)
         .into()
 }

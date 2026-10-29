@@ -511,7 +511,8 @@ pub fn segment(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Sty
 pub fn mini_player(tint: Color) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: background(super::motion::mix(SURFACE, tint, 0.45)),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_TILE),
+        // Appoggiata sulla barra delle schede: niente angoli arrotondati.
+        border: border(0.0, Color::TRANSPARENT, 0.0),
         ..container::Style::default()
     }
 }

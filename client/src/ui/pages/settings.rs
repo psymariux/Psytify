@@ -7,15 +7,16 @@
 //! Stretta, le scelte a segmenti scendono sotto il testo a tutta riga; interruttori e pulsanti
 //! restano a destra, come nelle impostazioni di un telefono.
 
-use iced::widget::{Column, Space, button, column, container, row, text, toggler, vertical_slider};
-use iced::{Alignment, Element, Length, Theme, alignment};
+use iced::widget::{
+    Column, Space, button, column, container, row, text, text_input, toggler, vertical_slider,
+};
+use iced::{Alignment, Element, Length, Theme};
 
 use crate::api::{DownloadQuality, Quality};
 use crate::app::{Account, App, MenuTarget, Message, SettingsTab, is_phone};
+use crate::config;
 use crate::player::eq::{self, PRESETS};
-use crate::ui::components::{
-    MUTED_LINE, h1, h2, line_aligned, muted, outlined_button, outlined_button_owned, primary_button, small,
-};
+use crate::ui::components::{h1, h2, muted, outlined_button, outlined_button_owned, primary_button, small};
 use crate::ui::icons::Icon;
 use crate::ui::theme;
 
@@ -386,12 +387,7 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
                 .into()
         })
         .collect();
-    // Affiancato al testo, l'indirizzo si allinea a destra come gli altri controlli.
-    let (host_width, host_align) = if fit.compact {
-        (fit.inner, alignment::Horizontal::Left)
-    } else {
-        (HOST_WIDTH.min(fit.inner), alignment::Horizontal::Right)
-    };
+    let host_width = if fit.compact { fit.inner } else { HOST_WIDTH.min(fit.inner) };
     let mut groups = column![group(
         "Psytify",
         vec![
@@ -404,12 +400,7 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
                 },
                 muted(env!("CARGO_PKG_VERSION")).into(),
             ),
-            setting(
-                "Server",
-                "Il catalogo arriva da qui; l'audio mai.",
-                line_aligned(&app.api_host(), host_width, MUTED_LINE, host_align),
-                fit,
-            ),
+            setting("Server", server_detail(app), server_control(app, host_width), fit),
         ],
         fit,
     )];
@@ -427,6 +418,30 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
         ))
         .spacing(28)
         .into()
+}
+
+/// Dove arriva il catalogo, e se è il server predefinito o uno scelto qui.
+fn server_detail(app: &App) -> String {
+    let host = app.api_host();
+    match app.server {
+        Some(_) => format!("In uso: {host}, scelto da te. Vuoto torna al predefinito."),
+        None => format!("In uso: {host}, il predefinito. L'audio passa sempre da qui."),
+    }
+}
+
+/// Campo dell'indirizzo con «Usa» e, se è stato cambiato, «Predefinito».
+fn server_control(app: &App, width: f32) -> Element<'_, Message> {
+    let input = text_input(config::default_api_url(), &app.server_draft)
+        .on_input(Message::ServerDraft)
+        .on_submit(Message::ServerApply)
+        .size(theme::FS_BODY)
+        .padding([8, 14])
+        .style(theme::search_input);
+    let mut actions = row![outlined_button("Usa", None, Some(Message::ServerApply))].spacing(8);
+    if app.server.is_some() {
+        actions = actions.push(outlined_button("Predefinito", None, Some(Message::ServerReset)));
+    }
+    column![input, actions].spacing(10).width(width).into()
 }
 
 /// Il timer di spegnimento: il pulsante apre il menu del player con le durate.

@@ -526,6 +526,10 @@ pub enum Message {
     LyricsLoaded(Uuid, Result<Lyrics, AppError>),
     /// Clic su una riga del testo: la riproduzione va a quel punto.
     LyricSeek(Duration),
+    /// Impostazioni: indirizzo del backend digitato, applicato o riportato al predefinito.
+    ServerDraft(String),
+    ServerApply,
+    ServerReset,
     /// Schermata Jam: nome in stanza, codice da inserire, creazione, ingresso e uscita.
     JamName(String),
     JamCode(String),
@@ -689,7 +693,12 @@ struct JamTarget {
 
 pub struct App {
     pub api: Result<ApiClient, AppError>,
+    /// Backend in uso (variabile d'ambiente, scelta dell'utente o predefinito).
     api_base_url: String,
+    /// Backend scelto nelle impostazioni; `None` = il predefinito della build.
+    pub server: Option<String>,
+    /// Indirizzo che si sta scrivendo nelle impostazioni.
+    pub server_draft: String,
     pub audio: Option<AudioOutput>,
     pub queue: Queue,
     pub playback: Playback,
@@ -838,7 +847,8 @@ pub struct App {
 impl App {
     pub fn new() -> (Self, Task<Message>) {
         let config = config::load();
-        let api = ApiClient::new(&config.api_base_url);
+        let api_base_url = config::api_url(config.server.as_deref());
+        let api = ApiClient::new(&api_base_url);
         let clerk_app = config.clerk_app();
         let (audio, audio_error) = match AudioOutput::open() {
             Ok(output) => {
@@ -852,7 +862,9 @@ impl App {
             toast: None,
             toast_generation: 0,
             api,
-            api_base_url: config.api_base_url,
+            server_draft: config.server.clone().unwrap_or_default(),
+            server: config.server,
+            api_base_url,
             audio,
             queue: config.queue,
             playback: Playback::new(config.volume),
@@ -1697,6 +1709,15 @@ impl App {
                 }
                 Task::none()
             }
+            Message::ServerDraft(url) => {
+                self.server_draft = url;
+                Task::none()
+            }
+            Message::ServerApply => {
+                let server = config::normalize_server(&self.server_draft);
+                self.set_server(server)
+            }
+            Message::ServerReset => self.set_server(None),
             Message::JamName(name) => {
                 self.jam_name = name.chars().take(jam::MAX_NAME_CHARS).collect();
                 Task::none()
@@ -2201,6 +2222,29 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    /// Cambia il backend: un indirizzo non valido resta nel campo con l'errore, senza toccare quello
+    /// in uso. Il catalogo si ricarica dal nuovo server.
+    fn set_server(&mut self, server: Option<String>) -> Task<Message> {
+        let url = config::api_url(server.as_deref());
+        let api = match ApiClient::new(&url) {
+            Ok(api) => api,
+            Err(err) => {
+                self.notice = Some(Notice::Error(err.to_string()));
+                return Task::none();
+            }
+        };
+        self.server_draft = server.clone().unwrap_or_default();
+        if server == self.server && url == self.api_base_url {
+            return Task::none();
+        }
+        self.notice = Some(Notice::Info(format!("Server: {}", api.host())));
+        self.api = Ok(api);
+        self.api_base_url = url;
+        self.server = server;
+        self.artists = ArtistsState::default();
+        Task::batch([self.persist(), self.load_home()])
     }
 
     fn api(&self) -> Result<ApiClient, AppError> {
@@ -3011,7 +3055,8 @@ impl App {
 
     fn snapshot(&self) -> Config {
         Config {
-            api_base_url: self.api_base_url.clone(),
+            server: self.server.clone(),
+            legacy_api: None,
             volume: self.volume_before_mute.unwrap_or(self.playback.volume),
             last_screen: self.screen.into(),
             queue: self.queue.clone(),

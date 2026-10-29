@@ -1,0 +1,27 @@
+# Build output
+/target/
+/android/target/
+/dist/
+
+# Secrets and local configuration: only the *.example files are tracked
+.env
+.env.*
+!.env.*.example
+*.pem
+*.key
+*.keystore
+*.jks
+*.token
+session.json
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Profiling and logs
+*.log
+perf.data*
+flamegraph.svg

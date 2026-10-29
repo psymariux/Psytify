@@ -1,0 +1,42 @@
+# cargo deny check: licenze, advisory, fonti delle dipendenze.
+
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+# Le dipendenze dirette non mantenute bloccano il CI; quelle transitive (lo stack di testo di
+# Iced 0.13: rustybuzz, ttf-parser, instant, paste) restano visibili in `cargo audit` e sono
+# tracciate da Dependabot. Spariscono solo con l'aggiornamento di Iced.
+unmaintained = "workspace"
+# rsa (RUSTSEC-2023-0071) non compare qui: cargo-deny risolve il grafo con le feature attive e
+# sqlx-mysql non è mai compilato. cargo audit, che legge Cargo.lock, lo ignora in .cargo/audit.toml.
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "Unlicense",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

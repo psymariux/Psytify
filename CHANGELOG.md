@@ -8,6 +8,8 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- In-app updates: at startup Psytify checks the latest release and offers it in Settings → About; the
+  package comes through the backend, and Android hands it to the system installer.
 - Desktop client for Arch Linux and Windows, and an Android app with a phone layout.
 - Lossless playback (FLAC, WAV) and lossy formats through Symphonia, with ranged streaming and seeking.
 - Home feed, search, artist and album pages, queue, shuffle, repeat, sleep timer and autoplay.

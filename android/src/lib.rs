@@ -40,6 +40,7 @@ fn android_main(app: AndroidApp) {
     // La sessione multimediale: schermata di blocco, notifica e cuffie.
     media::start(&app);
     psytify::set_phone_media(media::show);
+    psytify::set_phone_installer(media::install);
     let _ = iced_winit::ANDROID_APP.set(app);
     if let Err(err) = psytify::run(psytify::Platform::Phone) {
         log::error!("Psytify si è chiuso: {err}");

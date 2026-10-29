@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use reqwest::StatusCode;
+
+use super::update;
 use serde::de::DeserializeOwned;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
@@ -642,8 +644,23 @@ impl ApiClient {
     }
 
     /// Scarica un URL firmato su disco: prima in `<dest>.part`, poi rinomina.
+    /// L'ultima release dell'app, come la legge il backend.
+    pub async fn latest_release(&self) -> Result<update::Release, AppError> {
+        self.get_json("/v1/app/release", &[]).await
+    }
+
+    /// Scarica un file dell'ultima release dal backend, nel file `dest`.
+    pub async fn download_release(&self, asset: &update::Asset, dest: &Path) -> Result<u64, AppError> {
+        self.fetch_to(&format!("{}/v1/app/release/assets/{}", self.base, asset.name), dest).await
+    }
+
     pub async fn download_to(&self, url: &SignedUrl, dest: &Path) -> Result<u64, AppError> {
-        let mut response = self.download.get(&url.url).send().await.map_err(|e| AppError::from_http(&e))?;
+        self.fetch_to(&url.url, dest).await
+    }
+
+    /// Scarica `url` a blocchi nel file `dest`: prima in `dest.part`, poi lo rinomina.
+    async fn fetch_to(&self, url: &str, dest: &Path) -> Result<u64, AppError> {
+        let mut response = self.download.get(url).send().await.map_err(|e| AppError::from_http(&e))?;
         check_storage_status(response.status())?;
 
         let partial = dest.with_extension("part");

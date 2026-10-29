@@ -400,6 +400,14 @@ pub struct Hovered {
     pub track: bool,
 }
 
+/// L'aggiornamento proposto in Informazioni, e a che punto è.
+#[derive(Debug, Clone)]
+pub enum UpdateState {
+    Offered(api::update::Offer),
+    Downloading(String),
+    Downloaded(PathBuf),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
     Info(String),
@@ -478,6 +486,10 @@ pub enum Message {
     PlaySource(SourceKind, String),
     /// Copertina scaricata e decodificata; `None` se non si può mostrare.
     CoverLoaded(String, Option<CoverPixels>),
+    /// L'ultima release letta dal backend, se è da installare.
+    UpdateChecked(Option<api::update::Offer>),
+    UpdateRequested,
+    UpdateDownloaded(Result<PathBuf, AppError>),
     Imported(String, Result<DiscoverImport, AppError>),
     /// Un brano salvato che il server non aveva più, ritrovato e importato di nuovo.
     TrackHealed(Uuid, Result<Track, AppError>),
@@ -876,6 +888,8 @@ pub struct App {
     pub covers: Covers,
     pub notice: Option<Notice>,
     pub toast: Option<Toast>,
+    /// L'aggiornamento offerto in Informazioni, e a che punto è il download.
+    pub update: Option<UpdateState>,
     toast_generation: u64,
     saving: bool,
     save_pending: bool,
@@ -915,6 +929,7 @@ impl App {
         let mut app = Self {
             notice: None,
             toast: None,
+            update: None,
             toast_generation: 0,
             api,
             server_draft: config.server.clone().unwrap_or_default(),
@@ -1067,6 +1082,7 @@ impl App {
             },
             Message::GpuDetected,
         );
+        let update = app.check_update();
         (
             app,
             Task::batch([
@@ -1081,8 +1097,27 @@ impl App {
                 covers,
                 resume,
                 notice,
+                update,
                 window::get_oldest().map(Message::WindowReady),
             ]),
+        )
+    }
+
+    /// Chiede una volta, all'avvio, se c'è una release più recente di questa copia. Senza rete, o
+    /// con una compilazione locale, non dice nulla.
+    fn check_update(&self) -> Task<Message> {
+        if api::update::BUILD_TAG.is_none() {
+            return Task::none();
+        }
+        let Ok(api) = self.api.clone() else { return Task::none() };
+        Task::perform(
+            async move {
+                api.latest_release()
+                    .await
+                    .ok()
+                    .and_then(|release| api::update::offer(release, api::update::BUILD_TAG))
+            },
+            Message::UpdateChecked,
         )
     }
 
@@ -1896,6 +1931,44 @@ impl App {
                 self.dedicated_video = on;
                 // Il videoclip aperto riparte con il decoder scelto; il prossimo lo usa da sé.
                 Task::batch([self.persist(), self.reopen_video()])
+            }
+            Message::UpdateChecked(offer) => {
+                self.update = offer.map(UpdateState::Offered);
+                Task::none()
+            }
+            Message::UpdateRequested => {
+                let (Some(UpdateState::Offered(offer)), Ok(api)) = (&self.update, self.api.clone()) else {
+                    return Task::none();
+                };
+                let offer = offer.clone();
+                self.update = Some(UpdateState::Downloading(offer.tag.clone()));
+                let dir = api::update::updates_dir();
+                Task::perform(
+                    async move {
+                        tokio::fs::create_dir_all(&dir)
+                            .await
+                            .map_err(|_| AppError::Io(dir.display().to_string()))?;
+                        let dest = dir.join(&offer.asset.name);
+                        api.download_release(&offer.asset, &dest).await?;
+                        Ok::<PathBuf, AppError>(dest)
+                    },
+                    Message::UpdateDownloaded,
+                )
+            }
+            Message::UpdateDownloaded(Ok(path)) => {
+                let notice = if cfg!(target_os = "android") {
+                    "Aggiornamento scaricato: conferma l'installazione dal sistema.".to_owned()
+                } else {
+                    format!("Aggiornamento scaricato in {}. Installalo a mano.", path.display())
+                };
+                #[cfg(target_os = "android")]
+                crate::phone_install(&path);
+                self.update = Some(UpdateState::Downloaded(path));
+                self.show_notice(Some(Notice::Info(notice)))
+            }
+            Message::UpdateDownloaded(Err(err)) => {
+                self.update = None;
+                self.show_notice(Some(Notice::Error(format!("Aggiornamento non scaricato: {err}"))))
             }
             Message::GpuDetected(gpu) => {
                 self.dedicated_gpu = gpu;

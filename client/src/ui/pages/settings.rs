@@ -12,8 +12,9 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length, Theme};
 
+use crate::api::update;
 use crate::api::{DownloadQuality, Quality};
-use crate::app::{Account, App, MenuTarget, Message, SettingsTab, is_phone};
+use crate::app::{Account, App, MenuTarget, Message, SettingsTab, UpdateState, is_phone};
 use crate::config;
 use crate::player::eq::{self, PRESETS};
 use crate::ui::components::{h1, h2, muted, outlined_button, outlined_button_owned, primary_button, small};
@@ -455,22 +456,20 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
         })
         .collect();
     let host_width = if fit.compact { fit.inner } else { HOST_WIDTH.min(fit.inner) };
-    let mut groups = column![group(
-        "Psytify",
-        vec![
-            inline(
-                "Versione",
-                if is_phone() {
-                    "Player per il catalogo Psytify."
-                } else {
-                    "Player desktop per il catalogo Psytify."
-                },
-                muted(env!("CARGO_PKG_VERSION")).into(),
-            ),
-            setting("Server", server_detail(app), server_control(app, host_width), fit),
-        ],
-        fit,
-    )];
+    let mut rows = vec![
+        inline(
+            "Versione",
+            if is_phone() {
+                "Player per il catalogo Psytify."
+            } else {
+                "Player desktop per il catalogo Psytify."
+            },
+            muted(update::BUILD_TAG.unwrap_or(env!("CARGO_PKG_VERSION"))).into(),
+        ),
+        setting("Server", server_detail(app), server_control(app, host_width), fit),
+    ];
+    rows.extend(update_setting(app, fit));
+    let mut groups = column![group("Psytify", rows, fit)];
     if !is_phone() {
         groups = groups.push(group("Scorciatoie", shortcuts, fit));
     }
@@ -485,6 +484,19 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
         ))
         .spacing(28)
         .into()
+}
+
+/// La riga dell'aggiornamento: l'offerta da scaricare, il download in corso o il file pronto.
+fn update_setting(app: &App, fit: Fit) -> Option<Element<'_, Message>> {
+    let (detail, control): (String, Element<'_, Message>) = match app.update.as_ref()? {
+        UpdateState::Offered(offer) => (
+            format!("Versione {} pronta per questo dispositivo.", offer.tag),
+            primary_button("Scarica", None, Message::UpdateRequested),
+        ),
+        UpdateState::Downloading(tag) => (format!("Scarico {tag}…"), muted("In corso").into()),
+        UpdateState::Downloaded(path) => (format!("Scaricato in {}", path.display()), muted("Pronto").into()),
+    };
+    Some(setting("Aggiornamento", detail, control, fit))
 }
 
 /// Dove arriva il catalogo, e se è il server predefinito o uno scelto qui.

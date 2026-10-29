@@ -23,7 +23,7 @@ path = "src/main.rs"
 # image-without-codecs for covers (the codecs are chosen by the `image` dependency below).
 # Without the default features: the Fira Sans font is not needed (we use Inter) and system
 # theme detection (zbus on Linux) is not either, because the theme is fixed.
-iced = { version = "0.13.1", default-features = false, features = ["wgpu", "tiny-skia", "tokio", "svg", "lazy", "image-without-codecs"] }
+iced = { version = "0.13.1", default-features = false, features = ["wgpu", "tiny-skia", "tokio", "svg", "lazy", "image-without-codecs", "advanced"] }
 # Internet Archive covers: `image` 0.25 with only the codecs of the item images (JPEG, PNG,
 # GIF, WebP). Iced keeps its own `image` 0.24, which only handles ready-made RGBA pixels here.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }

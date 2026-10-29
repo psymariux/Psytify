@@ -67,9 +67,18 @@ else
 fi
 APK=${CARGO_TARGET_DIR:-$ROOT/android/target}/release/apk/psytify.apk
 
+# Il codice Java (la sessione multimediale, `android/java/`) diventa un classes.dex: cargo-apk compila
+# solo Rust. javac e d8 vengono dal JDK e dall'SDK; `--release 11` è ciò che d8 legge.
+JAVA_OUT=$(mktemp -d)
+trap 'rm -rf "$JAVA_OUT"' EXIT
+javac --release 11 -Xlint:-options -classpath "$ANDROID_HOME/platforms/android-35/android.jar" \
+  -d "$JAVA_OUT/classes" $(find "$ROOT/android/java" -name '*.java')
+d8 --release --min-api 26 --lib "$ANDROID_HOME/platforms/android-35/android.jar" \
+  --output "$JAVA_OUT" $(find "$JAVA_OUT/classes" -name '*.class')
+
 # The configuration changes aapt does not accept by name (see the script), then alignment to
 # 16 KB (Android 15 on phones with 16 KB pages) and a fresh signature.
-python3 "$ROOT/scripts/android-manifest.py" "$APK" "$APK.unsigned"
+python3 "$ROOT/scripts/android-manifest.py" "$APK" "$APK.unsigned" "$JAVA_OUT/classes.dex"
 zipalign -P 16 -f 4 "$APK.unsigned" "$APK.aligned"
 apksigner sign --ks "$KEYSTORE" --ks-pass "file:$PASSFILE" --out "$APK" "$APK.aligned"
 rm -f "$APK.unsigned" "$APK.aligned" "$APK.idsig"

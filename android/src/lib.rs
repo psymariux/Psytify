@@ -5,6 +5,7 @@
 
 mod browser;
 mod insets;
+mod media;
 
 use winit::platform::android::activity::AndroidApp;
 
@@ -36,6 +37,9 @@ fn android_main(app: AndroidApp) {
     // Il login con Clerk passa dal browser: lo apre un Intent.
     let activity = app.clone();
     psytify::set_url_opener(move |url| browser::open(&activity, url));
+    // La sessione multimediale: schermata di blocco, notifica e cuffie.
+    media::start(&app);
+    psytify::set_phone_media(media::show);
     let _ = iced_winit::ANDROID_APP.set(app);
     if let Err(err) = psytify::run(psytify::Platform::Phone) {
         log::error!("Psytify si è chiuso: {err}");

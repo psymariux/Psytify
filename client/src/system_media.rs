@@ -1,9 +1,11 @@
-//! Controlli multimediali del sistema (MPRIS su Linux): i tasti multimediali della tastiera, il
-//! widget del desktop e le cuffie comandano il player, e il sistema mostra titolo, artista,
-//! copertina e posizione. Su Windows e macOS per ora non c'è: servirebbe la finestra nativa
-//! (HWND), e lì `subscription` non produce nulla.
+//! Controlli multimediali del sistema (MPRIS su Linux, la sessione multimediale su Android): i tasti
+//! multimediali della tastiera, il widget del desktop, la schermata di blocco del telefono e le
+//! cuffie comandano il player, e il sistema mostra titolo, artista, copertina e posizione. Su
+//! Android il lavoro con Java lo fa il guscio (`android/src/media.rs`), agganciato con
+//! `set_phone_media`. Su Windows e macOS per ora non c'è: servirebbe la finestra nativa (HWND), e lì
+//! `subscription` non produce nulla.
 #![cfg_attr(
-    not(target_os = "linux"),
+    not(any(target_os = "linux", target_os = "android")),
     expect(dead_code, reason = "fuori da Linux i comandi del sistema non arrivano mai")
 )]
 
@@ -13,6 +15,10 @@ use iced::Subscription;
 
 /// Un comando arrivato dal sistema.
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    target_os = "android",
+    expect(dead_code, reason = "il telefono non manda salti relativi, volume né «porta in primo piano»")
+)]
 pub enum Event {
     /// Il collegamento è pronto: da qui in poi si aggiorna ciò che il sistema mostra.
     Ready(Handle),
@@ -38,15 +44,23 @@ pub struct NowPlaying<'a> {
     pub duration: Duration,
     pub playing: bool,
     pub position: Duration,
+    /// La copertina già scaricata (lato e RGBA), per chi la vuole in pixel e non per indirizzo.
+    #[cfg_attr(not(target_os = "android"), expect(dead_code, reason = "MPRIS la legge dall'indirizzo"))]
+    pub artwork: Option<(u32, &'a [u8])>,
 }
 
 /// Il secondi di un «avanti» o «indietro» senza durata.
+#[cfg_attr(target_os = "android", expect(dead_code, reason = "lo usa solo MPRIS"))]
 const SEEK_STEP: i64 = 5;
 
 #[cfg(target_os = "linux")]
 pub use linux::{Handle, subscription};
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 pub use other::{Handle, subscription};
+#[cfg(target_os = "android")]
+pub use phone::{Handle, subscription};
+#[cfg(target_os = "android")]
+pub use phone::{command as phone_command, register as set_phone_media};
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -170,7 +184,91 @@ mod linux {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Android: il guscio registra chi mostra il brano al sistema e manda indietro i comandi (Play,
+/// Pausa, Successivo, Precedente, salto) con `command`.
+#[cfg(target_os = "android")]
+mod phone {
+    use std::sync::{Mutex, OnceLock, PoisonError};
+    use std::time::Duration;
+
+    use futures_util::SinkExt;
+    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+    use super::{Event, NowPlaying, Subscription};
+
+    type Show = Box<dyn Fn(Option<&NowPlaying<'_>>) + Send + Sync>;
+    type Commands = (UnboundedSender<Event>, Mutex<Option<UnboundedReceiver<Event>>>);
+
+    static SHOW: OnceLock<Show> = OnceLock::new();
+    static COMMANDS: OnceLock<Commands> = OnceLock::new();
+
+    fn commands() -> &'static Commands {
+        COMMANDS.get_or_init(|| {
+            let (sender, receiver) = unbounded_channel();
+            (sender, Mutex::new(Some(receiver)))
+        })
+    }
+
+    /// Registra chi mostra il brano al sistema. Vale la prima chiamata.
+    pub fn register(show: impl Fn(Option<&NowPlaying<'_>>) + Send + Sync + 'static) {
+        let _ = SHOW.set(Box::new(show));
+    }
+
+    /// Un comando dal sistema: 0 Play, 1 Pausa, 2 Successivo, 3 Precedente, 4 salto a `value` ms,
+    /// 5 Play o Pausa. Gli altri codici non fanno nulla.
+    pub fn command(code: i32, value: i64) {
+        let event = match code {
+            0 => Event::Play,
+            1 => Event::Pause,
+            2 => Event::Next,
+            3 => Event::Previous,
+            4 => Event::SetPosition(Duration::from_millis(u64::try_from(value).unwrap_or(0))),
+            5 => Event::Toggle,
+            _ => return,
+        };
+        let _ = commands().0.send(event);
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Handle;
+
+    impl Handle {
+        pub fn show(&self, now: Option<&NowPlaying<'_>>) {
+            if let Some(show) = SHOW.get() {
+                show(now);
+            }
+        }
+
+        pub fn set_volume(&self, _volume: f32) {}
+    }
+
+    pub fn subscription() -> Subscription<Event> {
+        Subscription::run(events)
+    }
+
+    /// Senza guscio registrato (desktop con `PSYTIFY_PHONE=1`) non succede nulla.
+    fn events() -> impl futures_util::Stream<Item = Event> {
+        iced::stream::channel(32, |mut output| async move {
+            if SHOW.get().is_none() {
+                return;
+            }
+            let Some(mut receiver) = commands().1.lock().unwrap_or_else(PoisonError::into_inner).take()
+            else {
+                return;
+            };
+            if output.send(Event::Ready(Handle)).await.is_err() {
+                return;
+            }
+            while let Some(event) = receiver.recv().await {
+                if output.send(event).await.is_err() {
+                    return;
+                }
+            }
+        })
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 mod other {
     use super::{Event, NowPlaying, Subscription};
 

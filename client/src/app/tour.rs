@@ -135,6 +135,9 @@ const STEPS: &[Step] = &[
         }
     }),
     ("focus-lyrics", 4000, |app| go(app, [Message::SideTab(SideTab::NowPlaying), Message::ToggleFocus])),
+    // Sul telefono: il testo e la coda aperti nel player a schermo intero.
+    ("player-lyrics", 4000, |app| app.update(Message::SideTab(SideTab::Lyrics))),
+    ("player-queue", 2500, |app| app.update(Message::SideTab(SideTab::Queue))),
     ("focus-video", 6000, |app| app.update(Message::ToggleVideoFocus)),
     ("dialog", 1500, |app| {
         go(

@@ -1465,7 +1465,13 @@ impl App {
             Message::PlayDiscovered(identifier) => self.play_discovered(identifier),
             Message::PlaySource(source, id) => self.play_source(source, id),
             Message::CoverLoaded(url, pixels) => {
+                // La copertina del brano in corso arriva dopo il brano: il sistema la riceve ora.
+                let current =
+                    self.queue.current().is_some_and(|t| t.cover_url.as_deref() == Some(url.as_str()));
                 self.covers.loaded(url, pixels);
+                if current {
+                    self.publish_media();
+                }
                 Task::none()
             }
             Message::Imported(identifier, result) => {
@@ -2829,6 +2835,7 @@ impl App {
                 duration: track.duration(),
                 playing: self.playback.is_playing(),
                 position: self.audio_position(),
+                artwork: self.covers.pixels(track.cover_url.as_deref()),
             }
         });
         handle.show(now.as_ref());

@@ -311,6 +311,18 @@ impl Covers {
     }
 
     /// Il colore medio di una copertina già arrivata.
+    /// I pixel RGBA della copertina già arrivata (lato e byte), per chi la mostra fuori dall'app:
+    /// la schermata di blocco del telefono.
+    pub fn pixels(&self, url: Option<&str>) -> Option<(u32, &[u8])> {
+        match self.states.get(url?)? {
+            CoverState::Ready(ready) => match &ready.square {
+                image::Handle::Rgba { width, pixels, .. } => Some((*width, pixels.as_ref())),
+                _ => None,
+            },
+            CoverState::Loading | CoverState::Failed => None,
+        }
+    }
+
     fn tint(&self, url: Option<&str>) -> Option<Color> {
         match self.states.get(url?)? {
             CoverState::Ready(ready) => Some(ready.tint),

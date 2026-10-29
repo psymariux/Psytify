@@ -14,7 +14,10 @@ to return, but Iced's loop never ends and "App not responding" arrives. The publ
 into the binary manifest and rewrites the APK without a signature. Then `scripts/android-apk.sh` aligns
 and signs it again.
 
-Usage: android-manifest.py INPUT.apk OUTPUT.apk
+Con un terzo argomento (`classes.dex`) aggiunge anche il codice Java di Psytify
+(`android/java/`, compilato da `scripts/android-apk.sh`): cargo-apk compila solo Rust.
+
+Usage: android-manifest.py INPUT.apk OUTPUT.apk [classes.dex]
 """
 
 import struct
@@ -61,10 +64,14 @@ def patch_manifest(data: bytearray) -> int:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         raise SystemExit(__doc__)
     source, target = sys.argv[1], sys.argv[2]
     with zipfile.ZipFile(source) as apk, zipfile.ZipFile(target, "w") as out:
+        if len(sys.argv) == 4:
+            if "classes.dex" in apk.namelist():
+                raise SystemExit("l'APK ha già un classes.dex: il codice Java si aggiunge una volta sola")
+            out.write(sys.argv[3], "classes.dex", compress_type=zipfile.ZIP_DEFLATED)
         for info in apk.infolist():
             # The old v1 signature is no longer valid: it is signed again afterwards.
             if info.filename.startswith("META-INF/"):

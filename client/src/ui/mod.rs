@@ -23,6 +23,7 @@ pub mod splash;
 pub mod theme;
 pub mod toast;
 pub mod top_bar;
+pub mod touch_seek;
 
 use iced::widget::{Space, column, container, mouse_area, responsive, row, scrollable, stack};
 use iced::{Color, Element, Length, Padding, Size, mouse};

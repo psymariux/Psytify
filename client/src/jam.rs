@@ -163,7 +163,7 @@ async fn run(
                 // Senza comandi l'app ha chiuso il collegamento: si esce e il socket cade con noi.
                 let Some(snapshot) = outgoing else { return "Jam chiusa".into() };
                 let Ok(text) = serde_json::to_string(&Outgoing::State(&snapshot)) else { continue };
-                if socket.send(Message::Text(text)).await.is_err() {
+                if socket.send(Message::Text(text.into())).await.is_err() {
                     return LOST.into();
                 }
             }

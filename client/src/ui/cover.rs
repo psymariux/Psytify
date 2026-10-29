@@ -94,11 +94,11 @@ impl std::fmt::Debug for CoverPixels {
 /// Decodifica un'immagine, ne ritaglia il quadrato centrale e lo riduce a [`COVER_SIDE`]. `None`
 /// se il formato non è supportato, se l'immagine è vuota o troppo grande.
 pub fn decode_square(bytes: &[u8]) -> Option<CoverPixels> {
-    let mut limits = ::image::io::Limits::default();
+    let mut limits = ::image::Limits::default();
     limits.max_image_width = Some(MAX_SOURCE_SIDE);
     limits.max_image_height = Some(MAX_SOURCE_SIDE);
     limits.max_alloc = Some(MAX_DECODE_BYTES);
-    let mut reader = ::image::io::Reader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    let mut reader = ::image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
     reader.limits(limits);
     let decoded = reader.decode().ok()?;
     let (width, height) = (decoded.width(), decoded.height());
@@ -461,7 +461,7 @@ mod tests {
     fn png(width: u32, height: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         ::image::DynamicImage::new_rgb8(width, height)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), ::image::ImageOutputFormat::Png)
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ::image::ImageFormat::Png)
             .unwrap();
         bytes
     }

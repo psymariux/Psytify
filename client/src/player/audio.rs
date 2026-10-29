@@ -1,10 +1,10 @@
-//! Wrapper di rodio: uno `OutputStream` aperto per tutta la vita dell'app e un `Sink` per brano.
+//! Wrapper di rodio: un'uscita audio aperta per tutta la vita dell'app e un `Player` per brano.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rodio::{OutputStream, OutputStreamHandle, Sink};
+use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
 
 use super::decoder::SymphoniaSource;
 use super::eq::{EqControl, Equalized, Settings};
@@ -12,11 +12,10 @@ use super::stream::StreamBuffer;
 use crate::error::AppError;
 
 pub struct AudioOutput {
-    // Lo stream va tenuto in vita: se viene distrutto l'audio si ferma.
-    _stream: OutputStream,
-    handle: OutputStreamHandle,
-    sink: Option<Arc<Sink>>,
-    /// Seek in corso, fuori dal thread dell'interfaccia: `Sink::try_seek` aspetta che il thread
+    // L'uscita va tenuta in vita: se viene distrutta l'audio si ferma.
+    device: MixerDeviceSink,
+    sink: Option<Arc<Player>>,
+    /// Seek in corso, fuori dal thread dell'interfaccia: `Player::try_seek` aspetta che il thread
     /// audio lo esegua, e in un FLAC ancora in arrivo vuol dire aspettare la rete.
     seeking: Arc<Seeking>,
     /// Equalizzatore condiviso con ogni brano: le modifiche valgono anche mentre suona.
@@ -25,14 +24,8 @@ pub struct AudioOutput {
 
 impl AudioOutput {
     pub fn open() -> Result<Self, AppError> {
-        let (stream, handle) = OutputStream::try_default().map_err(|_| AppError::AudioDevice)?;
-        Ok(Self {
-            _stream: stream,
-            handle,
-            sink: None,
-            seeking: Arc::default(),
-            eq: EqControl::new(Settings::default()),
-        })
+        let device = DeviceSinkBuilder::open_default_sink().map_err(|_| AppError::AudioDevice)?;
+        Ok(Self { device, sink: None, seeking: Arc::default(), eq: EqControl::new(Settings::default()) })
     }
 
     pub fn set_equalizer(&self, settings: Settings) {
@@ -43,7 +36,7 @@ impl AudioOutput {
     /// aspetta i byte non ancora scaricati.
     pub fn play(&mut self, stream: &StreamBuffer, volume: f32) -> Result<(), AppError> {
         self.stop();
-        let sink = Sink::try_new(&self.handle).map_err(|_| AppError::AudioDevice)?;
+        let sink = Player::connect_new(self.device.mixer());
         sink.set_volume(amplitude(volume));
         let eq = Arc::clone(&self.eq);
         let source = SymphoniaSource::open(Box::new(stream.reader())).map_err(|_| AppError::AudioDecode)?;
@@ -77,7 +70,7 @@ impl AudioOutput {
         if let Some(target) = self.seeking.target() {
             return target;
         }
-        self.sink.as_deref().map_or(Duration::ZERO, Sink::get_pos)
+        self.sink.as_deref().map_or(Duration::ZERO, Player::get_pos)
     }
 
     /// Avvia il seek e torna subito. Un fallimento si legge dopo con [`Self::take_seek_failure`].
@@ -105,7 +98,7 @@ impl AudioOutput {
 
     /// Il brano caricato è finito.
     pub fn finished(&self) -> bool {
-        self.sink.as_deref().is_some_and(Sink::empty)
+        self.sink.as_deref().is_some_and(Player::empty)
     }
 }
 

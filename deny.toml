@@ -32,6 +32,9 @@ allow = [
     "Unlicense",
 ]
 
+# Il client stesso.
+exceptions = [{ allow = ["AGPL-3.0-only"], crate = "psytify" }]
+
 [bans]
 multiple-versions = "allow"
 wildcards = "deny"

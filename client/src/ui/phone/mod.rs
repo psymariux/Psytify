@@ -24,8 +24,6 @@ use crate::player::seek::progress as progress_of;
 
 /// Lato della copertina nel mini-player.
 const MINI_COVER: f32 = 44.0;
-/// Margine del mini-player dai bordi dello schermo.
-const MINI_MARGIN: f32 = 8.0;
 /// Spazio fra il fondo della pagina e il mini-player: l'ultima riga non finisce sotto le barre.
 const PAGE_BOTTOM: f32 = 32.0;
 
@@ -211,8 +209,10 @@ fn nav(app: &App) -> Element<'_, Message> {
 /// Sul fondo, una linea sottile con l'avanzamento.
 fn mini_player(app: &App, window: f32) -> Option<Element<'_, Message>> {
     let track = app.queue.current()?;
-    let outer = window - 2.0 * MINI_MARGIN;
-    let text_width = outer - 2.0 * 8.0 - MINI_COVER - 3.0 * 10.0 - 2.0 * theme::TOUCH_TARGET;
+    // Fascia piena larghezza, appoggiata sulla barra delle schede: la copertina sta sul margine
+    // della pagina, la linea d'avanzamento corre sul fondo da bordo a bordo.
+    let inner = window - 2.0 * theme::PHONE_GUTTER;
+    let text_width = inner - MINI_COVER - 3.0 * 10.0 - 2.0 * theme::TOUCH_TARGET;
     let glyph = if app.playback.is_playing() { Icon::Pause } else { Icon::Play };
     let play = button(container(icon(glyph, 24.0, theme::TEXT)).center(Length::Fill))
         .width(theme::TOUCH_TARGET)
@@ -230,30 +230,26 @@ fn mini_player(app: &App, window: f32) -> Option<Element<'_, Message>> {
     ]
     .spacing(10)
     .align_y(Alignment::Center);
-    let open = button(body)
-        .padding(Padding { top: 0.0, bottom: 0.0, left: 8.0, right: 8.0 })
+    let open = button(container(body).padding(Padding::from([0.0, theme::PHONE_GUTTER])))
+        .padding(0)
         .height(Length::Fill)
+        .width(Length::Fill)
         .style(theme::bare)
         .on_press(Message::ToggleFocus);
 
     let fraction = progress_of(app.shown_position(), track.duration()).clamp(0.0, 1.0);
-    let track_width = outer - 2.0 * 8.0;
     let progress = container(
-        container(Space::new(Length::Fixed(track_width * fraction), 2.0)).style(theme::bar(theme::TEXT, 1.0)),
+        container(Space::new(Length::Fixed(window * fraction), 2.0)).style(theme::bar(theme::TEXT, 1.0)),
     )
-    .width(track_width)
+    .width(window)
     .style(theme::bar(motion::fade(theme::TEXT, 0.2), 1.0));
 
     let tint = app.covers.tint_of(art_of(track));
     Some(
-        container(
-            container(column![open, container(progress).padding(Padding { left: 8.0, ..Padding::ZERO })])
-                .padding(Padding { bottom: 4.0, ..Padding::ZERO })
-                .height(theme::PHONE_MINI_HEIGHT)
-                .width(Length::Fill)
-                .style(theme::mini_player(tint)),
-        )
-        .padding(Padding { top: 0.0, bottom: 4.0, left: MINI_MARGIN, right: MINI_MARGIN })
-        .into(),
+        container(column![open, progress])
+            .height(theme::PHONE_MINI_HEIGHT)
+            .width(Length::Fill)
+            .style(theme::mini_player(tint))
+            .into(),
     )
 }

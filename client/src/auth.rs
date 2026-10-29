@@ -891,7 +891,7 @@ mod tests {
         if let Step::Code(code) = step {
             step = submit_code(app.clone(), code, "424242".into()).await.unwrap_or_else(|e| panic!("{e}"));
         }
-        let Step::Done(session, user) = step else { panic!("still waiting for a code") };
+        let Step::Done(session, _) = step else { panic!("still waiting for a code") };
         let token = session.bearer().await.unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(token.split('.').count(), 3);
         assert_eq!(session.bearer().await.ok(), Some(token.clone()), "the token is reused while fresh");
@@ -900,7 +900,8 @@ mod tests {
         if let Ok(api) = std::env::var("PSYTIFY_LIVE_API") {
             let api = crate::api::ApiClient::new(&api).unwrap_or_else(|e| panic!("{e}"));
             let me = api.me(&token).await.unwrap_or_else(|e| panic!("{e}"));
-            assert!(me.user_id.starts_with("user_"), "{user:?}");
+            // Niente dati dell'utente nel messaggio: l'output dei test finisce nei log.
+            assert!(me.user_id.starts_with("user_"), "the backend did not recognise the session");
         }
         session.sign_out().await.unwrap_or_else(|e| panic!("{e}"));
     }

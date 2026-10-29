@@ -49,7 +49,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 # The user's configuration and download directories on Windows and Linux.
-dirs = "6"
+dirs = "7"
 # Catalog identifiers: an invalid id never ends up in a URL path.
 uuid = { version = "1", features = ["v4", "serde"] }
 # Clerk sign-in (OAuth 2.0 + PKCE): SHA-256 for the code challenge, system random bytes for

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Campiona un processo Psytify da /proc: CPU per thread, RSS e memoria GPU di calcolo.
+"""Samples a Psytify process from /proc: CPU per thread, RSS and GPU compute memory.
 
-Uso: scripts/perf-sample.py PID [SECONDI]   (default 30)
+Usage: scripts/perf-sample.py PID [SECONDS]   (default 30)
 
-Non richiede privilegi: legge solo /proc e nvidia-smi. Il risultato va riportato in
-docs/PERFORMANCE.md con lo stato dell'app (fermo, in riproduzione, video, lyrics, formato).
+It needs no privileges: it only reads /proc and nvidia-smi. The result goes into
+docs/PERFORMANCE.md with the app state (idle, playing, video, lyrics, format).
 """
 
 import os
@@ -16,14 +16,14 @@ HZ = os.sysconf("SC_CLK_TCK")
 
 
 def thread_ticks(pid):
-    """CPU (utente + sistema, in tick) di ogni thread, per tid."""
+    """CPU (user + system, in ticks) of every thread, by tid."""
     ticks = {}
     for tid in os.listdir(f"/proc/{pid}/task"):
         try:
             with open(f"/proc/{pid}/task/{tid}/stat") as stat:
                 raw = stat.read()
         except OSError:
-            continue  # il thread è terminato mentre lo leggevamo
+            continue  # the thread ended while we were reading it
         name = raw[raw.index("(") + 1 : raw.rindex(")")]
         fields = raw[raw.rindex(")") + 2 :].split()
         ticks[tid] = (name, int(fields[11]) + int(fields[12]))
@@ -39,7 +39,7 @@ def rss_mb(pid):
 
 
 def compute_mib(pid):
-    """Memoria di calcolo sulla GPU NVIDIA usata dal processo (0 se non c'è o non c'è NVIDIA)."""
+    """Compute memory on the NVIDIA GPU used by the process (0 if there is none or no NVIDIA)."""
     try:
         out = subprocess.run(
             ["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
@@ -72,9 +72,9 @@ def main():
     per_thread.sort(reverse=True)
     total = sum(share for share, _ in per_thread)
 
-    print(f"CPU totale: {total:.1f}% di un core (campione di {elapsed:.0f} s)")
+    print(f"Total CPU: {total:.1f}% of a core (sample of {elapsed:.0f} s)")
     top = ", ".join(f"{name}={share:.1f}%" for share, name in per_thread[:8] if share >= 0.05)
-    print(f"Thread più attivi: {top or 'nessuno'}")
+    print(f"Busiest threads: {top or 'none'}")
     print(f"RSS: {rss_mb(pid):.0f} MB   GPU (calcolo): {compute_mib(pid)} MiB   thread: {len(after)}")
 
 

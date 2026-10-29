@@ -1,26 +1,26 @@
 # Maintainer: Psytify
-# Pacchetto Arch Linux del client desktop, costruito dal sorgente locale.
+# Arch Linux package of the desktop client, built from the local source.
 #
-# Non lanciare `makepkg` qui a mano: di default usa `client/src` (il codice!) come cartella di lavoro.
-# Usa `scripts/arch-package.sh`, che sposta BUILDDIR e crea anche il database del repository.
+# Do not run `makepkg` here by hand: by default it uses `client/src` (the code!) as its working folder.
+# Use `scripts/arch-package.sh`, which moves BUILDDIR and also creates the repository database.
 pkgname=psytify
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="Player musicale desktop per il catalogo Psytify"
+pkgdesc="Desktop music player for Psytify catalogs"
 arch=('x86_64')
 url="https://github.com/psymariux/Psytify"
 license=('AGPL-3.0-only' 'OFL-1.1')
-# Audio (ALSA), finestra (Wayland o X11), tastiera (xkbcommon), rendering (Vulkan, con ripiego software),
-# videoclip (GStreamer: base per la pipeline, good per qtdemux e souphttpsrc, libav per H.264 e AAC).
+# Audio (ALSA), window (Wayland or X11), keyboard (xkbcommon), rendering (Vulkan, with software fallback),
+# video clips (GStreamer: base for the pipeline, good for qtdemux and souphttpsrc, libav for H.264 and AAC).
 depends=('alsa-lib' 'wayland' 'libxkbcommon' 'libx11' 'libxcursor' 'libxi' 'libxrandr' 'vulkan-icd-loader' 'gcc-libs'
          'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-libav')
-optdepends=('vulkan-radeon: rendering su GPU AMD'
-            'vulkan-intel: rendering su GPU Intel'
-            'nvidia-utils: rendering su GPU NVIDIA')
+optdepends=('vulkan-radeon: rendering on AMD GPUs'
+            'vulkan-intel: rendering on Intel GPUs'
+            'nvidia-utils: rendering on NVIDIA GPUs')
 makedepends=('cargo')
-# Il binario ha già i simboli tolti da Cargo; niente pacchetto -debug. `!lto`: il `-flto` di makepkg
-# trasformerebbe il codice C di `ring` in bitcode che il linker di Rust non collega (la LTO vera è
-# quella di Cargo, nel profilo release).
+# The binary is already stripped by Cargo; no -debug package. `!lto`: makepkg's `-flto` would
+# turn the C code of `ring` into bitcode that Rust's linker does not link (the real LTO is
+# Cargo's, in the release profile).
 options=('!debug' '!lto')
 source=()
 

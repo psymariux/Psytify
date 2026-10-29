@@ -58,7 +58,8 @@ Examples: `fix(player): resume at the right position after a pause`, `feat(ui): 
 - **Never put URLs, tokens or credentials** in code, tests or logs. Signed links are secrets.
 - **New dependencies** need a comment in `Cargo.toml` explaining why, and must pass `cargo deny`.
   A dependency on a hot path needs a before/after measurement.
-- Comments are short and explain *why*; keep identifiers in English.
+- Comments are short and explain *why*; identifiers are in English. Existing code comments and the app's
+  interface text are in Italian for now; new documentation, commit messages and pull requests are in English.
 - Add or update tests for behavior you change. Pure logic (queue, feed, parsing) is easy to test; do.
 
 ## Performance rules

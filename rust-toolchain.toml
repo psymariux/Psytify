@@ -1,5 +1,5 @@
-# Toolchain con cui il progetto è verificato. La versione minima supportata è `rust-version`
-# in Cargo.toml (1.94.1, imposta dall'SDK AWS).
+# The toolchain the project is verified with. The minimum supported version is `rust-version`
+# in Cargo.toml (1.94.1, set by the AWS SDK).
 [toolchain]
 channel = "1.99.0"
 components = ["rustfmt", "clippy"]

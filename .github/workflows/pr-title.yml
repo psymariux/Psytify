@@ -1,7 +1,7 @@
 name: PR title
 
-# I titoli seguono Conventional Commits (feat, fix, docs, ci, deps...): le note di release si
-# generano da lì. Con "squash merge" il titolo della PR diventa il messaggio del commit.
+# Titles follow Conventional Commits (feat, fix, docs, ci, deps...): release notes are
+# generated from them. With "squash merge" the PR title becomes the commit message.
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]

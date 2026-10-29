@@ -1,6 +1,6 @@
 name: Release
 
-# Si lancia con un tag `vX.Y.Z`: compila Linux, Windows, pacchetto Arch e APK, poi pubblica la release.
+# Triggered by a `vX.Y.Z` tag: builds Linux, Windows, the Arch package and the APK, then publishes the release.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]

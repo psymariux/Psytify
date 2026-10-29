@@ -1,212 +1,209 @@
-# Stile visivo di Psytify
+# Psytify visual style
 
-I token sono in `client/src/ui/theme.rs`: ogni altro file li usa e non definisce colori o misure
-propri. Questo documento sostituisce la direzione «True-black flat» del 23 ottobre 2026.
+The tokens live in `client/src/ui/theme.rs`: every other file uses them and defines no colors or
+measures of its own. This document replaces the "true-black flat" direction of 23 October 2026.
 
-## Perché è cambiato
+The interface text is currently in Italian; the labels quoted below are given in English.
 
-Il 24 ottobre 2026 il proprietario del progetto ha chiesto un'interfaccia più vicina a Spotify e
-Apple Music: pannelli, sfumature dalla copertina, più movimento, un menu del clic destro, icone
-Iconly. Quindi **le sfumature e le ombre sono ora ammesse, ma solo in tre posti**:
+## Why it changed
 
-1. la **tinta della copertina** in cima alla pagina e al pannello «In riproduzione»
-   (`tinted_panel`, `aurora`): un gradiente verticale che si scioglie nel grigio del pannello;
-2. le **ombre degli elementi che galleggiano** (menu, finestre di dialogo, avvisi, copertina
-   grande, tasto Play sulla copertina);
-3. la **copertina disegnata** di «Brani che ti piacciono» (sfumatura rosa).
+On 24 October 2026 the project owner asked for an interface closer to Spotify and Apple Music: panels,
+gradients taken from the cover, more motion, a right-click menu, Iconly icons. So **gradients and
+shadows are now allowed, but only in three places**:
 
-Restano vietati: vetro e sfocature, bagliori, bordi luminosi, gradienti su pulsanti, righe o schede,
-ombre sugli elementi a riposo.
+1. the **cover tint** at the top of a page and of the "Now playing" panel (`tinted_panel`, `aurora`): a
+   vertical gradient that melts into the gray of the panel;
+2. the **shadows of floating elements** (menus, dialogs, notices, the large cover, the Play button on a
+   cover);
+3. the **drawn cover** of "Liked songs" (pink gradient).
 
-I siti indicati dal proprietario (ui.unlumen.com, shadergradient.co, magicui.design,
-styles.refero.design) sono stati usati come ispirazione e riportati in Rust con i gradienti
-lineari di Iced: nessuna web view, nessun codice JavaScript.
+Still forbidden: glass and blur, glows, luminous borders, gradients on buttons, rows or cards, and
+shadows on resting elements.
 
-## Direzione
+The sites the owner pointed to (ui.unlumen.com, shadergradient.co, magicui.design,
+styles.refero.design) were used as inspiration and rebuilt in Rust with Iced's linear gradients: no web
+view, no JavaScript.
 
-**Tre pannelli arrotondati su nero.** Barra laterale (navigazione + libreria personale), pagina al
-centro, pannello «In riproduzione» a destra, ognuno `PANEL` (`#121212`) con raggio 14, separati da
-8px di nero. Sopra la barra superiore (marchio, Home e ricerca, account, tre controlli della
-finestra), sotto la barra del player: entrambe direttamente sul nero.
+## Direction
 
-**Colore dalla copertina.** La pagina e il pannello destro prendono la tinta media della copertina
-(`Covers::tint_of`, calcolata alla decodifica); senza copertina, il colore piatto dell'album. Le
-pagine senza copertina usano una tinta di casa (`BRAND_TINT`, `NEUTRAL_TINT`, `LIKED_TINT`).
+**Three rounded panels on black.** Sidebar (navigation + personal library), page in the middle,
+"Now playing" panel on the right, each `PANEL` (`#121212`) with radius 14, separated by 8px of black.
+Above sits the top bar (brand, Home and search, account, three window controls), below the player bar:
+both directly on black.
 
-**Il lime è il marchio.** `ACCENT` (`#c6f24e`) colora il Play grande, il brano in corso, le barre
-dell'equalizzatore, il cuore, casuale e ripeti attivi, il segno della voce di navigazione attiva e
-gli interruttori. Il pulsante primario resta bianco con testo nero (inversione).
+**Color from the cover.** The page and the right panel take the cover's average tint (`Covers::tint_of`,
+computed at decode time); without a cover, the album's flat color. Pages without a cover use a house
+tint (`BRAND_TINT`, `NEUTRAL_TINT`, `LIKED_TINT`).
 
-## Token
+**Lime is the brand.** `ACCENT` (`#c6f24e`) colors the large Play button, the current track, the
+equalizer bars, the heart, active shuffle and repeat, the mark of the active navigation item and the
+switches. The primary button stays white with black text (inverted).
 
-| Ruolo | Valore | Uso |
+## Tokens
+
+| Role | Value | Use |
 |---|---|---|
-| `GROUND` | `#000000` | Fondo della finestra, barre superiore e inferiore |
-| `PANEL` | `#121212` | I tre pannelli |
-| `SURFACE` | `#1b1b1b` | Card, ricerca, riga selezionata |
-| `HOVER` | `#252525` | Passaggio del mouse, linee sottili |
-| `RAISED` | `#2e2e2e` | Menu, finestre, binari degli slider |
-| `CONTROL` | `#4d4d4d` | Bordo dei controlli |
-| `TEXT` / `MUTED` / `FAINT` | `#fff` / `#b8b8b8` / `#9c9c9c` | Testo primario, secondario, meta |
-| `ACCENT` | `#c6f24e` | Marchio e stati attivi |
-| `NEGATIVE` | `#e5566f` | Errori, voci distruttive |
+| `GROUND` | `#000000` | Window background, top and bottom bars |
+| `PANEL` | `#121212` | The three panels |
+| `SURFACE` | `#1b1b1b` | Cards, search, selected row |
+| `HOVER` | `#252525` | Mouse hover, thin lines |
+| `RAISED` | `#2e2e2e` | Menus, dialogs, slider tracks |
+| `CONTROL` | `#4d4d4d` | Control border |
+| `TEXT` / `MUTED` / `FAINT` | `#fff` / `#b8b8b8` / `#9c9c9c` | Primary, secondary, meta text |
+| `ACCENT` | `#c6f24e` | Brand and active states |
+| `NEGATIVE` | `#e5566f` | Errors, destructive items |
 
-Contrasto: ogni livello di testo supera 4.5:1 (WCAG AA) su `GROUND`, `PANEL`, `SURFACE`, `HOVER` e
-`RAISED`. Lo verifica il test `every_text_tier_passes_wcag_aa_on_every_surface` in `theme.rs`.
+Contrast: every text tier exceeds 4.5:1 (WCAG AA) on `GROUND`, `PANEL`, `SURFACE`, `HOVER` and `RAISED`.
+The test `every_text_tier_passes_wcag_aa_on_every_surface` in `theme.rs` checks it.
 
-### Misure
+### Measures
 
-| Token | Valore |
+| Token | Value |
 |---|---|
-| Barra laterale | 252px |
-| Barra superiore / player | 56px / 88px |
-| Pannello destro | 340px |
-| Margine esterno e spazio tra pannelli | 8px |
-| Raggi | pannello e card 14, tessera 10, riga 8, copertina 6, pillola 999 |
-| Righe di tabella / di ricerca | 56px / 64px |
-| Copertina nella testa di una pagina | 188px |
-| Menu contestuale | 276px, voci da 38px |
-| Avviso (toast) | 420px |
+| Sidebar | 252px |
+| Top bar / player bar | 56px / 88px |
+| Right panel | 340px |
+| Outer margin and gap between panels | 8px |
+| Radii | panel and card 14, tile 10, row 8, cover 6, pill 999 |
+| Table rows / search rows | 56px / 64px |
+| Cover in a page header | 188px |
+| Context menu | 276px, items 38px |
+| Notice (toast) | 420px |
 
-### Tipografia
+### Typography
 
-Inter 4.1 (OFL 1.1, `client/assets/fonts`) nei pesi 400, 500 e 600, con cifre tabellari.
+Inter 4.1 (OFL 1.1, `client/assets/fonts`) in weights 400, 500 and 600, with tabular figures.
 
-| Ruolo | Corpo | Peso |
+| Role | Size | Weight |
 |---|---|---|
-| Titolo di una pagina di brani (hero) | 44 | 600 |
-| Titolo di pagina (h1) | 28 | 600 |
-| Titolo di sezione | 18 | 600 |
-| Corpo, celle, navigazione | 14 | 400/500 |
-| Meta, etichette | 12 | 400 |
+| Title of a track page (hero) | 44 | 600 |
+| Page title (h1) | 28 | 600 |
+| Section title | 18 | 600 |
+| Body, cells, navigation | 14 | 400/500 |
+| Meta, labels | 12 | 400 |
 
-Sentence case ovunque.
+Sentence case everywhere.
 
-## Componenti
+## Components
 
-- **Righe di brani**: nessuna zebratura. A riposo il numero; al passaggio del mouse Play, cuore,
-  Scarica (se consentito) e «altre azioni»; sul brano in corso le barre dell'equalizzatore. Il clic
-  destro apre il menu. Un clic sul brano in corso mette in pausa o riprende.
-- **Tessere**: al passaggio compare il Play verde sulla copertina (brani); gli album si aprono.
-- **Menu contestuale** (`ui/context_menu.rs`): Riproduci, Riproduci subito dopo, Aggiungi alla coda,
-  Mi piace, Aggiungi a una playlist (elenco accanto, con spunta), Togli da questa playlist / dalla
-  coda, Vai all'artista e all'album, Scarica. Si apre dove sta il mouse e resta nella finestra.
-- **Dialoghi** (`ui/dialog.rs`): nuova playlist, rinomina, conferma di eliminazione. Invio conferma,
-  Esc o un clic sul velo annullano.
-- **Pannello destro** (`ui/side_panel.rs`): un selettore a pillola (binario `SURFACE`, cursore
-  `RAISED` con una tacca lime) che scivola con la molla fra «In riproduzione», «Coda» e «Testo»; il
-  contenuto nuovo entra salendo. «In riproduzione»: copertina che respira con il Play (o mini
-  videoclip), titolo, cuore, etichette (formato, «Lossless» con contorno lime per FLAC e WAV, durata,
-  scaricabile), licenza, artista, prossimo in coda. «Testo»: lo stesso motore della vista immersiva
-  (`ui/lyrics.rs`), con la riga in corso in alto.
-- **Impostazioni**: schede in alto (Riproduzione, Suono, Account, Informazioni) e gruppi di righe
-  con nome e spiegazione a sinistra e controllo a destra; interruttori per ciò che si accende.
-- **Home** (`ui/pages/home.rs`, `ui/shelf.rs`): in cima il carosello `hero` con le cinque uscite più
-  recenti che hanno una copertina (sfondo `hero_card` con la tinta della copertina, cambio ogni 8 s
-  con dissolvenza, puntini per scegliere). Sotto, in ordine: scorciatoie, «Continua ad ascoltare»,
-  «Nuove uscite», «Novità dai tuoi artisti», «I tuoi artisti», «Mix per te», «Più ascoltati da te»,
-  «Ascoltati di recente», «Album», la scheda «Il tuo ascolto» (ore, brani, artista del momento) e
-  «Dalla A alla Z». Le sezioni senza dati non compaiono. Sono righe orizzontali di tessere con
-  copertina da 184px (`shelf::BIG_COVER`; 148px per gli artisti) e un link «Vedi tutte» a destra
-  del titolo.
-- **Copertine tonde**: gli artisti hanno la copertina circolare, gli album quadrata con raggio 6.
-  Iced 0.13 non arrotonda le immagini: l'angolo si ottiene mascherando l'alfa dei pixel alla
-  decodifica (`Covers::handle(url, round)`, `cover()` / `cover_round()` in `ui/cover.rs`).
-- **Catalogo** (`ui/pages/library.rs`): schede Album, Artisti, Tutti i brani, Scaricabili, Singoli e
-  ordine (recenti, A–Z); griglie grandi di tessere, non elenchi. «Sfoglia tutto» (`browse_grid`) usa
-  le tessere a colore pieno `browse_card` con i nove colori `BROWSE`.
-- **Novità** (`ui/pages/news.rs`): le uscite degli artisti seguiti, dalla più recente, con la
-  pastiglia `badge` (lime, testo nero) sulla voce della barra laterale finché ce ne sono di non viste.
-- **Pagina artista**: banner con `aurora_full` (tinta della copertina, nessun disegno aggiunto),
-  pulsante Play tondo `fab_button`, «Popolari» (cinque brani: prima i più ascoltati da te, poi i più recenti; solo con più di cinque brani) e
-  «Discografia» a griglia.
-- **Vista immersiva** (`ui/focus.rs`, tasto F): a tutto schermo, copertina (fino a 640px) e testo
-  (fino a 760px) formano un blocco solo, centrato nella finestra; senza testo la copertina sta al
-  centro, fino a 760px. Esc, F o la X in alto la chiudono.
-- **Testo sincronizzato** (`ui/lyrics.rs`): non è una lista che salta, ogni verso sta dove lo porta
-  la riga in corso, che scivola da un verso all'altro. La riga in corso cresce al corpo pieno e si
-  accende parola per parola (stima sui caratteri, perché LRC dà solo l'inizio della riga); le altre
-  stanno all'84% e sfumano verso i bordi. Le pause strumentali sono tre puntini che si accendono.
-  Gli a capo si stimano con le larghezze vere di Inter SemiBold.
-- **Splash d'ingresso** (`ui/splash.rs`): sul nero le tre barre del marchio saltano su una dopo
-  l'altra, ondeggiano, il nome si accende lettera per lettera, poi il velo sfuma mentre la pagina
-  entra. Meno di due secondi; un clic lo chiude.
-- **Libreria nella barra laterale**: chip Playlist, Artisti, Album; un clic sul chip attivo li
-  mostra tutti. Playlist, album salvati e artisti seguiti stanno qui, con il clic destro per
-  smettere di seguire o rimuovere.
-- **Timer di spegnimento e riproduzione automatica**: dal menu del player (clic destro sulla barra in
-  basso). Il timer mette in pausa dopo 5, 15, 30, 45, 60 minuti o alla fine del brano; l'autoplay
-  aggiunge altri brani dello stesso artista (o, se non ce ne sono, dalle uscite recenti) quando la
-  coda finisce, tranne durante una jam. «Avvia radio», dal menu di un brano, fa lo stesso a richiesta.
-- **Download**: il pulsante compare solo se il brano ha `downloadable: true`. Altrimenti è
-  nascosto, non disabilitato: lo spazio resta.
-- **Copertine**: l'immagine pubblica dell'item se c'è; altrimenti un campo di colore piatto scelto
-  dall'id e l'iniziale del titolo. Nessuna immagine finta.
-- **Stati**: scheletri grigi alla dimensione reale del contenuto; stato vuoto con frase e azione;
-  errore dentro il blocco che è fallito, con «Riprova».
-- **Icone**: Iconly (Light e Bold) per l'interfaccia, i controlli del player disegnati nello stesso
-  tratto (`client/assets/icons`, crediti in `CREDITS.md`).
-- **Telefono** (`ui/phone.rs`, Android e `PSYTIFY_PHONE=1`): una colonna, dentro gli spazi che
-  Android dichiara per le sue barre.
-  - **In alto**: «Indietro», il marchio e l'ingranaggio delle Impostazioni.
-  - **Al centro**: la pagina a tutta larghezza con la tinta della copertina, senza barre di
-    scorrimento: si scorre col dito. In Cerca il campo resta fermo sopra i risultati e si apre la
-    tastiera.
-  - **In basso**: il mini-player (copertina, titolo, cuore, Play tondo, una linea d'avanzamento; un
-    tocco apre il player) e la barra con quattro voci, icona piena e tacca lime sulla voce attiva.
-  - **Player a schermo intero**: copertina che respira, titolo, avanzamento, controlli, poi «Testo»
-    o «Coda».
-  - **Misure**: bersagli di tocco da 44 px (`TOUCH_TARGET`). Sotto 520 px la card «Continua ad
-    ascoltare» usa il Play tondo senza scritta; sotto 420 px il riquadro in evidenza mette i
-    pulsanti sotto la copertina.
-  - **Impostazioni**: ogni controllo va sotto la sua spiegazione.
-  - **Scorciatoie della Home**: titoli su due righe.
-  - **Gesti**: la pressione lunga apre il menu contestuale. Il tasto Indietro di Android chiude ciò
-    che sta sopra, altrimenti torna alla pagina precedente.
-- **Finestra senza cornice**: la barra superiore trascina (doppio clic: ingrandisce); riduci a icona,
-  schermo intero (anche F11) e chiudi stanno a destra. Il ridimensionamento ha maniglie sui bordi
-  destro e basso e sull'angolo: su Wayland non si può spostare l'origine della finestra.
+- **Track rows**: no zebra striping. At rest the number; on hover Play, heart, Download (if allowed) and
+  "more actions"; on the current track the equalizer bars. Right-click opens the menu. A click on the
+  current track pauses or resumes.
+- **Tiles**: on hover the green Play appears on the cover (tracks); albums open.
+- **Context menu** (`ui/context_menu.rs`): Play, Play next, Add to queue, Like, Add to a playlist (list at
+  the side, with a check), Remove from this playlist / from the queue, Go to artist and album, Download.
+  It opens where the mouse is and stays inside the window.
+- **Dialogs** (`ui/dialog.rs`): new playlist, rename, delete confirmation. Enter confirms, Esc or a
+  click on the veil cancels.
+- **Right panel** (`ui/side_panel.rs`): a pill selector (`SURFACE` track, `RAISED` thumb with a lime
+  notch) that slides with a spring between "Now playing", "Queue" and "Lyrics"; the new content enters
+  rising. "Now playing": a cover that breathes with Play (or a mini video clip), title, heart, labels
+  (format, "Lossless" with a lime outline for FLAC and WAV, duration, downloadable), license, artist,
+  next in the queue. "Lyrics": the same engine as the immersive view (`ui/lyrics.rs`), with the current
+  line at the top.
+- **Settings**: tabs at the top (Playback, Sound, Account, About) and groups of rows with a name and
+  explanation on the left and the control on the right; switches for what turns on.
+- **Home** (`ui/pages/home.rs`, `ui/shelf.rs`): at the top the `hero` carousel with the five most recent
+  releases that have a cover (`hero_card` background with the cover tint, changes every 8 s with a
+  fade, dots to choose). Below, in order: shortcuts, "Continue listening", "New releases", "News from
+  your artists", "Your artists", "Mixes for you", "Most played by you", "Recently played", "Albums",
+  the "Your listening" card (hours, tracks, artist of the moment) and "A to Z". Sections without data
+  do not appear. They are horizontal rows of tiles with a 184px cover (`shelf::BIG_COVER`; 148px for
+  artists) and a "See all" link to the right of the title.
+- **Round covers**: artists have a circular cover, albums a square one with radius 6. Iced 0.13 does not
+  round images: the corner comes from masking the pixel alpha at decode time
+  (`Covers::handle(url, round)`, `cover()` / `cover_round()` in `ui/cover.rs`).
+- **Catalog** (`ui/pages/library.rs`): tabs Albums, Artists, All tracks, Downloadable, Singles and
+  sorting (recent, A–Z); large grids of tiles, not lists. "Browse all" (`browse_grid`) uses the
+  full-color `browse_card` tiles with the nine `BROWSE` colors.
+- **News** (`ui/pages/news.rs`): releases from followed artists, newest first, with the `badge` pill
+  (lime, black text) on the sidebar item as long as there are unseen ones.
+- **Artist page**: banner with `aurora_full` (cover tint, no added drawing), round Play button
+  `fab_button`, "Popular" (five tracks: first the ones you played most, then the most recent; only with
+  more than five tracks) and "Discography" as a grid.
+- **Immersive view** (`ui/focus.rs`, key F): full screen, cover (up to 640px) and lyrics (up to 760px)
+  form a single block, centered in the window; without lyrics the cover sits in the center, up to
+  760px. Esc, F or the X at the top close it.
+- **Synced lyrics** (`ui/lyrics.rs`): not a list that jumps; each line sits where the current line takes
+  it, sliding from one line to the next. The current line grows to full size and lights up word by word
+  (estimated on characters, because LRC only gives the start of the line); the others sit at 84% and
+  fade towards the edges. Instrumental breaks are three dots that light up. Line breaks are estimated
+  with the real widths of Inter SemiBold.
+- **Entry splash** (`ui/splash.rs`): on black the three bars of the brand jump up one after another and
+  sway, the name lights up letter by letter, then the veil fades while the page enters. Under two
+  seconds; a click closes it.
+- **Library in the sidebar**: chips Playlists, Artists, Albums; a click on the active chip shows them
+  all. Playlists, saved albums and followed artists live here, with right-click to unfollow or remove.
+- **Sleep timer and autoplay**: from the player menu (right-click on the bottom bar). The timer pauses
+  after 5, 15, 30, 45, 60 minutes or at the end of the track; autoplay adds more tracks by the same
+  artist (or, if there are none, from recent releases) when the queue ends, except during a jam.
+  "Start radio", from a track's menu, does the same on request.
+- **Downloads**: the button appears only if the track has `downloadable: true`. Otherwise it is hidden,
+  not disabled: the space stays.
+- **Covers**: the item's public image if there is one; otherwise a flat color field chosen from the id and
+  the initial of the title. No fake images.
+- **States**: gray skeletons at the real size of the content; an empty state with a sentence and an
+  action; an error inside the block that failed, with "Retry".
+- **Icons**: Iconly (Light and Bold) for the interface, with the player controls drawn in the same
+  stroke (`client/assets/icons`, credits in `CREDITS.md`).
+- **Phone** (`ui/phone.rs`, Android and `PSYTIFY_PHONE=1`): one column, inside the insets Android declares
+  for its bars.
+  - **Top**: "Back", the brand and the Settings gear.
+  - **Middle**: the page at full width with the cover tint, without scroll bars: you scroll with the
+    finger. In Search the field stays above the results and the keyboard opens.
+  - **Bottom**: the mini player (cover, title, heart, round Play, a progress line; a tap opens the
+    player) and the bar with four items, a filled icon and a lime notch on the active one.
+  - **Full-screen player**: breathing cover, title, progress, controls, then "Lyrics" or "Queue".
+  - **Measures**: 44 px touch targets (`TOUCH_TARGET`). Below 520 px the "Continue listening" card uses
+    the round Play without a label; below 420 px the featured panel puts the buttons under the cover.
+  - **Settings**: each control goes under its explanation.
+  - **Home shortcuts**: titles on two lines.
+  - **Gestures**: a long press opens the context menu. Android's Back button closes whatever is on
+    top, otherwise it goes back to the previous page.
+- **Frameless window**: the top bar drags (double click: maximize); minimize, full screen (also F11) and
+  close are on the right. Resizing has handles on the right and bottom edges and on the corner: on
+  Wayland the window origin cannot be moved.
 
-## Movimento
+## Motion
 
-Iced 0.13 non ha animazioni: `ui/motion.rs` le costruisce con un `Tween` o con funzioni del tempo
-(`appear`, `stagger`, `pop`, `wave`, `drift`, `spring_in`), e l'app chiede i frame della finestra
-solo mentre qualcosa si muove.
+Iced 0.13 has no animations: `ui/motion.rs` builds them with a `Tween` or with functions of time
+(`appear`, `stagger`, `pop`, `wave`, `drift`, `spring_in`), and the app asks for window frames only
+while something is moving.
 
-Due andamenti: **ease-out** per pagine, liste, menu e avvisi; **molla** (`motion::spring`, supera
-l'arrivo del 6% e si posa) solo per ciò che si tocca o rappresenta il brano: copertina, cursore delle
-schede, marchio dello splash.
+Two curves: **ease-out** for pages, lists, menus and notices; **spring** (`motion::spring`, overshoots
+the target by 6% and settles) only for what you touch or what represents the track: the cover, the tab
+thumb, the splash brand.
 
-| Movimento | Durata | Token / funzione |
+| Motion | Duration | Token / function |
 |---|---|---|
-| Pagina nuova: sale di 16px | 220 ms | `MOTION_BASE`, `PAGE_RISE` |
-| Righe di una lista: il testo compare una dopo l'altra (prime 14) | 28 ms l'una | `STAGGER`, `motion::stagger` |
-| Pannello destro: si apre da destra | 260 ms | `MOTION_PANEL` |
-| Menu e tasto Play sulla copertina | 120 ms | `MOTION_FAST` |
-| Finestra di dialogo: sale e si schiarisce | 260 ms | `MOTION_PANEL` |
-| Cuore appena premuto: rimbalzo | 260 ms | `motion::pop` |
-| Barre dell'equalizzatore sul brano in corso | continuo | `motion::wave` |
-| Sfumatura del pannello «In riproduzione» | respira in 14 s | `motion::drift` |
-| Copertina appena arrivata: dissolvenza | 220 ms | `MOTION_BASE` |
-| Scheletri | ciclo di 1,4 s | `PULSE_PERIOD` |
-| Avviso: entra salendo e schiarendosi | 220 ms | `MOTION_BASE` |
-| Carosello della Home: cambio di uscita | ogni 8 s, dissolvenza 420 ms | `HERO_PERIOD`, `HERO_SWAP` |
-| Copertina grande: in pausa scende al 90%, al Play torna con la molla | 620 ms | `MOTION_SPRING`, `COVER_REST` |
-| Cursore delle schede del pannello (molla), contenuto che sale di 10px | 620 / 260 ms | `MOTION_SPRING`, `MOTION_PANEL` |
-| Testo: scorre al verso nuovo, che cresce e si schiarisce | 480 ms a 24 fps | `MOTION_LYRICS`, `AMBIENT_FRAME` |
-| Testo: parole accese una a una | col Tick (4 al secondo) | `lyrics::sung_fraction` |
-| Tasto Play: l'icona rimbalza al cambio Play/Pausa | 260 ms | `motion::pop` |
-| Splash: barre a molla scaglionate di 90 ms, lettere di 45 ms, velo che sfuma | 1,75 s in tutto | `SPLASH_TOTAL`, `SPLASH_EXIT` |
+| New page: rises 16px | 220 ms | `MOTION_BASE`, `PAGE_RISE` |
+| List rows: text appears one after another (first 14) | 28 ms each | `STAGGER`, `motion::stagger` |
+| Right panel: opens from the right | 260 ms | `MOTION_PANEL` |
+| Menu and Play button on a cover | 120 ms | `MOTION_FAST` |
+| Dialog: rises and brightens | 260 ms | `MOTION_PANEL` |
+| Heart just pressed: bounce | 260 ms | `motion::pop` |
+| Equalizer bars on the current track | continuous | `motion::wave` |
+| Gradient of the "Now playing" panel | breathes over 14 s | `motion::drift` |
+| Cover that just arrived: fade | 220 ms | `MOTION_BASE` |
+| Skeletons | 1.4 s cycle | `PULSE_PERIOD` |
+| Notice: enters rising and brightening | 220 ms | `MOTION_BASE` |
+| Home carousel: change of release | every 8 s, 420 ms fade | `HERO_PERIOD`, `HERO_SWAP` |
+| Large cover: on pause it shrinks to 90%, on Play it springs back | 620 ms | `MOTION_SPRING`, `COVER_REST` |
+| Panel tab thumb (spring), content rising 10px | 620 / 260 ms | `MOTION_SPRING`, `MOTION_PANEL` |
+| Lyrics: scroll to the new line, which grows and brightens | 480 ms at 24 fps | `MOTION_LYRICS`, `AMBIENT_FRAME` |
+| Lyrics: words lit one by one | with the Tick (4 per second) | `lyrics::sung_fraction` |
+| Play button: the icon bounces when switching Play/Pause | 260 ms | `motion::pop` |
+| Splash: spring bars staggered by 90 ms, letters by 45 ms, fading veil | 1.75 s in total | `SPLASH_TOTAL`, `SPLASH_EXIT` |
 
-## Limiti di Iced 0.13 e soluzioni
+## Iced 0.13 limits and workarounds
 
-| Limite | Soluzione |
+| Limit | Workaround |
 |---|---|
-| `Wrapping::None` è ignorato | `responsive` fornisce la larghezza reale; i testi si tagliano con «…» su una stima (`components::line`) |
-| Nessun nome accessibile sui widget | I pulsanti a icona hanno un tooltip con il loro nome |
-| Nessun `drag_resize`, nessun doppio clic su `mouse_area` | Ridimensionamento a maniglie con eventi del mouse; doppio clic sulla barra contato a mano (`app/chrome.rs`) |
-| La posizione del mouse non arriva a chi sta in uno `scrollable` | Un listener globale la ricorda (`ui/cursor.rs`) e il menu si apre lì |
-| Opacità solo sui colori, non sui widget | Si sfumano i colori del testo e degli sfondi (`motion::fade`) |
-| Le immagini non hanno raggio di curvatura | Maschera sull'alfa dei pixel alla decodifica (copertine tonde e arrotondate) |
-| `container.clip(true)` taglia solo in rettangolo | Le forme tonde si ottengono con la maschera, non col clip |
-| La finestra non può essere più stretta di 1100px | Sotto 820px di contenuto, la ricerca impila le colonne |
+| `Wrapping::None` is ignored | `responsive` provides the real width; texts are cut with "…" on an estimate (`components::line`) |
+| No accessible name on widgets | Icon buttons have a tooltip with their name |
+| No `drag_resize`, no double click on `mouse_area` | Resizing with handles driven by mouse events; the double click on the bar is counted by hand (`app/chrome.rs`) |
+| The mouse position does not reach widgets inside a `scrollable` | A global listener remembers it (`ui/cursor.rs`) and the menu opens there |
+| Opacity only on colors, not on widgets | The colors of text and backgrounds are faded (`motion::fade`) |
+| Images have no corner radius | Mask on the pixel alpha at decode time (round and rounded covers) |
+| `container.clip(true)` only clips to a rectangle | Round shapes come from the mask, not from the clip |
+| The window cannot be narrower than 1100px | Below 820px of content, search stacks its columns |

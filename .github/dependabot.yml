@@ -1,7 +1,7 @@
 version: 2
 
 updates:
-  # Dipendenze del client desktop (workspace della radice).
+  # Dependencies of the desktop client (root workspace).
   - package-ecosystem: cargo
     directory: "/"
     schedule:
@@ -17,8 +17,8 @@ updates:
       rust-minor-and-patch:
         update-types: [minor, patch]
     ignore:
-      # Iced 0.13, winit e il player video vanno aggiornati insieme e a mano: l'app Android usa una
-      # copia patchata di iced_winit (android/vendor).
+      # Iced 0.13, winit and the video player must be upgraded together and by hand: the Android app uses a
+      # patched copy of iced_winit (android/vendor).
       - dependency-name: "iced"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "iced_*"
@@ -26,7 +26,7 @@ updates:
       - dependency-name: "winit"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
-  # Il guscio Android è un workspace a parte, con il suo Cargo.lock.
+  # The Android shell is a separate workspace, with its own Cargo.lock.
   - package-ecosystem: cargo
     directory: "/android"
     schedule:
@@ -49,7 +49,7 @@ updates:
       - dependency-name: "winit"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
-  # Le action sono fissate allo SHA: Dependabot aggiorna lo SHA e il commento con la versione.
+  # Actions are pinned to a SHA: Dependabot updates the SHA and the version comment.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

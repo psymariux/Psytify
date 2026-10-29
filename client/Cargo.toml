@@ -1,14 +1,14 @@
 [package]
 name = "psytify"
 version = "0.1.0"
-description = "Player musicale desktop per il catalogo Psytify"
+description = "Desktop music player for Psytify catalogs"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
 
-# La libreria contiene tutta l'app: il binario desktop (`main.rs`) e il crate Android (`android/`)
-# la avviano con la loro finestra.
+# The library holds the whole app: the desktop binary (`main.rs`) and the Android crate (`android/`)
+# start it with their own window.
 [lib]
 name = "psytify"
 path = "src/lib.rs"
@@ -18,63 +18,63 @@ name = "psytify"
 path = "src/main.rs"
 
 [dependencies]
-# GUI: wgpu con ripiego software tiny-skia; tokio come executor per Task::perform e time::every;
-# svg per le icone; lazy per `responsive`, che dà alla vista la larghezza reale della finestra;
-# image-without-codecs per le copertine (i codec li sceglie la dipendenza `image` qui sotto).
-# Senza le feature di default: il font Fira Sans non serve (usiamo Inter) e il rilevamento del
-# tema di sistema (zbus su Linux) nemmeno, perché il tema è fisso.
+# GUI: wgpu with the tiny-skia software fallback; tokio as the executor for Task::perform and time::every;
+# svg for the icons; lazy for `responsive`, which gives the view the real window width;
+# image-without-codecs for covers (the codecs are chosen by the `image` dependency below).
+# Without the default features: the Fira Sans font is not needed (we use Inter) and system
+# theme detection (zbus on Linux) is not either, because the theme is fixed.
 iced = { version = "0.13.1", default-features = false, features = ["wgpu", "tiny-skia", "tokio", "svg", "lazy", "image-without-codecs"] }
-# Copertine di Internet Archive: la stessa `image` 0.24 che Iced usa già, con i soli codec delle
-# immagini degli item (JPEG, PNG, GIF, WebP) invece dei sedici di `iced/image`.
+# Internet Archive covers: the same `image` 0.24 Iced already uses, with only the codecs of
+# the item images (JPEG, PNG, GIF, WebP) instead of the sixteen of `iced/image`.
 image = { version = "0.24", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
-# Audio: OutputStream, Sink e Decoder. symphonia-all copre flac, mp3, ogg/vorbis, wav e m4a (AAC).
+# Audio: OutputStream, Sink and Decoder. symphonia-all covers flac, mp3, ogg/vorbis, wav and m4a (AAC).
 rodio = { version = "0.20.1", default-features = false, features = ["symphonia-all"] }
-# Decodifica diretta di tutti i formati: il decoder di rodio 0.20 non dice a Symphonia la lunghezza
-# del flusso, così il seek nei FLAC falliva e gli M4A non si aprivano (vedi `player::decoder`).
-# È già nel grafo come dipendenza di rodio. Ai formati di symphonia-all si aggiunge il container
-# `ogg` (symphonia-format-ogg), senza il quale i `.ogg` accettati dal server non si aprivano.
+# Direct decoding of every format: rodio 0.20's decoder does not tell Symphonia the stream
+# length, so seeking in FLAC failed and M4A files did not open (see `player::decoder`).
+# It is already in the graph as a rodio dependency. To the symphonia-all formats we add the
+# `ogg` container (symphonia-format-ogg), without which the `.ogg` files served by the backend did not open.
 symphonia = { version = "0.5", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "vorbis", "ogg", "wav", "pcm", "adpcm"] }
-# HTTP verso il backend e lo storage: TLS con rustls, nessuna dipendenza da OpenSSL di sistema.
+# HTTP to the backend: TLS with rustls, no dependency on the system OpenSSL.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-# Debounce della ricerca e scrittura asincrona di configurazione e download. `net`: il login con
-# Clerk riceve il codice OAuth su una porta di loopback (127.0.0.1). `rt`, `sync` e `macros`: la
-# jam gira su un runtime proprio, con un canale per i comandi e `select!` sul socket.
+# Search debounce and asynchronous writing of configuration and downloads. `net`: the Clerk
+# sign-in receives the OAuth code on a loopback port (127.0.0.1). `rt`, `sync` and `macros`: the
+# jam runs on its own runtime, with a command channel and `select!` on the socket.
 tokio = { version = "1", features = ["time", "fs", "io-util", "net", "rt", "sync", "macros"] }
-# Jam: il client WebSocket verso il backend. Stessa versione di tungstenite che usa axum sul
-# server; TLS con rustls e le radici di Mozilla (`wss://` in produzione), come reqwest.
+# Jam: the WebSocket client towards the backend. TLS with rustls and the Mozilla roots
+# (`wss://` in production), like reqwest.
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
-# `SinkExt` e `StreamExt` per leggere e scrivere sul socket della jam.
+# `SinkExt` and `StreamExt` to read and write on the jam socket.
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-# Directory di configurazione e di download dell'utente su Windows e Linux.
+# The user's configuration and download directories on Windows and Linux.
 dirs = "6"
-# Identificatori del catalogo: un id non valido non finisce mai in un percorso URL.
+# Catalog identifiers: an invalid id never ends up in a URL path.
 uuid = { version = "1", features = ["v4", "serde"] }
-# Login con Clerk (OAuth 2.0 + PKCE): SHA-256 per il code challenge, byte casuali del sistema per
-# verifier e state, apertura della pagina di login nel browser predefinito (xdg-open, ShellExecute).
+# Clerk sign-in (OAuth 2.0 + PKCE): SHA-256 for the code challenge, system random bytes for
+# verifier and state, opening the login page in the default browser (xdg-open, ShellExecute).
 sha2 = "0.10"
 getrandom = "0.3"
 open = "5"
-# Videoclip dentro l'app con GStreamer: la 0.5 è l'ultima per Iced 0.13 e decodifica solo il video,
-# così l'audio resta quello del player. `url` è il tipo che il widget accetta.
+# Video clips inside the app with GStreamer: 0.5 is the last for Iced 0.13 and decodes only the video,
+# so the audio stays the player's. `url` is the type the widget accepts.
 iced_video_player = { version = "0.5", optional = true }
-# La stessa GStreamer di iced_video_player (già compilata): serve solo ad abbassare il rango dei
-# decoder NVIDIA, che sui portatili ibridi sveglierebbero la GPU dedicata per un videoclip.
+# The same GStreamer as iced_video_player (already compiled): it is only used to lower the rank of the
+# NVIDIA decoders, which on hybrid laptops would wake the discrete GPU for a video clip.
 gstreamer = { version = "0.22", optional = true }
 url = { version = "2", optional = true }
 
-# Controlli multimediali del sistema su Linux (MPRIS): tasti multimediali, widget del desktop,
-# cuffie. `use_zbus` parla D-Bus in Rust puro: niente libdbus da installare.
+# System media controls on Linux (MPRIS): media keys, desktop widgets,
+# headphones. `use_zbus` speaks D-Bus in pure Rust: no libdbus to install.
 [target.'cfg(target_os = "linux")'.dependencies]
 souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
 
 [features]
-# Senza `video` il client compila anche dove GStreamer non c'è: il pulsante del videoclip sparisce.
+# Without `video` the client builds even where GStreamer is missing: the video clip button disappears.
 default = ["video"]
 video = ["dep:iced_video_player", "dep:url", "dep:gstreamer"]
-# Giro automatico delle viste con screenshot (`PSYTIFY_TOUR`): serve solo a controllare la UI.
+# Automatic tour of the views with screenshots (`PSYTIFY_TOUR`): only used to check the UI.
 tour = []
 
 [dev-dependencies]

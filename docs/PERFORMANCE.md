@@ -1,184 +1,127 @@
-# Prestazioni del client
+# Client performance
 
-Misure, colli di bottiglia e stato dell'ottimizzazione del client Psytify. Le regole per scrivere
-codice veloce stanno in `CONTRIBUTING.md`, sezione «Performance rules».
+Measurements, bottlenecks and optimization status of the Psytify client. The rules for writing fast
+code are in [CONTRIBUTING.md](../CONTRIBUTING.md), section "Performance rules".
 
-## Come si misura
+## How to measure
 
-- Strumento: `scripts/perf-sample.py PID [SECONDI]`. Legge `/proc` (CPU per thread, RSS) e
-  `nvidia-smi` (memoria di calcolo). Non richiede privilegi.
-- **La finestra deve essere visibile e a fuoco sul workspace attivo.** Con lo schermo bloccato o la
-  finestra coperta il compositore non manda i frame callback e la CPU della UI risulta quasi zero:
-  una misura così è falsa (è successo, vedi sotto).
-- Scenario di riferimento: istanza di prova con configurazione isolata (`XDG_CONFIG_HOME`), volume a
-  zero, brano m4a con testo sincronizzato, pannello «Testo» aperto (tasto `T`), video chiuso. Si
-  avvia e si fa partire via MPRIS (`org.mpris.MediaPlayer2.psytify.instance<PID>`).
-- Confronti A/B: due binari, due round ciascuno, alternati. La RAM varia di ±20 MB fra due avvii
-  uguali: contano le differenze ripetute, non il singolo valore.
-- Profiler a campionamento (`perf`): non installato. Per la memoria si usa `gdb` con il programma
-  avviato da gdb (`ptrace_scope=1`): `call (void)malloc_stats()` e `call (int)malloc_trim(0)`.
+- Tool: `scripts/perf-sample.py PID [SECONDS]`. It reads `/proc` (CPU per thread, RSS) and `nvidia-smi`
+  (compute memory). It needs no privileges.
+- **The window must be visible and focused on the active workspace.** With a locked screen or a covered
+  window the compositor does not send frame callbacks and the UI CPU looks close to zero: such a
+  measurement is false (it happened, see below).
+- Reference scenario: a test instance with an isolated configuration (`XDG_CONFIG_HOME`), volume at
+  zero, an m4a track with synced lyrics, the "Lyrics" panel open (key `T`), video closed. It is started
+  and made to play over MPRIS (`org.mpris.MediaPlayer2.psytify.instance<PID>`).
+- A/B comparisons: two binaries, two rounds each, alternated. RAM varies by ±20 MB between two identical
+  launches: repeated differences count, not a single value.
+- Sampling profiler (`perf`): not installed. For memory, `gdb` is used with the program started by gdb
+  (`ptrace_scope=1`): `call (void)malloc_stats()` and `call (int)malloc_trim(0)`.
 
-## Risultati (riproduzione m4a, lyrics aperte, video chiuso)
+## Results (m4a playback, lyrics open, video closed)
 
-| | Prima | Dopo |
+| | Before | After |
 |---|---|---|
-| CPU totale | 10,6% di un core | **1,6–1,8%** |
-| Thread UI | 9,0% | **0,7%** |
-| RSS dopo 15 s | 337–388 MB | **230–237 MB** |
-| Librerie NVIDIA e Mesa/LLVM caricate | sì (~70 MB) | no |
-| Contesto NVIDIA del processo | sì (grafico, 2 MiB) | nessuno |
+| Total CPU | 10.6% of a core | **1.6–1.8%** |
+| UI thread | 9.0% | **0.7%** |
+| RSS after 15 s | 337–388 MB | **230–237 MB** |
+| NVIDIA and Mesa/LLVM libraries loaded | yes (~70 MB) | no |
+| NVIDIA context of the process | yes (graphics, 2 MiB) | none |
 
-Server: 21 MB di RSS, nessun intervento necessario.
+### What changed
 
-### Cosa è cambiato
+1. **No continuous frames** (`app.rs`, `subscription`). `window::frames()` sent a message on every vsync
+   while playing, and every message redraws the window. Full frames now start only with an animation
+   (`is_animating`); the progress bar updates with the Tick (4 per second, sub-pixel step). Instrumenting
+   `view` and `update`: they cost less than 1 µs and 2 µs. The ~1.4 ms per redraw is all inside iced's
+   renderer, so the only lever is the number of redraws.
+2. **Light environment** (`launch.rs`, Linux only). The client relaunches itself once with `exec` (same
+   PID) setting:
+   - `MALLOC_ARENA_MAX=2`: glibc opened 32 arenas (one per thread) and kept 186 MB of heap for 111 MB in
+     use; `malloc_trim` alone brought RAM from 270 down to 226 MB.
+   - `VK_LOADER_DRIVERS_DISABLE=*nvidia*` and `WGPU_BACKEND=vulkan`, only if the driver of an integrated
+     GPU (RADV, ANV, AMDVLK) is also present: iced already draws on the low-power GPU, and the NVIDIA
+     driver and wgpu's OpenGL were being loaded for nothing (~70 MB and the discrete card kept awake).
+   - To pick the GPU by hand: `PSYTIFY_ALL_GPUS=1`, or one of the `VK_*`, `WGPU_*`, `DRI_PRIME`,
+     `__NV_PRIME_RENDER_OFFLOAD` variables: in that case nothing is touched.
+3. The "Video clips on the graphics card" option (Settings → Playback) works with the light environment:
+   NVDEC is loaded only when it is on (126 MiB of VRAM), otherwise VA-API is used.
 
-1. **Niente frame continui** (`app.rs`, `subscription`). `window::frames()` mandava un messaggio a ogni
-   vsync mentre suona, e ogni messaggio ridisegna la finestra. Ora i frame pieni partono solo con
-   un'animazione (`is_animating`); la barra di avanzamento si aggiorna col Tick (4 al secondo, passo
-   sotto il pixel). Strumentando `view` e `update`: costano meno di 1 µs e 2 µs. I ~1,4 ms per
-   ridisegno sono tutti nel renderer di iced, quindi l'unica leva è il numero di ridisegni.
-2. **Ambiente leggero** (`launch.rs`, solo Linux). Il client si rilancia una volta con `exec` (stesso
-   PID) impostando:
-   - `MALLOC_ARENA_MAX=2`: glibc apriva 32 arene (una per thread) e teneva 186 MB di heap per 111 MB in
-     uso; `malloc_trim` da solo riportava la RAM da 270 a 226 MB.
-   - `VK_LOADER_DRIVERS_DISABLE=*nvidia*` e `WGPU_BACKEND=vulkan`, solo se c'è anche il driver di una GPU
-     integrata (RADV, ANV, AMDVLK): iced disegna già sulla GPU a basso consumo, e il driver NVIDIA e
-     l'OpenGL di wgpu si caricavano per niente (~70 MB e la scheda dedicata sveglia).
-   - Per scegliere la GPU a mano: `PSYTIFY_ALL_GPUS=1`, oppure una delle variabili `VK_*`, `WGPU_*`,
-     `DRI_PRIME`, `__NV_PRIME_RENDER_OFFLOAD`: in quel caso non si tocca nulla.
-3. L'opzione «Videoclip sulla scheda video» (Impostazioni → Riproduzione) funziona con l'ambiente
-   leggero: NVDEC si carica solo quando è attiva (126 MiB di VRAM), altrimenti VA-API.
+### 27 October 2026: new animations, cache, release profile
 
-### 27 ottobre 2026: nuove animazioni, cache, profilo di release
+Release binaries, visible window on the laptop (60 Hz), volume at zero, "In the End" (m4a, synced
+lyrics), two rounds each.
 
-Binari di release, finestra visibile sul portatile (60 Hz), volume a zero, «In the End» (m4a,
-testo sincronizzato), due giri ciascuno.
-
-| Scenario | CPU totale | Thread UI | RSS |
+| Scenario | Total CPU | UI thread | RSS |
 |---|---|---|---|
-| Cerca + «In riproduzione», profilo di prima (A) | 1,6% / 1,6% | 0,4–0,5% | 200 / 194 MB |
-| Stesso, LTO completo + 1 unità di codegen (B) | 1,5% / 1,4% | 0,4% | 199 / 194 MB |
-| Home + «Testo» nel pannello, scorrimento a vsync (650 ms) | 6,9% / 7,2% | 5,8% | 192 / 201 MB |
-| Stesso, scorrimento a 30 fps, 480 ms | 4,2% / 4,1% | 2,8–3,0% | 193 / 196 MB |
-| Stesso, 24 fps e corpo dei versi al pixel (**adottato**) | **3,0% / 2,6%** | **1,6–1,8%** | **190 / 192 MB** |
+| Search + "Now playing", previous profile (A) | 1.6% / 1.6% | 0.4–0.5% | 200 / 194 MB |
+| Same, full LTO + 1 codegen unit (B) | 1.5% / 1.4% | 0.4% | 199 / 194 MB |
+| Home + "Lyrics" in the panel, scrolling at vsync (650 ms) | 6.9% / 7.2% | 5.8% | 192 / 201 MB |
+| Same, scrolling at 30 fps, 480 ms | 4.2% / 4.1% | 2.8–3.0% | 193 / 196 MB |
+| Same, 24 fps and line body size at pixel precision (**adopted**) | **3.0% / 2.6%** | **1.6–1.8%** | **190 / 192 MB** |
 
-- **Profilo di release** (`Cargo.toml`): `lto = "fat"`, `codegen-units = 1`. Binario da 41 a 28 MB, CPU
-  uguale o appena più bassa (dentro il rumore), RAM uguale. Compilazione da zero 2 min 51 s; a ogni
-  modifica del client il link con LTO costa ~2 min 15 s (in sviluppo si usa il profilo `dev`).
-  `panic` resta `unwind`.
-- **Il testo che scorre** è il movimento più frequente (a ogni verso, ogni ~2 s): a vsync costava il
-  5,8% del thread UI. Ora non chiede i frame della finestra ma un timer a 24 fps
-  (`AMBIENT_FRAME`), dura 480 ms, e il corpo dei versi che crescono è arrotondato al pixel, così il
-  testo si reimpagina solo quando la misura cambia davvero. Gli altri movimenti restano a vsync.
-- **Cache delle copertine** (`ui/cover.rs`): al massimo 240 copertine pronte, scarto della meno
-  disegnata di recente (LRU). La versione tonda (artisti) si ricava dal quadrato solo quando serve:
-  256 KB in meno per ogni copertina di album. `is_fading` non scorre più tutta la cache a ogni
-  messaggio.
-- Per misurare il pannello «Testo» senza mouse né tastiera c'è il passo `hold-lyrics` del giro
-  automatico (`--features tour`, `PSYTIFY_TOUR_STEPS=playing,hold-lyrics`): apre il testo e resta
-  fermo 40 s.
+- **Release profile** (`Cargo.toml`): `lto = "fat"`, `codegen-units = 1`. Binary from 41 to 28 MB, CPU the
+  same or slightly lower (within noise), RAM the same. A from-scratch build takes 2 min 51 s; on every
+  client change the LTO link costs ~2 min 15 s (development uses the `dev` profile). `panic` stays
+  `unwind`.
+- **Scrolling lyrics** are the most frequent motion (every line, about every 2 s): at vsync they cost 5.8%
+  of the UI thread. They no longer request window frames but a 24 fps timer (`AMBIENT_FRAME`), last
+  480 ms, and the size of the growing lines is rounded to the pixel, so the text is laid out again only
+  when the measure really changes. The other motions stay at vsync.
+- **Cover cache** (`ui/cover.rs`): at most 240 ready covers, evicting the least recently drawn (LRU). The
+  round version (artists) is derived from the square one only when needed: 256 KB less for every album
+  cover. `is_fading` no longer walks the whole cache on every message.
+- To measure the "Lyrics" panel with no mouse or keyboard there is the `hold-lyrics` step of the automatic
+  tour (`--features tour`, `PSYTIFY_TOUR_STEPS=playing,hold-lyrics`): it opens the lyrics and stays still
+  for 40 s.
 
-### 28 ottobre 2026: primo ascolto di un brano del catalogo ufficiale
+### Discarded attempts
 
-Tempo di `POST /v1/meta/tracks/{id}/resolve` (server di sviluppo, misurato con `curl`):
+- **mimalloc** as the global allocator: RSS 522–540 MB against 344 (it keeps pages, and C libraries keep
+  using glibc). Removed.
+- **Progress bar at 20 or 10 Hz with `time::every`**: 4.5% and 3.6% total CPU. The Tick is enough.
 
-| Scenario | Tempo |
-|---|---|
-| Primo ascolto via YouTube, ricerca con yt-dlp (10 brani) | 3,8–4,9 s, media ~4,3 s |
-| Stesso, ricerca diretta e fonti insieme (10 brani nuovi) | **3,2–4,2 s, media ~3,7 s** |
-| Primo ascolto via Internet Archive in lossless | 1,4–1,5 s → **1,2 s** |
-| Secondo ascolto dello stesso brano | **2–4 ms** |
-| Due richieste insieme per lo stesso brano | una sola importazione: la seconda aspetta la prima |
+## To do
 
-Dove va il tempo di un brano da YouTube (yt-dlp 2026.08.19, `-v` con l'ora di ogni riga):
+- **FLAC**: measure FLAC decoding (Symphonia) and the buffer in `player/stream.rs`.
+- **Video open**: cost of GStreamer and the decoders, with and without the dedicated option.
+- **Main heap ~50 MB in use** (estimate: cosmic-text system fonts, images, texts). A heap profile is
+  needed to say more; `perf` and `heaptrack` are not installed.
+- **Lyrics**: `verse_heights` recomputes the heights on every redraw (a sum of widths per line, a few
+  microseconds). Cache it per track and width if a profile points there.
 
-| Fase | Tempo |
-|---|---|
-| Avvio di yt-dlp (Python) | ~0,25 s per processo |
-| Ricerca `ytsearch20`: configurazione del client + API | ~1,3 s (diretta: **~0,7 s**) |
-| Estrazione: pagina del video (1,2 MB, lenta anche con `curl`) + API del player | ~1,4 s |
-| Download dell'audio m4a (5 MB, un solo file) | ~0,8 s |
-| Correzione del contenitore m4a | ~0,1 s |
+## Research: what is left to try (27 October 2026)
 
-Opzioni provate e scartate: `player_skip=webpage` e `player_skip=webpage,configs` fanno scattare
-il controllo anti-bot di YouTube («Sign in to confirm you're not a bot»); `player_client=default,-tv`
-non cambia il tempo; i client `android_vr`, `ios`, `tv_simply` e `web_safari` non danno il formato
-audio; `-N 8` (frammenti in parallelo) non serve, l'audio è un file unico. Cosa è cambiato:
+Ordered by expected gain for our case, which is dominated by the number of redraws (the renderer costs
+~1.4–2.6 ms per frame, `view` and `update` a few microseconds).
 
-- **Ricerca di YouTube diretta** (`ingest/sources.rs`, `youtube_direct`): la stessa chiamata della
-  pagina dei risultati (`youtubei/v1/search`), senza processo. Se non risponde entro 4 s, cambia
-  forma o non dà video, si usa `ytsearch` come prima. Vale anche per la ricerca dell'app.
-- **Le tre fonti insieme** (`find_song_anywhere`): YouTube, SoundCloud e Bandcamp partono insieme;
-  vince sempre la prima nell'ordine che ha il brano, le altre si fermano. Se YouTube non lo ha, la
-  risposta di SoundCloud è già pronta.
-- **Il download parte mentre Archive cerca** (`ingest/resolve.rs`): l'audio dall'altra fonte si
-  scarica in parallelo alla ricerca del lossless (`prepare_source`) e si registra solo se Archive non
-  lo trova; altrimenti il download si ferma (yt-dlp terminato, cartella cancellata).
-- **Il play premuto non fa la fila** (`app/external.rs`): «Riproduci» importa subito il primo
-  brano, anche se un'importazione in sottofondo (una playlist salvata) è in corso. Prima aspettava
-  che finisse: fino a ~4–5 s in più.
-- **Un brano alla volta per id** (`ingest/resolve.rs`, `Resolving`): due richieste per lo stesso
-  brano non lanciano due download; chi aspetta trova il brano nel catalogo.
-- **Archive**: i metadati dei 3 candidati si scaricano insieme invece che in fila, e il file scelto
-  resta legato all'id di Deezer, così il secondo ascolto è immediato anche se su Archive il titolo è
-  scritto diversamente.
-- **Scartato: preparare il brano al passaggio del mouse.** Risolvere e firmare hanno un limite di 120
-  richieste al minuto per IP: le richieste del passaggio del mouse toglierebbero spazio al clic vero.
-- **Resta da provare: suonare mentre scarica.** Oggi il client parte quando il file è sul disco del
-  server (~0,9 s di download e correzione). Il m4a di YouTube è frammentato e yt-dlp lo riscrive alla
-  fine: servirlo a metà richiede di saltare la correzione e un decoder che legga i frammenti.
+1. **Fewer redraws, not faster redraws.** It is the lever that worked every time (frames only with an
+   animation, Tick at 250 ms, lyrics at 24 fps). Next step: stop the Tick while the lyrics timer is
+   active (today both arrive) and do not redraw when the displayed position does not change by at
+   least one pixel.
+2. **Iced 0.14**: the release notes mention *reactive rendering* (#2662: only what changes is redrawn)
+   and primitive *culling* in `column` and `row` (#2611). They are the two problems we work around by
+   hand; upgrading deserves a measurement, but the `Task`, `Subscription` and style APIs change and the
+   migration touches the whole UI.
+3. **Iced's `lazy`** on the parts that do not change during playback (sidebar, Home shelves): the widget
+   is rebuilt only when its key changes. Useful if a profile shows a heavy `view`; today it does not.
+4. **PGO** (profile-guided optimization, `cargo-pgo`): the Rust Performance Book reports gains of 10% and
+   more, but it needs a representative workload and two builds; our bottleneck is the GPU/renderer, not
+   the Rust code, so the expectation is low.
+5. **`target-cpu=native`**: only for personal builds, the binary would not run on older CPUs.
+6. **Alternative allocators** (jemalloc, mimalloc): the Perf Book recommends them, but here mimalloc made
+   RAM worse (see above). jemalloc must be measured the same way before adopting it.
+7. **Present mode** (`ICED_PRESENT_MODE`, `fifo` by default): `fifo` is vsync and the right choice for a
+   player; `mailbox`/`immediate` increase frames, they do not reduce them.
 
-### Tentativi scartati
-
-- **mimalloc** come allocatore globale: RSS 522–540 MB contro 344 (tiene le pagine, e le librerie C
-  continuano a usare glibc). Rimosso.
-- **Barra a 20 o 10 Hz con `time::every`**: 4,5% e 3,6% di CPU totale. Il Tick basta.
-
-## Da fare
-
-- **FLAC**: nel catalogo locale tutti i 52 brani sono m4a con licenza esterna; il FLAC di Internet
-  Archive arriva dopo un import (scrive nel database, serve l'autorizzazione dell'utente). Va misurata la
-  decodifica FLAC (Symphonia) e il buffer di `player/stream.rs`.
-- **Video aperto**: costo di GStreamer e dei decoder, con e senza opzione dedicata.
-- **Heap principale ~50 MB in uso** (stima: font di sistema di cosmic-text, immagini, testi). Serve un
-  profilo dell'heap per dire altro; `perf` o `heaptrack` non sono installati.
-- **Lyrics**: `verse_heights` ricalcola le altezze a ogni ridisegno (una somma di larghezze per verso,
-  pochi microsecondi). Da tenere in cache per brano e larghezza se un profilo lo indica.
-
-## Ricerca: cosa resta da provare (27 ottobre 2026)
-
-Ordinate per guadagno atteso sul nostro caso, che è dominato dal numero di ridisegni (il renderer
-costa ~1,4–2,6 ms a frame, `view` e `update` pochi microsecondi).
-
-1. **Meno ridisegni, non ridisegni più veloci.** È la leva che ha funzionato ogni volta (frame solo
-   con un'animazione, Tick a 250 ms, testo a 24 fps). Prossimo passo: fermare il Tick mentre è
-   attivo il timer del testo (oggi arrivano entrambi) e non ridisegnare quando la posizione mostrata
-   non cambia di almeno un pixel.
-2. **Iced 0.14**: le note di rilascio citano il *reactive rendering* (#2662: si ridisegna solo ciò
-   che cambia) e il *culling* delle primitive in `column` e `row` (#2611). Sono i due problemi che qui
-   aggiriamo a mano; aggiornare vale una misura, ma l'API di `Task`, `Subscription` e stili cambia e
-   la migrazione tocca tutta la UI.
-3. **`lazy` di Iced** sulle parti che non cambiano durante la riproduzione (barra laterale, scaffali
-   della Home): il widget si ricostruisce solo se cambia la chiave. Utile se un profilo mostra `view`
-   pesante; oggi non lo è.
-4. **PGO** (ottimizzazione guidata dal profilo, `cargo-pgo`): il Rust Performance Book riporta
-   guadagni del 10% e più, ma serve un carico rappresentativo e due compilazioni; il nostro collo di
-   bottiglia è la GPU/il renderer, non il codice Rust, quindi l'attesa è bassa.
-5. **`target-cpu=native`**: solo per build personali, il binario non girerebbe su CPU più vecchie.
-6. **Allocatori alternativi** (jemalloc, mimalloc): il Perf Book li consiglia, ma qui mimalloc ha
-   peggiorato la RAM (vedi sotto). jemalloc va misurato allo stesso modo prima di adottarlo.
-7. **Modalità di presentazione** (`ICED_PRESENT_MODE`, `fifo` di default): `fifo` è il vsync e la scelta
-   giusta per un player; `mailbox`/`immediate` aumentano i frame, non li riducono.
-
-Fonti: [Rust Performance Book, Build configuration](https://nnethercote.github.io/perf-book/build-configuration.html),
-[iced, note di rilascio](https://github.com/iced-rs/iced/releases),
-[iced, guida alle prestazioni (`lazy`)](https://www.mintlify.com/iced-rs/iced/advanced/performance),
+Sources: [Rust Performance Book, Build configuration](https://nnethercote.github.io/perf-book/build-configuration.html),
+[iced, release notes](https://github.com/iced-rs/iced/releases),
+[iced, performance guide (`lazy`)](https://www.mintlify.com/iced-rs/iced/advanced/performance),
 [iced_wgpu, `present_mode_from_env`](https://docs.iced.rs/iced_wgpu/settings/fn.present_mode_from_env.html),
 [wgpu, `PresentMode`](https://wgpu.rs/doc/wgpu/enum.PresentMode.html).
 
-## Obiettivi
+## Targets
 
-- Fermo con lyrics: CPU ≤ 0,5% (oggi 0,6–0,7%).
-- In riproduzione con lyrics: CPU ≤ 3% (oggi 2,6–3,0% con il testo animato; era 1,6–1,8% senza
-  animazione).
-- RSS in riproduzione ≤ 300 MB (oggi 190–200 MB).
+- Idle with lyrics: CPU ≤ 0.5% (today 0.6–0.7%).
+- Playing with lyrics: CPU ≤ 3% (today 2.6–3.0% with animated lyrics; it was 1.6–1.8% without animation).
+- RSS while playing ≤ 300 MB (today 190–200 MB).

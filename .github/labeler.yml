@@ -1,4 +1,4 @@
-# Etichette automatiche per percorso (actions/labeler).
+# Automatic labels by path (actions/labeler).
 client:
   - changed-files:
       - any-glob-to-any-file: ["client/src/**", "client/tests/**", "client/Cargo.toml"]

@@ -1,29 +1,29 @@
-# Dipendenze patchate per Android
+# Patched dependencies for Android
 
-`iced_winit/` è `iced_winit` 0.13.0 da crates.io (licenza MIT, vedi il suo `Cargo.toml`) con quattro
-modifiche, segnate da «Patch di Psytify». La prima: su Android `program::run` crea il ciclo degli eventi di winit
-con l'`AndroidApp` ricevuto da `android_main` (`iced_winit::ANDROID_APP`). Senza, winit si ferma con
-«An `AndroidApp` as passed to android_main() is required to create an `EventLoop` on Android».
+`iced_winit/` is `iced_winit` 0.13.0 from crates.io (MIT license, see its `Cargo.toml`) with four
+changes, marked "Psytify patch". The first: on Android `program::run` creates winit's event loop
+with the `AndroidApp` received from `android_main` (`iced_winit::ANDROID_APP`). Without it, winit stops with
+"An `AndroidApp` as passed to android_main() is required to create an `EventLoop` on Android".
 
-La patch vale solo per il progetto `android/` (`[patch.crates-io]` nel suo `Cargo.toml`): il client
-desktop usa l'`iced_winit` originale. Va rifatta se si aggiorna Iced.
+The patch applies only to the `android/` project (`[patch.crates-io]` in its `Cargo.toml`): the desktop
+client uses the original `iced_winit`. It has to be redone when Iced is upgraded.
 
-Seconda modifica, in `src/conversion.rs`: su Android winit non ha `platform::modifier_supplement`;
-lì si usano `logical_key` e `text` come già fa la versione per il web.
+Second change, in `src/conversion.rs`: on Android winit has no `platform::modifier_supplement`;
+`logical_key` and `text` are used there, as the web version already does.
 
-Terza modifica, in `src/program.rs`: andando in background Android distrugge la finestra nativa e al
-ritorno ne dà una nuova. Iced 0.13 usa `resumed` solo per l'avvio e lasciava lo schermo nero; con la
-patch `suspended` ferma i ridisegni (niente lavoro né ciclo di errori in background) e `resumed`
-ricrea la superficie di ogni finestra e ridisegna. L'audio intanto continua.
+Third change, in `src/program.rs`: going to the background, Android destroys the native window and
+gives a new one on return. Iced 0.13 uses `resumed` only for startup and left the screen black; with the
+patch `suspended` stops redraws (no work or error loop in the background) and `resumed`
+recreates the surface of every window and redraws. Audio keeps playing meanwhile.
 
-Quarta modifica, `src/program/touch.rs` (agganciata in `src/program.rs`, con
-`State::forget_cursor`). I widget di Iced 0.13 sono pensati per il mouse: un pulsante cattura il
-dito e la lista che lo contiene non scorre, e uno `scrollable` orizzontale cattura ogni tocco (c'è un
-«TODO: bubble up» in iced_widget). Qui il tocco non arriva ai widget come tale, ma diventa:
+Fourth change, `src/program/touch.rs` (hooked into `src/program.rs`, with
+`State::forget_cursor`). Iced 0.13 widgets are designed for a mouse: a button captures the
+finger and the list containing it does not scroll, and a horizontal `scrollable` captures every touch (there is a
+"TODO: bubble up" in iced_widget). Here the touch does not reach the widgets as such, but becomes:
 
-- un clic se è breve;
-- una rotella in pixel, bloccata sull'asse del gesto, se il dito si muove oltre 8 px, con l'inerzia
-  al rilascio;
-- un clic destro se resta fermo mezzo secondo.
+- a click if it is short;
+- a pixel wheel, locked to the axis of the gesture, if the finger moves more than 8 px, with inertia
+  on release;
+- a right click if it stays still for half a second.
 
-Dopo il gesto il puntatore viene tolto, così non resta un «hover» appeso.
+After the gesture the pointer is removed, so no "hover" is left hanging.

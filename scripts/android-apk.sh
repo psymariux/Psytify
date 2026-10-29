@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Compila l'APK di Psytify per Android (aarch64 per i telefoni, x86_64 per l'emulatore).
+# Builds the Psytify APK for Android (aarch64 for phones, x86_64 for the emulator).
 #
-# Uso: [QUICK=1] scripts/android-apk.sh [URL_DEL_BACKEND]
-#   QUICK=1          solo x86_64 senza LTO, per l'emulatore (android/target-quick)
-#   URL_DEL_BACKEND  backend di una configurazione nuova, per esempio http://192.168.1.20:8080
-#                    (il PC sulla rete locale). Senza: PSYTIFY_DEFAULT_API_URL da `.env.build` (vedi
-#                    `.env.build.example`) e, se manca, http://10.0.2.2:8080, il PC visto dall'emulatore.
+# Usage: [QUICK=1] scripts/android-apk.sh [BACKEND_URL]
+#   QUICK=1          x86_64 only, no LTO, for the emulator (android/target-quick)
+#   BACKEND_URL      backend of a fresh configuration, for example http://192.168.1.20:8080
+#                    (your computer on the LAN). Without it: PSYTIFY_DEFAULT_API_URL from `.env.build` (see
+#                    `.env.build.example`) and, if missing, http://10.0.2.2:8080, the computer seen from the emulator.
 #
-# Richiede: Android SDK in $ANDROID_HOME (default ~/Android/Sdk) con NDK 27, i target Rust
-# aarch64-linux-android e x86_64-linux-android, cargo-apk, un JDK (keytool). Vedi docs/ANDROID.md.
+# Requires: Android SDK in $ANDROID_HOME (default ~/Android/Sdk) with NDK 27, the Rust targets
+# aarch64-linux-android and x86_64-linux-android, cargo-apk, a JDK (keytool). See docs/ANDROID.md.
 #
-# La firma: alla prima esecuzione crea ~/.android/psytify-release.keystore con una password casuale
-# in ~/.android/psytify-release.pass (permessi 600). Fuori dal repository: non va mai committata.
-# Conservale: un aggiornamento dell'app si installa solo se firmato con la stessa chiave.
+# Signing: on the first run it creates ~/.android/psytify-release.keystore with a random password
+# in ~/.android/psytify-release.pass (mode 600). Outside the repository: never commit it.
+# Keep them: an app update installs only if it is signed with the same key.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -22,7 +22,7 @@ export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION
 export ANDROID_NDK_HOME=$ANDROID_NDK_ROOT
 TOOLS=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
 export PATH=$TOOLS:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/35.0.0:$PATH
-# Il compilatore C dell'NDK per le dipendenze con codice C/C++ (oboe per l'audio).
+# The NDK's C compiler for dependencies with C/C++ code (oboe for audio).
 for arch in aarch64 x86_64; do
   upper=$(echo "$arch" | tr '[:lower:]' '[:upper:]')
   export "CC_${arch}_linux_android=$TOOLS/${arch}-linux-android26-clang"
@@ -31,7 +31,7 @@ for arch in aarch64 x86_64; do
   export "CARGO_TARGET_${upper}_LINUX_ANDROID_LINKER=$TOOLS/${arch}-linux-android26-clang"
 done
 
-# Il backend di distribuzione sta in `.env.build`, fuori dal repository.
+# The distribution backend lives in `.env.build`, outside the repository.
 if [ -f "$ROOT/.env.build" ]; then
   set -a
   # shellcheck disable=SC1091
@@ -50,7 +50,7 @@ if [ ! -f "$KEYSTORE" ]; then
   head -c 24 /dev/urandom | base64 | tr -d '/+=' > "$PASSFILE"
   keytool -genkeypair -keystore "$KEYSTORE" -storepass "$(cat "$PASSFILE")" -alias psytify \
     -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Psytify" >/dev/null
-  echo "Creata la chiave di firma $KEYSTORE (password in $PASSFILE)."
+  echo "Created the signing key $KEYSTORE (password in $PASSFILE)."
 fi
 export CARGO_APK_RELEASE_KEYSTORE=$KEYSTORE
 CARGO_APK_RELEASE_KEYSTORE_PASSWORD=$(cat "$PASSFILE")
@@ -58,7 +58,7 @@ export CARGO_APK_RELEASE_KEYSTORE_PASSWORD
 
 cd "$ROOT/android"
 if [ "${QUICK:-}" = 1 ]; then
-  # Per provare nell'emulatore: solo x86_64 e senza LTO, qualche minuto in meno.
+  # To try it in the emulator: x86_64 only and no LTO, a few minutes less.
   export CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
   export CARGO_TARGET_DIR=$ROOT/android/target-quick
   cargo apk build --release --target x86_64-linux-android
@@ -67,8 +67,8 @@ else
 fi
 APK=${CARGO_TARGET_DIR:-$ROOT/android/target}/release/apk/psytify.apk
 
-# I cambi di configurazione che aapt non accetta per nome (vedi lo script), poi allineamento a
-# 16 KB (Android 15 sui telefoni con pagine da 16 KB) e una firma nuova.
+# The configuration changes aapt does not accept by name (see the script), then alignment to
+# 16 KB (Android 15 on phones with 16 KB pages) and a fresh signature.
 python3 "$ROOT/scripts/android-manifest.py" "$APK" "$APK.unsigned"
 zipalign -P 16 -f 4 "$APK.unsigned" "$APK.aligned"
 apksigner sign --ks "$KEYSTORE" --ks-pass "file:$PASSFILE" --out "$APK" "$APK.aligned"

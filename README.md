@@ -10,10 +10,6 @@
   <img src="https://img.shields.io/badge/platforms-Arch%20Linux%20%C2%B7%20Windows%20%C2%B7%20Android-c6f24e?labelColor=121212" alt="Platforms">
 </p>
 
-<p align="center">
-  <b>English</b> · <a href="README.it.md">Italiano</a>
-</p>
-
 **Psytify** is a native music player for the desktop and Android, written in Rust. It is built to
 stay out of your way: a true-black interface, lossless playback, and a small memory and CPU
 footprint even while it plays.
@@ -35,6 +31,8 @@ footprint even while it plays.
 - **Respects the music.** Every track carries its license; downloads are offered only when the
   license allows them, and lossless sources are preferred.
 - **Listen together.** *Jam* lets up to 8 people play the same queue, each from their own device.
+- **Italian interface for now.** The app's text is in Italian; the code, documentation and project
+  conversation are in English.
 - **Private by design.** Playlists, likes, follows and play counts live in a local file. The client
   talks to a single backend address and nothing else.
 

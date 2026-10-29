@@ -1,6 +1,6 @@
 name: Android
 
-# Compila e firma l'APK. Gira a mano, sulle modifiche ad Android e come parte della release.
+# Builds and signs the APK. Runs by hand, on Android changes and as part of the release.
 on:
   workflow_call:
     secrets:
@@ -50,8 +50,8 @@ jobs:
           ndk=$(ls "$ANDROID_HOME/ndk" | grep '^27\.' | sort -V | tail -1)
           echo "NDK_VERSION=$ndk" >> "$GITHUB_ENV"
           echo "using NDK $ndk"
-      # Senza segreti l'APK si firma con una chiave nuova: va bene per provarlo, ma un aggiornamento
-      # non si installa sopra una versione firmata con un'altra chiave.
+      # Without secrets the APK is signed with a throwaway key: fine to try it, but an update
+      # does not install over a version signed with another key.
       - name: Restore the signing key
         env:
           KEYSTORE_B64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
@@ -68,8 +68,8 @@ jobs:
           fi
       - name: Build the APK
         env:
-          # Facoltativo: il backend che l'app usa di default. È un segreto del repository: non compare nei log.
-          # Sulle pull request non si usa: gli artifact di un repository pubblico li scarica chiunque.
+          # Optional: the backend the app uses by default. It is a repository secret: it does not appear in logs.
+          # Not used on pull requests: anyone can download the artifacts of a public repository.
           PSYTIFY_DEFAULT_API_URL: ${{ github.event_name != 'pull_request' && secrets.PSYTIFY_DEFAULT_API_URL || '' }}
         run: scripts/android-apk.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

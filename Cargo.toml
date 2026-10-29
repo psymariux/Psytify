@@ -1,6 +1,6 @@
 [workspace]
 members = ["client"]
-# Android è un workspace a parte: usa una copia patchata di iced_winit (vedi android/vendor).
+# Android is a separate workspace: it uses a patched copy of iced_winit (see android/vendor).
 exclude = ["android"]
 resolver = "2"
 
@@ -18,10 +18,10 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 
-# Build di distribuzione. LTO completo e una sola unità di codegen: l'ottimizzatore vede tutto il
-# programma insieme (dipendenze comprese) e può fare inline fra crate. Costa tempo di compilazione,
-# non di esecuzione. `panic` resta `unwind`: un panic in un task non deve chiudere il player.
-# Misure prima/dopo in docs/PERFORMANCE.md («Profilo di release»).
+# Distribution build. Full LTO and a single codegen unit: the optimizer sees the whole
+# program together (dependencies included) and can inline across crates. It costs build time,
+# not run time. `panic` stays `unwind`: a panic in a task must not close the player.
+# Before/after measurements in docs/PERFORMANCE.md ("Release profile").
 [profile.release]
 lto = "fat"
 codegen-units = 1

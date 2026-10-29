@@ -129,7 +129,7 @@ fn frame(app: &App, window: Size) -> Element<'_, Message> {
 }
 
 /// La pagina della schermata corrente, impaginata su `width`.
-fn page(app: &App, width: f32) -> Element<'_, Message> {
+pub(crate) fn page(app: &App, width: f32) -> Element<'_, Message> {
     match app.screen {
         Screen::Home => pages::home::view(app, width),
         Screen::Search => pages::search::view(app, width),
@@ -142,6 +142,7 @@ fn page(app: &App, width: f32) -> Element<'_, Message> {
         Screen::Liked => pages::liked::view(app, width),
         Screen::News => pages::news::view(app, width),
         Screen::SourcePlaylist => pages::source_playlist::view(app, width),
+        Screen::Collection => phone::library::view(app, width),
     }
 }
 
@@ -166,7 +167,7 @@ fn page_tint(app: &App) -> Color {
             Some(release) => app.covers.tint_of(shelf::release_art(release)),
             None => current(),
         },
-        Screen::News => theme::BRAND_TINT,
+        Screen::News | Screen::Collection => theme::BRAND_TINT,
         Screen::SourcePlaylist => match &app.external.open {
             Some(open) => cover::color_for(pages::search::art_id(&open.playlist.id)),
             None => theme::NEUTRAL_TINT,

@@ -91,13 +91,23 @@ pub const GRID_GAP: f32 = 16.0;
 pub const MENU_WIDTH: f32 = 276.0;
 pub const MENU_ITEM: f32 = 38.0;
 
-// Telefono (ui/phone.rs).
+// Telefono (ui/phone/).
 /// Barra di navigazione in basso, mini-player sopra di lei, margine laterale delle pagine.
-pub const PHONE_NAV_HEIGHT: f32 = 62.0;
+pub const PHONE_NAV_HEIGHT: f32 = 60.0;
 pub const PHONE_MINI_HEIGHT: f32 = 60.0;
 pub const PHONE_GUTTER: f32 = 16.0;
-/// Barra superiore del telefono (Indietro, marchio, impostazioni).
-pub const PHONE_TOP_HEIGHT: f32 = 52.0;
+/// Barra delle pagine aperte da un'altra: solo «Indietro».
+pub const PHONE_TOP_HEIGHT: f32 = 48.0;
+/// Titolo delle quattro schermate principali: grande, come nelle app da telefono.
+pub const FS_PHONE_TITLE: f32 = 30.0;
+/// Copertine degli scaffali: due e mezza per riga, quella tagliata invita a scorrere.
+pub const PHONE_COVER: f32 = 148.0;
+pub const PHONE_ARTIST: f32 = 120.0;
+/// Righe delle liste: copertina e passo.
+pub const PHONE_ROW_COVER: f32 = 56.0;
+pub const PHONE_ROW: f32 = 68.0;
+/// Copertina del player a schermo intero: al massimo questa parte dell'altezza.
+pub const PHONE_PLAYER_COVER: f32 = 0.42;
 /// Spazio per la barra di stato e per quella dei gesti di Android, che stanno sopra l'app.
 pub const PHONE_STATUS_INSET: f32 = 28.0;
 pub const PHONE_GESTURE_INSET: f32 = 14.0;
@@ -499,7 +509,22 @@ pub fn mini_player(tint: Color) -> impl Fn(&Theme) -> container::Style {
     }
 }
 
-/// La barra di navigazione del telefono: il nero della finestra con una linea sottile sopra.
+/// La pagina del telefono: il nero della finestra con, in alto, la tinta di ciò che si guarda che
+/// si scioglie nel nero prima di metà schermo. Niente pannello: la pagina va da bordo a bordo.
+pub fn phone_wash(tint: Color) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Gradient(Gradient::Linear(
+            Linear::new(PI)
+                .add_stop(0.0, super::motion::mix(GROUND, tint, 0.5))
+                .add_stop(0.42, GROUND)
+                .add_stop(1.0, GROUND),
+        ))),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
+/// La barra di navigazione del telefono: il nero della finestra, senza linee.
 pub fn phone_nav(_: &Theme) -> container::Style {
     container::Style {
         background: background(GROUND),

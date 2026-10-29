@@ -56,6 +56,8 @@ pub enum SavedScreen {
     Liked,
     /// Le uscite degli artisti seguiti.
     News,
+    /// La libreria personale (telefono).
+    Collection,
 }
 
 /// Playlist locale: il backend non ha playlist, quindi l'app salva una copia dei brani.

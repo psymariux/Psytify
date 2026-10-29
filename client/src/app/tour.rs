@@ -9,7 +9,7 @@ use std::time::Duration;
 use iced::{Size, Task, window};
 
 use super::menu::Dialog;
-use super::{App, Message, Screen, SettingsTab, SideTab};
+use super::{App, Load, Message, Screen, SettingsTab, SideTab};
 
 /// A che punto è il giro.
 pub struct Tour {
@@ -44,6 +44,7 @@ const STEPS: &[Step] = &[
         None => Task::none(),
     }),
     ("library", 5000, |app| app.update(Message::Navigate(Screen::Library))),
+    ("collection", 3000, |app| app.update(Message::Navigate(Screen::Collection))),
     ("liked", 3000, |app| app.update(Message::Navigate(Screen::Liked))),
     ("playlist", 3000, |app| match app.playlists.first().map(|playlist| playlist.id) {
         Some(id) => app.update(Message::Navigate(Screen::Playlist(id))),
@@ -67,10 +68,12 @@ const STEPS: &[Step] = &[
         )
     }),
     ("playing", 10000, |app| {
-        let start = if app.queue.is_empty() {
-            Message::ShufflePlay(app.liked.clone().into())
-        } else {
-            Message::TogglePlay
+        // Con una configurazione nuova non ci sono brani che piacciono: suonano gli ultimi arrivati.
+        let start = match &app.home.recent {
+            _ if !app.queue.is_empty() => Message::TogglePlay,
+            _ if !app.liked.is_empty() => Message::ShufflePlay(app.liked.clone().into()),
+            Load::Ready(tracks) => Message::PlayTracks(tracks.clone(), 0),
+            _ => Message::TogglePlay,
         };
         go(app, [Message::Navigate(Screen::Home), start, Message::OpenPanel(SideTab::NowPlaying)])
     }),

@@ -146,18 +146,24 @@ Sentence case everywhere.
   action; an error inside the block that failed, with "Retry".
 - **Icons**: Iconly (Light and Bold) for the interface, with the player controls drawn in the same
   stroke (`client/assets/icons`, credits in `CREDITS.md`).
-- **Phone** (`ui/phone.rs`, Android and `PSYTIFY_PHONE=1`): one column, inside the insets Android declares
-  for its bars.
-  - **Top**: "Back", the brand and the Settings gear.
-  - **Middle**: the page at full width with the cover tint, without scroll bars: you scroll with the
-    finger. In Search the field stays above the results and the keyboard opens.
-  - **Bottom**: the mini player (cover, title, heart, round Play, a progress line; a tap opens the
-    player) and the bar with four items, a filled icon and a lime notch on the active one.
-  - **Full-screen player**: breathing cover, title, progress, controls, then "Lyrics" or "Queue".
-  - **Measures**: 44 px touch targets (`TOUCH_TARGET`). Below 520 px the "Continue listening" card uses
-    the round Play without a label; below 420 px the featured panel puts the buttons under the cover.
+- **Phone** (`ui/phone/`, Android and `PSYTIFY_PHONE=1`): an app designed for the thumb, not the
+  desktop squeezed, inside the insets Android declares for its bars.
+  - **Tabs**: Home, Search, Library and News at the bottom; the active one has a filled icon and white
+    text, News a lime dot when there are releases to hear. Each opens with a large title
+    (`FS_PHONE_TITLE`) and no bar above it; Home has the brand, Home and Library the Settings gear.
+  - **Pages opened from another** (album, artist, settings): only "Back" at the top.
+  - **Page**: edge to edge on black, with the cover tint fading from the top (`phone_wash`); no panel,
+    no scroll bars. The Home cover rows start at the margin and scroll to the screen edge.
+  - **Library**: liked songs, the server catalog, playlists, saved albums and followed artists in one
+    list, with pill filters; "+" creates a playlist.
+  - **Artist**: round photo in the middle, large name, Follow and Radio on the left, Play on the right.
+  - **Bottom**: the mini player (cover, title, heart, Play, a progress line; a tap opens the player)
+    above the tabs.
+  - **Full-screen player**: breathing cover (at most 42% of the height), title, progress bar with the
+    times below, a 68 px white Play between previous and next, then "Lyrics" or "Queue".
+  - **Measures**: 44 px touch targets (`TOUCH_TARGET`), 16 px margins, 148 px shelf covers, 68 px rows.
+    Home shortcuts always fill whole rows.
   - **Settings**: each control goes under its explanation.
-  - **Home shortcuts**: titles on two lines.
   - **Gestures**: a long press opens the context menu. Android's Back button closes whatever is on
     top, otherwise it goes back to the previous page.
 - **Frameless window**: the top bar drags (double click: maximize); minimize, full screen (also F11) and

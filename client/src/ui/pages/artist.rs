@@ -5,18 +5,18 @@
 
 use std::sync::Arc;
 
-use iced::widget::{column, container, row, text};
-use iced::{Alignment, Element, Length};
+use iced::widget::{Space, column, container, row, text};
+use iced::{Alignment, Element, Length, alignment};
 use uuid::Uuid;
 
 use crate::api::{ArtistPage, SourcePlaylist, Track};
-use crate::app::{App, ArtistExtras, Discography, Load, Message};
+use crate::app::{App, ArtistExtras, Discography, Load, Message, is_phone};
 use crate::config::{FollowedArtist, PlayStat};
 use crate::feed::{self, ArtistCard};
 use crate::ui::components::{
     HERO_LINE, Origin, SUB_LINE, TableKind, count_label, empty_block, error_block, h2, line, outlined_button,
-    outlined_button_owned, outlined_icon, pill, play_bar, primary_button, section, skeleton_rows, small,
-    text_button, total_label, track_table,
+    outlined_button_owned, outlined_icon, pill, play_bar, play_controls, primary_button, section,
+    skeleton_rows, small, text_button, total_label, track_table,
 };
 use crate::ui::cover::{Art, cover_round};
 use crate::ui::icons::Icon;
@@ -243,6 +243,9 @@ fn banner<'a>(
         None => meta.push(count_label(tracks.len())),
     }
 
+    if is_phone() {
+        return phone_banner(app, page, extras, tracks, art, &meta.join(" · "), width);
+    }
     // Con il banner stretto (finestra piccola, pannello aperto) Segui e Radio restano solo icone:
     // con le etichette uscirebbero dal banner.
     let compact = text_width < ACTIONS_WIDTH;
@@ -298,6 +301,58 @@ fn banner<'a>(
         .width(Length::Fill)
         .style(theme::hero_card(tint))
         .into()
+}
+
+/// La testa sul telefono: niente scheda, la foto tonda al centro sulla tinta della pagina, il nome
+/// grande, e sotto Segui e Radio a sinistra e il Play tondo a destra, sotto il pollice.
+fn phone_banner<'a>(
+    app: &'a App,
+    page: &'a ArtistPage,
+    extras: Option<&'a ArtistExtras>,
+    tracks: &Arc<[Track]>,
+    art: Art<'a>,
+    meta: &str,
+    width: f32,
+) -> Element<'a, Message> {
+    let side = (width * 0.5).min(PORTRAIT);
+    let following = app.is_following(page.id);
+    let mut bar = row![outlined_button(
+        if following { "Seguito" } else { "Segui" },
+        None,
+        Some(Message::ToggleFollow(FollowedArtist {
+            id: page.id,
+            name: page.name.clone(),
+            cover_url: art.url.map(str::to_string),
+        })),
+    )]
+    .spacing(8)
+    .align_y(Alignment::Center);
+    if let Some(track) = feed::popular(tracks, &app.stats, 1).into_iter().next() {
+        bar = bar.push(outlined_icon(Icon::Radio, "Radio", Some(Message::StartRadio(Box::new(track)))));
+    }
+    bar = bar.push(Space::with_width(Length::Fill));
+    let play = match extras.filter(|e| !e.top.is_empty()) {
+        Some(_) => Some(Message::PlayArtistTop(page.id, 0)),
+        None => (!tracks.is_empty()).then(|| Message::PlayTracks(tracks.clone(), 0)),
+    };
+    if let Some(play) = play {
+        bar = bar.push(play_controls(play, Message::ShufflePlay(tracks.clone())));
+    }
+    column![
+        container(cover_round(&app.covers, art, side)).center_x(Length::Fill),
+        column![
+            text(page.name.clone())
+                .size(theme::FS_PHONE_TITLE + 2.0)
+                .font(theme::FONT_SEMIBOLD)
+                .width(Length::Fill)
+                .align_x(alignment::Horizontal::Center),
+            container(line(meta, width, SUB_LINE)).center_x(Length::Fill),
+        ]
+        .spacing(6),
+        bar,
+    ]
+    .spacing(18)
+    .into()
 }
 
 #[cfg(test)]

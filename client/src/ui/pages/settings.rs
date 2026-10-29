@@ -490,10 +490,10 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
 fn update_setting(app: &App, fit: Fit) -> Option<Element<'_, Message>> {
     let (detail, control): (String, Element<'_, Message>) = match app.update.as_ref()? {
         UpdateState::Offered(offer) => (
-            format!("Versione {} pronta per questo dispositivo.", offer.tag),
+            format!("Versione {} disponibile.", offer.tag),
             primary_button("Scarica", None, Message::UpdateRequested),
         ),
-        UpdateState::Downloading(tag) => (format!("Scarico {tag}…"), muted("In corso").into()),
+        UpdateState::Downloading(tag) => (format!("Download di {tag} in corso"), muted("In corso").into()),
         UpdateState::Downloaded(path) => (format!("Scaricato in {}", path.display()), muted("Pronto").into()),
     };
     Some(setting("Aggiornamento", detail, control, fit))

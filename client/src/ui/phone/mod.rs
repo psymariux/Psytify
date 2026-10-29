@@ -15,15 +15,18 @@ mod player;
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding, Size};
 
-use super::components::{SUB_LINE, TITLE_LINE, art_of, heart, line};
+use super::components::{Line, art_of, heart, line};
 use super::cover::cover;
 use super::icons::{Icon, icon};
 use super::{motion, theme};
-use crate::app::{App, Message, Screen, phone_tab_of};
+use crate::app::{Account, App, Message, Screen, phone_tab_of};
 use crate::player::seek::progress as progress_of;
 
 /// Lato della copertina nel mini-player.
 const MINI_COVER: f32 = 44.0;
+/// Titolo e artista nel mini-player: due righe della stessa scala, come la barra alta quanto una scheda.
+const MINI_TITLE: Line = Line { size: theme::FS_SMALL, font: theme::FONT_MEDIUM, color: Some(theme::TEXT) };
+const MINI_SUB: Line = Line { size: theme::FS_SMALL, font: theme::FONT, color: Some(theme::MUTED) };
 /// Spazio fra il fondo della pagina e il mini-player: l'ultima riga non finisce sotto le barre.
 const PAGE_BOTTOM: f32 = 32.0;
 
@@ -165,22 +168,35 @@ fn search_header(app: &App) -> Element<'_, Message> {
         .into()
 }
 
-/// Le quattro schede. Quella accesa ha l'icona piena e il testo bianco; Novità ha un punto lime
-/// quando ci sono uscite da ascoltare.
+/// Le cinque schede. Quella accesa ha l'icona piena e il testo bianco. Novità ha un punto lime
+/// quando ci sono uscite da ascoltare; Profilo quando ci sono richieste di amicizia.
 fn nav(app: &App) -> Element<'_, Message> {
     let tab = app.phone_tab();
     let unread = app.unread_news() > 0;
+    let requests = app.friend_requests() > 0;
     let items = [
-        (Icon::Home, Icon::HomeFill, "Home", Screen::Home),
-        (Icon::Search, Icon::SearchFill, "Cerca", Screen::Search),
-        (Icon::Library, Icon::LibraryFill, "Libreria", Screen::Collection),
-        (Icon::Bell, Icon::BellFill, "Novità", Screen::News),
+        (Icon::Home, Icon::HomeFill, "Home", Screen::Home, Message::Navigate(Screen::Home)),
+        (Icon::Search, Icon::SearchFill, "Cerca", Screen::Search, Message::Navigate(Screen::Search)),
+        (
+            Icon::Library,
+            Icon::LibraryFill,
+            "Libreria",
+            Screen::Collection,
+            Message::Navigate(Screen::Collection),
+        ),
+        (Icon::Account, Icon::Account, "Profilo", Screen::Profile, profile_target(app)),
+        (Icon::Bell, Icon::BellFill, "Novità", Screen::News, Message::Navigate(Screen::News)),
     ];
-    let buttons = items.into_iter().map(|(idle, filled, label, screen)| {
+    let buttons = items.into_iter().map(|(idle, filled, label, screen, press)| {
         let active = tab == screen;
         let color = if active { theme::TEXT } else { theme::FAINT };
         let mut glyph = row![icon(if active { filled } else { idle }, 24.0, color)];
-        if screen == Screen::News && unread {
+        let dot = match screen {
+            Screen::News => unread,
+            Screen::Profile => requests,
+            _ => false,
+        };
+        if dot {
             glyph = glyph.push(
                 container(Space::new(7.0, 7.0))
                     .style(theme::bar(theme::ACCENT, 3.5))
@@ -199,10 +215,22 @@ fn nav(app: &App) -> Element<'_, Message> {
         .height(theme::PHONE_NAV_HEIGHT)
         .padding(0)
         .style(theme::bare)
-        .on_press(Message::Navigate(screen))
+        .on_press(press)
         .into()
     });
     container(row(buttons)).width(Length::Fill).style(theme::phone_nav).into()
+}
+
+/// Dove porta la scheda Profilo: il proprio profilo se c'è, altrimenti le impostazioni o l'accesso.
+fn profile_target(app: &App) -> Message {
+    match &app.account {
+        Account::SignedIn(me) => match &me.profile {
+            Some(profile) => Message::OpenProfile(profile.handle.clone()),
+            None => Message::Navigate(Screen::Settings),
+        },
+        Account::SignedOut | Account::Working => Message::SignIn,
+        Account::Unavailable => Message::Navigate(Screen::Settings),
+    }
 }
 
 /// Il brano in corso sopra le schede, sulla tinta della sua copertina: un tocco apre il player.
@@ -222,7 +250,7 @@ fn mini_player(app: &App, window: f32) -> Option<Element<'_, Message>> {
         .on_press(Message::TogglePlay);
     let body = row![
         cover(&app.covers, art_of(track), MINI_COVER),
-        column![line(&track.title, text_width, TITLE_LINE), line(&track.artist.name, text_width, SUB_LINE)]
+        column![line(&track.title, text_width, MINI_TITLE), line(&track.artist.name, text_width, MINI_SUB)]
             .spacing(2)
             .width(Length::Fill),
         heart(app, track, true),
@@ -230,12 +258,13 @@ fn mini_player(app: &App, window: f32) -> Option<Element<'_, Message>> {
     ]
     .spacing(10)
     .align_y(Alignment::Center);
-    let open = button(container(body).padding(Padding::from([0.0, theme::PHONE_GUTTER])))
-        .padding(0)
-        .height(Length::Fill)
-        .width(Length::Fill)
-        .style(theme::bare)
-        .on_press(Message::ToggleFocus);
+    let open =
+        button(container(body).padding(Padding::from([0.0, theme::PHONE_GUTTER])).center_y(Length::Fill))
+            .padding(0)
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .style(theme::bare)
+            .on_press(Message::ToggleFocus);
 
     let fraction = progress_of(app.shown_position(), track.duration()).clamp(0.0, 1.0);
     let progress = container(

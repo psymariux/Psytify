@@ -8,6 +8,7 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Phone: a Profile tab in the tab bar, and a Jam button in the full-screen player.
 - In-app updates: at startup Psytify checks the latest release and offers it in Settings → About; the
   package comes through the backend, and Android hands it to the system installer.
 - Desktop client for Arch Linux and Windows, and an Android app with a phone layout.

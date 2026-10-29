@@ -195,8 +195,9 @@ pub async fn login(app: ClerkApp) -> Result<Tokens, AppError> {
     let state = random_token(16)?;
     let listener =
         TcpListener::bind(("127.0.0.1", app.port)).await.map_err(|_| AppError::AuthPortBusy(app.port))?;
-    open::that_detached(authorize_url(&app, &code_challenge(&verifier), &state))
-        .map_err(|_| AppError::AuthFailed)?;
+    if !crate::open_url(&authorize_url(&app, &code_challenge(&verifier), &state)) {
+        return Err(AppError::AuthFailed);
+    }
 
     let code = tokio::time::timeout(LOGIN_TIMEOUT, receive_code(&listener, &state))
         .await

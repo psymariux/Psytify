@@ -180,6 +180,7 @@ Handy switches:
 | `PSYTIFY_API_URL` | Backend address for this run |
 | `PSYTIFY_PHONE=1` | Open the phone layout in a desktop window |
 | `PSYTIFY_DEFAULT_API_URL` | *Compile time:* backend baked into a distribution build |
+| `PSYTIFY_DEFAULT_CLERK_ISSUER`, `PSYTIFY_DEFAULT_CLERK_CLIENT_ID` | *Compile time:* Clerk sign-in (Frontend API and public OAuth client ID) baked into a distribution build |
 
 The interface is documented in [docs/STYLE.md](docs/STYLE.md): three panels on black, the cover art
 tints the background, lime is the brand color, no glass effects. Colors and sizes come only from

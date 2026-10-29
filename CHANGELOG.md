@@ -18,5 +18,9 @@ All notable changes are documented here. The format follows
 - MPRIS media controls on Linux and an optional Clerk sign-in.
 - Arch Linux package builder (`scripts/arch-package.sh`) and Android APK builder.
 - Backend address configurable at run time (`PSYTIFY_API_URL`) and at build time (`PSYTIFY_DEFAULT_API_URL`).
+- Dedicated phone layout: four tabs, a phone Home and Library, a thumb-sized full-screen player.
+- Backend address editable in Settings → About, with a reset to the build default.
+- Clerk sign-in configurable at build time (`PSYTIFY_DEFAULT_CLERK_ISSUER`, `PSYTIFY_DEFAULT_CLERK_CLIENT_ID`)
+  and working on Android, where the sign-in page opens in the system browser.
 
 [Unreleased]: https://github.com/psymariux/Psytify/commits/main

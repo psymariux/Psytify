@@ -28,7 +28,7 @@ iced = { version = "0.13.1", default-features = false, features = ["wgpu", "tiny
 # the item images (JPEG, PNG, GIF, WebP) instead of the sixteen of `iced/image`.
 image = { version = "0.24", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 # Audio: OutputStream, Sink and Decoder. symphonia-all covers flac, mp3, ogg/vorbis, wav and m4a (AAC).
-rodio = { version = "0.20.1", default-features = false, features = ["symphonia-all"] }
+rodio = { version = "0.23.0", default-features = false, features = ["symphonia-all"] }
 # Direct decoding of every format: rodio 0.20's decoder does not tell Symphonia the stream
 # length, so seeking in FLAC failed and M4A files did not open (see `player::decoder`).
 # It is already in the graph as a rodio dependency. To the symphonia-all formats we add the

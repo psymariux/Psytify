@@ -42,7 +42,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["time", "fs", "io-util", "net", "rt", "sync", "macros"] }
 # Jam: the WebSocket client towards the backend. TLS with rustls and the Mozilla roots
 # (`wss://` in production), like reqwest.
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 # `SinkExt` and `StreamExt` to read and write on the jam socket.
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 serde = { version = "1", features = ["derive"] }

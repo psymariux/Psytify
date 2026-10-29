@@ -23,6 +23,17 @@ pub const DEFAULT_API_URL: &str = match option_env!("PSYTIFY_DEFAULT_API_URL") {
     Some(url) if !url.is_empty() => url,
     _ => "http://127.0.0.1:8080",
 };
+/// Il login con Clerk di una build di distribuzione: issuer (Frontend API) e client ID
+/// dell'applicazione OAuth, compilati come il backend (`.env.build`). Non sono segreti. Valgono
+/// quando `config.json` non ne sceglie altri; vuoti, il login resta spento.
+const DEFAULT_CLERK_ISSUER: &str = match option_env!("PSYTIFY_DEFAULT_CLERK_ISSUER") {
+    Some(issuer) => issuer,
+    None => "",
+};
+const DEFAULT_CLERK_CLIENT_ID: &str = match option_env!("PSYTIFY_DEFAULT_CLERK_CLIENT_ID") {
+    Some(id) => id,
+    None => "",
+};
 /// Indirizzi predefiniti delle build di sviluppo (desktop ed emulatore Android). Le versioni
 /// precedenti li salvavano nel file anche senza una scelta dell'utente: letti lì, non valgono come
 /// scelta.
@@ -248,18 +259,11 @@ pub fn remember_search(history: &mut Vec<String>, query: &str) {
 impl Config {
     /// L'applicazione OAuth di Clerk, se configurata con un issuer https e un client ID.
     pub fn clerk_app(&self) -> Option<ClerkApp> {
-        let issuer = self.clerk_issuer.trim().trim_end_matches('/');
-        let client_id = self.clerk_client_id.trim();
-        let valid = issuer.starts_with("https://")
-            && issuer.len() > "https://".len()
-            && !issuer.contains(['?', '#', ' '])
-            && !client_id.is_empty()
-            && client_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
-        valid.then(|| ClerkApp {
-            issuer: issuer.to_owned(),
-            client_id: client_id.to_owned(),
-            port: self.oauth_port,
-        })
+        clerk_app_from(
+            or_default(&self.clerk_issuer, DEFAULT_CLERK_ISSUER),
+            or_default(&self.clerk_client_id, DEFAULT_CLERK_CLIENT_ID),
+            self.oauth_port,
+        )
     }
 
     /// Ripara valori fuori intervallo letti da disco.
@@ -292,6 +296,23 @@ impl Config {
         self.stats.truncate(taste::MAX_STATS);
         self
     }
+}
+
+/// Un campo della configurazione, o il predefinito della build se è vuoto.
+fn or_default<'a>(value: &'a str, default: &'a str) -> &'a str {
+    if value.trim().is_empty() { default } else { value }
+}
+
+/// L'applicazione OAuth, se issuer (`https://`) e client ID sono validi.
+fn clerk_app_from(issuer: &str, client_id: &str, port: u16) -> Option<ClerkApp> {
+    let issuer = issuer.trim().trim_end_matches('/');
+    let client_id = client_id.trim();
+    let valid = issuer.starts_with("https://")
+        && issuer.len() > "https://".len()
+        && !issuer.contains(['?', '#', ' '])
+        && !client_id.is_empty()
+        && client_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    valid.then(|| ClerkApp { issuer: issuer.to_owned(), client_id: client_id.to_owned(), port })
 }
 
 /// Backend predefinito scelto da chi avvia l'app (Android: fissato alla compilazione, perché sul
@@ -563,6 +584,12 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(config.clerk_app().map(|a| a.issuer), Some("https://x.clerk.accounts.dev".into()));
+    }
+
+    #[test]
+    fn an_empty_clerk_field_takes_the_build_default() {
+        assert_eq!(or_default("  ", "https://b.clerk.accounts.dev"), "https://b.clerk.accounts.dev");
+        assert_eq!(or_default("https://a.clerk.accounts.dev", "https://b"), "https://a.clerk.accounts.dev");
     }
 
     #[test]

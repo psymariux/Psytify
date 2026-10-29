@@ -71,6 +71,9 @@ jobs:
           # Optional: the backend the app uses by default. It is a repository secret: it does not appear in logs.
           # Not used on pull requests: anyone can download the artifacts of a public repository.
           PSYTIFY_DEFAULT_API_URL: ${{ github.event_name != 'pull_request' && secrets.PSYTIFY_DEFAULT_API_URL || '' }}
+          # The Clerk login (issuer and OAuth client ID): public values, kept as repository variables.
+          PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
+          PSYTIFY_DEFAULT_CLERK_CLIENT_ID: ${{ vars.PSYTIFY_DEFAULT_CLERK_CLIENT_ID }}
         run: scripts/android-apk.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

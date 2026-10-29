@@ -50,6 +50,24 @@ pub(crate) fn soft_keyboard(show: bool) {
     }
 }
 
+/// Chi apre un indirizzo nel browser del sistema, dove il crate `open` non arriva (su Android il
+/// guscio, con un Intent). Restituisce `false` se non ci riesce.
+type UrlOpener = Box<dyn Fn(&str) -> bool + Send + Sync>;
+static URL_OPENER: OnceLock<UrlOpener> = OnceLock::new();
+
+/// Registra chi apre un indirizzo nel browser del sistema. Vale la prima chiamata.
+pub fn set_url_opener(open: impl Fn(&str) -> bool + Send + Sync + 'static) {
+    let _ = URL_OPENER.set(Box::new(open));
+}
+
+/// Apre `url` nel browser: con l'aggancio del guscio se c'è, altrimenti col crate `open`.
+pub(crate) fn open_url(url: &str) -> bool {
+    match URL_OPENER.get() {
+        Some(open) => open(url),
+        None => open::that_detached(url).is_ok(),
+    }
+}
+
 /// Lo spazio che le barre del sistema (stato, gesti o pulsanti, notch) coprono ai bordi della
 /// finestra, in px logici.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]

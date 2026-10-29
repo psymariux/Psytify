@@ -30,6 +30,8 @@ jobs:
       - name: Build
         env:
           PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
+          PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
+          PSYTIFY_DEFAULT_CLERK_CLIENT_ID: ${{ vars.PSYTIFY_DEFAULT_CLERK_CLIENT_ID }}
         run: cargo build -p psytify --release --locked
       - name: Package
         run: |
@@ -56,6 +58,8 @@ jobs:
       - name: "Build (without video clips, the runner has no GStreamer)"
         env:
           PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
+          PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
+          PSYTIFY_DEFAULT_CLERK_CLIENT_ID: ${{ vars.PSYTIFY_DEFAULT_CLERK_CLIENT_ID }}
         run: cargo build -p psytify --release --locked --no-default-features
       - name: Package
         shell: pwsh
@@ -88,6 +92,8 @@ jobs:
       - name: Build the package
         env:
           PSYTIFY_DEFAULT_API_URL: ${{ secrets.PSYTIFY_DEFAULT_API_URL }}
+          PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
+          PSYTIFY_DEFAULT_CLERK_CLIENT_ID: ${{ vars.PSYTIFY_DEFAULT_CLERK_CLIENT_ID }}
         run: |
           chown -R builder:builder .
           su builder -c 'rustup default stable && CHECK=0 scripts/arch-package.sh'

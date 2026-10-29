@@ -1,0 +1,65 @@
+version: 2
+
+updates:
+  # Dipendenze del client desktop (workspace della radice).
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Rome
+    open-pull-requests-limit: 5
+    labels: [dependencies, rust]
+    commit-message:
+      prefix: "deps"
+    groups:
+      rust-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Iced 0.13, winit e il player video vanno aggiornati insieme e a mano: l'app Android usa una
+      # copia patchata di iced_winit (android/vendor).
+      - dependency-name: "iced"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "iced_*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "winit"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  # Il guscio Android è un workspace a parte, con il suo Cargo.lock.
+  - package-ecosystem: cargo
+    directory: "/android"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: Europe/Rome
+    open-pull-requests-limit: 3
+    labels: [dependencies, rust, android]
+    commit-message:
+      prefix: "deps(android)"
+    groups:
+      android-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "iced"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "iced_*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "winit"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  # Le action sono fissate allo SHA: Dependabot aggiorna lo SHA e il commento con la versione.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Rome
+    labels: [dependencies, github-actions]
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]

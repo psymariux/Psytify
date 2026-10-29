@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Please **do not paste tokens, signed URLs or your backend address**.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead? Include the exact error message.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Arch Linux (Wayland), Arch Linux (X11), Other Linux, Windows 10/11, Android]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Psytify version
+      description: Release tag or commit hash.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output of `psytify` started from a terminal, with secrets removed.
+      render: shell

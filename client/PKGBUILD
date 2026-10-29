@@ -1,0 +1,44 @@
+# Maintainer: Psytify
+# Pacchetto Arch Linux del client desktop, costruito dal sorgente locale.
+#
+# Non lanciare `makepkg` qui a mano: di default usa `client/src` (il codice!) come cartella di lavoro.
+# Usa `scripts/arch-package.sh`, che sposta BUILDDIR e crea anche il database del repository.
+pkgname=psytify
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Player musicale desktop per il catalogo Psytify"
+arch=('x86_64')
+url="https://github.com/psymariux/Psytify"
+license=('AGPL-3.0-only' 'OFL-1.1')
+# Audio (ALSA), finestra (Wayland o X11), tastiera (xkbcommon), rendering (Vulkan, con ripiego software),
+# videoclip (GStreamer: base per la pipeline, good per qtdemux e souphttpsrc, libav per H.264 e AAC).
+depends=('alsa-lib' 'wayland' 'libxkbcommon' 'libx11' 'libxcursor' 'libxi' 'libxrandr' 'vulkan-icd-loader' 'gcc-libs'
+         'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-libav')
+optdepends=('vulkan-radeon: rendering su GPU AMD'
+            'vulkan-intel: rendering su GPU Intel'
+            'nvidia-utils: rendering su GPU NVIDIA')
+makedepends=('cargo')
+# Il binario ha già i simboli tolti da Cargo; niente pacchetto -debug. `!lto`: il `-flto` di makepkg
+# trasformerebbe il codice C di `ring` in bitcode che il linker di Rust non collega (la LTO vera è
+# quella di Cargo, nel profilo release).
+options=('!debug' '!lto')
+source=()
+
+build() {
+  cd "$startdir/.."
+  cargo build -p psytify --release --locked
+}
+
+check() {
+  cd "$startdir/.."
+  cargo test -p psytify --locked
+}
+
+package() {
+  cd "$startdir/.."
+  install -Dm755 target/release/psytify "$pkgdir/usr/bin/psytify"
+  install -Dm644 client/psytify.desktop "$pkgdir/usr/share/applications/psytify.desktop"
+  install -Dm644 client/assets/psytify.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/psytify.svg"
+  install -Dm644 client/assets/fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL-Inter.txt"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

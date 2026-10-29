@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.ttf binary
+*.png binary
+*.apk binary
+*.svg linguist-detectable=false
+Cargo.lock linguist-generated
+docs/** linguist-documentation

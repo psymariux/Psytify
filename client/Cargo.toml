@@ -24,16 +24,16 @@ path = "src/main.rs"
 # Without the default features: the Fira Sans font is not needed (we use Inter) and system
 # theme detection (zbus on Linux) is not either, because the theme is fixed.
 iced = { version = "0.13.1", default-features = false, features = ["wgpu", "tiny-skia", "tokio", "svg", "lazy", "image-without-codecs"] }
-# Internet Archive covers: the same `image` 0.24 Iced already uses, with only the codecs of
-# the item images (JPEG, PNG, GIF, WebP) instead of the sixteen of `iced/image`.
-image = { version = "0.24", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
-# Audio: OutputStream, Sink and Decoder. symphonia-all covers flac, mp3, ogg/vorbis, wav and m4a (AAC).
-rodio = { version = "0.20.1", default-features = false, features = ["symphonia-all"] }
+# Internet Archive covers: `image` 0.25 with only the codecs of the item images (JPEG, PNG,
+# GIF, WebP). Iced keeps its own `image` 0.24, which only handles ready-made RGBA pixels here.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+# Audio: output device and Player. The decoding is ours (symphonia below), so rodio needs only playback.
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
 # Direct decoding of every format: rodio 0.20's decoder does not tell Symphonia the stream
 # length, so seeking in FLAC failed and M4A files did not open (see `player::decoder`).
 # It is already in the graph as a rodio dependency. To the symphonia-all formats we add the
 # `ogg` container (symphonia-format-ogg), without which the `.ogg` files served by the backend did not open.
-symphonia = { version = "0.5", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "vorbis", "ogg", "wav", "pcm", "adpcm"] }
+symphonia = { version = "0.6", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "vorbis", "ogg", "wav", "pcm", "adpcm"] }
 # HTTP to the backend: TLS with rustls, no dependency on the system OpenSSL.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Search debounce and asynchronous writing of configuration and downloads. `net`: the Clerk
@@ -42,7 +42,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["time", "fs", "io-util", "net", "rt", "sync", "macros"] }
 # Jam: the WebSocket client towards the backend. TLS with rustls and the Mozilla roots
 # (`wss://` in production), like reqwest.
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 # `SinkExt` and `StreamExt` to read and write on the jam socket.
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 serde = { version = "1", features = ["derive"] }

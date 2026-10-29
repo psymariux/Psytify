@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rodio::Source;
 use rodio::source::SeekError;
+use rodio::{ChannelCount, SampleRate, Source};
 use serde::{Deserialize, Serialize};
 
 /// Frequenze centrali delle bande, in Hz (ottave da 31 Hz a 16 kHz).
@@ -157,8 +157,8 @@ pub struct Equalized<S> {
 
 impl<S: Source<Item = f32>> Equalized<S> {
     pub fn new(input: S, control: Arc<EqControl>) -> Self {
-        let channels = usize::from(input.channels().max(1));
-        let sample_rate = input.sample_rate().max(1) as f32;
+        let channels = usize::from(input.channels().get());
+        let sample_rate = input.sample_rate().get() as f32;
         let mut equalized = Self {
             input,
             control,
@@ -211,15 +211,15 @@ impl<S: Source<Item = f32>> Iterator for Equalized<S> {
 }
 
 impl<S: Source<Item = f32>> Source for Equalized<S> {
-    fn current_frame_len(&self) -> Option<usize> {
-        self.input.current_frame_len()
+    fn current_span_len(&self) -> Option<usize> {
+        self.input.current_span_len()
     }
 
-    fn channels(&self) -> u16 {
+    fn channels(&self) -> ChannelCount {
         self.input.channels()
     }
 
-    fn sample_rate(&self) -> u32 {
+    fn sample_rate(&self) -> SampleRate {
         self.input.sample_rate()
     }
 
@@ -258,14 +258,14 @@ mod tests {
     }
 
     impl Source for Dc {
-        fn current_frame_len(&self) -> Option<usize> {
+        fn current_span_len(&self) -> Option<usize> {
             None
         }
-        fn channels(&self) -> u16 {
-            1
+        fn channels(&self) -> ChannelCount {
+            ChannelCount::MIN
         }
-        fn sample_rate(&self) -> u32 {
-            44_100
+        fn sample_rate(&self) -> SampleRate {
+            SampleRate::new(44_100).expect("a non-zero rate")
         }
         fn total_duration(&self) -> Option<Duration> {
             None
@@ -307,14 +307,14 @@ mod tests {
             }
         }
         impl Source for Samples {
-            fn current_frame_len(&self) -> Option<usize> {
+            fn current_span_len(&self) -> Option<usize> {
                 None
             }
-            fn channels(&self) -> u16 {
-                1
+            fn channels(&self) -> ChannelCount {
+                ChannelCount::MIN
             }
-            fn sample_rate(&self) -> u32 {
-                44_100
+            fn sample_rate(&self) -> SampleRate {
+                SampleRate::new(44_100).expect("a non-zero rate")
             }
             fn total_duration(&self) -> Option<Duration> {
                 None

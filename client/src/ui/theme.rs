@@ -70,6 +70,13 @@ pub const GUTTER: f32 = 28.0;
 /// Spazio tra i pannelli e dal bordo della finestra.
 pub const OUTER_GAP: f32 = 8.0;
 pub const CONTROL_HEIGHT: f32 = 36.0;
+/// Il modulo di accesso: una colonna stretta al centro della pagina.
+pub const SIGN_IN_WIDTH: f32 = 380.0;
+/// Campi e pulsanti del modulo di accesso: più alti dei controlli, per il pollice e per leggere.
+pub const FIELD_HEIGHT: f32 = 44.0;
+/// L'avatar grande in testa a un profilo e quello piccolo nelle righe delle persone.
+pub const AVATAR_PROFILE: f32 = 128.0;
+pub const AVATAR_ROW: f32 = 44.0;
 pub const SIDEBAR_WIDTH: f32 = 252.0;
 pub const TOP_BAR_HEIGHT: f32 = 56.0;
 pub const NAV_PITCH: f32 = 40.0;

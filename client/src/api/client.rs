@@ -118,7 +118,11 @@ pub fn is_allowed_cover_url(url: &reqwest::Url) -> bool {
         && url.password().is_none()
         && url.port().is_none()
         && url.host_str().is_some_and(|host| {
-            host == "archive.org" || host.ends_with(".archive.org") || host.ends_with(".dzcdn.net")
+            host == "archive.org"
+                || host.ends_with(".archive.org")
+                || host.ends_with(".dzcdn.net")
+                // Gli avatar dei profili.
+                || host == "img.clerk.com"
         })
 }
 
@@ -431,6 +435,37 @@ impl ApiClient {
         }
         let code = response.json::<ApiErrorBody>().await.map(|b| b.error).unwrap_or_default();
         Err(api_error(status, code))
+    }
+
+    /// Una richiesta con il login (profili, amici, attività). `None` per le risposte senza corpo
+    /// (`204`); `401` diventa `AuthExpired`, i messaggi del server restano quelli di `api_error`.
+    pub(crate) async fn authed<T: DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        token: &str,
+        query: &[(&str, String)],
+        body: Option<serde_json::Value>,
+    ) -> Result<Option<T>, AppError> {
+        let mut request = self
+            .http
+            .request(method, format!("{}{path}", self.base))
+            .bearer_auth(token)
+            .query(query)
+            .timeout(API_TIMEOUT);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        let response = request.send().await.map_err(|e| AppError::from_http(&e))?;
+        match response.status() {
+            StatusCode::NO_CONTENT => Ok(None),
+            s if s.is_success() => response.json::<T>().await.map(Some).map_err(|e| AppError::from_http(&e)),
+            StatusCode::UNAUTHORIZED => Err(AppError::AuthExpired),
+            s => {
+                let code = response.json::<ApiErrorBody>().await.map(|b| b.error).unwrap_or_default();
+                Err(api_error(s, code))
+            }
+        }
     }
 
     /// L'utente del token di Clerk. `401` vuol dire token scaduto o revocato.

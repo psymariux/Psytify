@@ -56,6 +56,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 0
             ),
             nav_item(
+                Icon::Account,
+                Icon::Account,
+                "Amici",
+                Screen::Friends,
+                matches!(app.screen, Screen::Friends | Screen::Profile | Screen::FriendPlaylist),
+                app.friend_requests(),
+            ),
+            nav_item(
                 Icon::Settings,
                 Icon::SettingsFill,
                 "Impostazioni",

@@ -2,6 +2,7 @@
 
 pub mod client;
 pub mod models;
+pub mod social;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};

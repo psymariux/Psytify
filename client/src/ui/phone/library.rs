@@ -20,8 +20,10 @@ use crate::ui::theme;
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     let new_playlist =
         Message::OpenDialog(Dialog::NewPlaylist { name: app.suggested_playlist_name(), seed: Vec::new() });
-    let header =
-        title_row("Libreria", vec![touch_icon(Icon::Plus, theme::TEXT, new_playlist), settings_icon()]);
+    let header = title_row(
+        "Libreria",
+        vec![touch_icon(Icon::Plus, theme::TEXT, new_playlist), super::friends_icon(app), settings_icon()],
+    );
     let text_width = width - theme::PHONE_ROW_COVER - 14.0 - 16.0;
     let filter = app.sidebar_filter;
     let mut list = column![];

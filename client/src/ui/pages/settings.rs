@@ -345,27 +345,94 @@ fn gain_label(gain: f32) -> String {
 // ---------- Account ----------
 
 fn account(app: &App, fit: Fit) -> Element<'_, Message> {
-    let body: Element<'_, Message> = match &app.account {
-        Account::Unavailable => note(
-            "Login non configurato",
-            "Imposta clerk_issuer e clerk_client_id in config.json per attivarlo.",
-        ),
-        Account::SignedOut => inline(
-            "Accedi con il browser",
-            "Facoltativo: catalogo e ascolto restano liberi.",
+    let mut groups = column![].spacing(32);
+    let body: Vec<Element<'_, Message>> = match &app.account {
+        Account::Unavailable => {
+            vec![note("Login non configurato", "Imposta clerk_issuer in config.json per attivarlo.")]
+        }
+        Account::SignedOut => vec![inline(
+            "Accedi a Psytify",
+            "Facoltativo: catalogo e ascolto restano liberi. Con l'account trovi gli amici e vedi cosa ascoltano.",
             primary_button("Accedi", None, Message::SignIn),
-        ),
-        Account::Working => inline("Accesso in corso", "Completa l'accesso nel browser.", muted("…").into()),
+        )],
+        Account::Working => vec![inline("Accesso in corso", "Un momento…", muted("…").into())],
         Account::SignedIn(me) => {
             let role = if me.admin { " · amministratore" } else { "" };
-            inline(
-                "Collegato",
-                format!("{}{role}", me.user_id),
-                outlined_button("Esci", None, Some(Message::SignOut)),
-            )
+            let who = match &me.profile {
+                Some(profile) => format!("{} · @{}{role}", profile.display_name, profile.handle),
+                None => format!("Nessun nome utente ancora{role}"),
+            };
+            let mut rows =
+                vec![inline("Collegato", who, outlined_button("Esci", None, Some(Message::SignOut)))];
+            if let Some(profile) = &me.profile {
+                rows.push(inline(
+                    "Il tuo profilo",
+                    "Come lo vedono gli altri: playlist pubbliche, amici e, per gli amici, cosa ascolti.",
+                    outlined_button("Apri", None, Some(Message::OpenProfile(profile.handle.clone()))),
+                ));
+            }
+            rows
         }
     };
-    group("Account", vec![body], fit)
+    groups = groups.push(group("Account", body, fit));
+
+    if let Account::SignedIn(me) = &app.account {
+        let edit = &app.social.edit;
+        let field = |placeholder: &'static str, value: &str, on_input: fn(String) -> Message| {
+            text_input(placeholder, value)
+                .on_input(on_input)
+                .on_submit(Message::ProfileSave(None))
+                .size(theme::FS_BODY)
+                .padding([8, 14])
+                .width(if fit.compact { Length::Fill } else { Length::Fixed(HOST_WIDTH) })
+                .style(theme::search_input)
+        };
+        let save_label = if edit.saving { "Salvataggio…" } else { "Salva il profilo" };
+        let mut rows = vec![
+            setting(
+                "Nome utente",
+                "Gli amici ti trovano così: da 3 a 30 fra lettere, cifre e _.",
+                field("nome_utente", &edit.handle, Message::ProfileHandle).into(),
+                fit,
+            ),
+            setting(
+                "Nome",
+                "Il nome che vedono gli altri.",
+                field("Il tuo nome", &edit.display_name, Message::ProfileName).into(),
+                fit,
+            ),
+            inline(
+                "",
+                "",
+                if edit.saving {
+                    outlined_button(save_label, None, None)
+                } else {
+                    primary_button(save_label, None, Message::ProfileSave(None))
+                },
+            ),
+        ];
+        if let Some(profile) = &me.profile {
+            rows.push(inline(
+                "Condividi cosa ascolti",
+                "Gli amici vedono il brano in corso, gli ascolti recenti e i tuoi artisti più ascoltati.",
+                switch(profile.share_activity, |on| Message::ProfileSave(Some(on))),
+            ));
+        }
+        groups = groups.push(group("Profilo", rows, fit));
+    }
+
+    if app.discord_available() {
+        groups = groups.push(group(
+            "Discord",
+            vec![inline(
+                "Mostra su Discord cosa ascolti",
+                "Con Discord aperto su questo computer, il tuo profilo dice «Sta ascoltando Psytify» con il brano.",
+                switch(app.discord_presence, Message::SetDiscord),
+            )],
+            fit,
+        ));
+    }
+    groups.into()
 }
 
 // ---------- Informazioni ----------

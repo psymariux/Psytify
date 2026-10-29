@@ -1,19 +1,22 @@
 //! Il player a schermo intero del telefono: la copertina grande che respira, titolo e artista, la
-//! barra di avanzamento con i tempi sotto, i controlli grandi per il pollice e, in fondo, il testo
-//! sincronizzato o la coda.
+//! barra di avanzamento con i tempi sotto, i controlli grandi per il pollice e, in fondo, le schede
+//! Testo e Coda. Aperta una scheda, il testo o la coda prendono il posto della copertina, che resta
+//! piccola accanto al titolo; i controlli restano dove sono.
 
 use std::time::Duration;
 
-use iced::widget::{Space, button, column, container, row, slider, text};
+use iced::widget::{Space, button, column, container, row, slider, stack, text};
 use iced::{Alignment, Color, Element, Length, Padding, Size, alignment};
 
 use super::touch_icon;
 use crate::app::{App, MenuTarget, Message, SideTab};
 use crate::player::queue::Repeat;
-use crate::player::seek::{format_time, progress as progress_of};
-use crate::ui::components::{H1_LINE, MUTED_LINE, art_of, heart, line, small};
+use crate::player::seek::{self, format_time, progress as progress_of};
+use crate::ui::components::{H1_LINE, MUTED_LINE, TITLE_LINE, art_of, heart, line, small};
+use crate::ui::cover::cover;
 use crate::ui::focus::breathing_cover;
 use crate::ui::icons::{Icon, icon};
+use crate::ui::touch_seek::touch_seek;
 use crate::ui::{lyrics, motion, side_panel, theme};
 
 /// Margine del player dai bordi.
@@ -22,6 +25,8 @@ const GUTTER: f32 = 24.0;
 const PLAY: f32 = 68.0;
 /// Precedente e successivo: più grandi degli interruttori ai lati.
 const SKIP: f32 = 56.0;
+/// La copertina piccola sopra il testo e la coda.
+const MINI_COVER: f32 = 52.0;
 
 pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
     let Some(track) = app.queue.current() else {
@@ -37,51 +42,83 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
     ]
     .align_y(Alignment::Center);
 
-    let side = (window.height * theme::PHONE_PLAYER_COVER).min(width).max(160.0);
     let mut detail = track.artist.name.clone();
     if let Some(album) = &track.album {
         detail = format!("{detail} · {}", album.title);
     }
-    let title_width = width - theme::TOUCH_TARGET - 8.0;
-    let title = row![
-        column![line(&track.title, title_width, H1_LINE), line(&detail, title_width, MUTED_LINE)]
-            .spacing(6)
-            .width(Length::Fill),
-        heart(app, track, true),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
 
-    let queue_open = app.side_tab == SideTab::Queue;
-    let choice = |label: &'static str, tab: SideTab, on: bool| -> Element<'_, Message> {
+    // Testo e coda prendono tutto lo spazio fra il brano e i controlli; la copertina si fa piccola.
+    let middle: Element<'_, Message> = match app.side_tab {
+        SideTab::NowPlaying => {
+            let side = (window.height * theme::PHONE_PLAYER_COVER).min(width).max(160.0);
+            let title_width = width - theme::TOUCH_TARGET - 8.0;
+            let title = row![
+                column![line(&track.title, title_width, H1_LINE), line(&detail, title_width, MUTED_LINE)]
+                    .spacing(6)
+                    .width(Length::Fill),
+                heart(app, track, true),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+            column![
+                container(breathing_cover(app, track, side))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center(Length::Fill),
+                title,
+            ]
+            .spacing(16)
+            .height(Length::Fill)
+            .into()
+        }
+        tab => {
+            let title_width = width - MINI_COVER - theme::TOUCH_TARGET - 2.0 * 12.0;
+            // Un tocco sul brano torna alla copertina grande.
+            let summary = button(
+                row![
+                    cover(&app.covers, art_of(track), MINI_COVER),
+                    column![
+                        line(&track.title, title_width, TITLE_LINE),
+                        line(&detail, title_width, MUTED_LINE)
+                    ]
+                    .spacing(4)
+                    .width(Length::Fill),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+            )
+            .padding(0)
+            .style(theme::bare)
+            .on_press(Message::SideTab(SideTab::NowPlaying));
+            let body: Element<'_, Message> = if tab == SideTab::Queue {
+                side_panel::queue_body(app)
+            } else {
+                lyrics::view_as(app, lyrics::PHONE)
+            };
+            column![
+                row![summary, heart(app, track, true)].spacing(12).align_y(Alignment::Center),
+                container(body).height(Length::Fill),
+            ]
+            .spacing(16)
+            .height(Length::Fill)
+            .into()
+        }
+    };
+
+    // Le due schede: toccare quella accesa torna alla copertina.
+    let choice = |label: &'static str, tab: SideTab| -> Element<'_, Message> {
+        let on = app.side_tab == tab;
         button(text(label).size(theme::FS_BODY).font(theme::FONT_MEDIUM))
             .padding([8, 18])
             .style(theme::pill(on))
-            .on_press(Message::SideTab(tab))
+            .on_press(Message::SideTab(if on { SideTab::NowPlaying } else { tab }))
             .into()
     };
-    let tabs =
-        row![choice("Testo", SideTab::Lyrics, !queue_open), choice("Coda", SideTab::Queue, queue_open)]
-            .spacing(8);
-    let below: Element<'_, Message> =
-        if queue_open { side_panel::queue_body(app) } else { lyrics::view(app) };
+    let tabs = container(row![choice("Testo", SideTab::Lyrics), choice("Coda", SideTab::Queue)].spacing(8))
+        .width(Length::Fill)
+        .align_x(alignment::Horizontal::Center);
 
-    let page = column![
-        header,
-        Space::with_height(8),
-        container(breathing_cover(app, track, side))
-            .width(Length::Fill)
-            .align_x(alignment::Horizontal::Center),
-        Space::with_height(12),
-        title,
-        progress(app),
-        controls(app),
-        Space::with_height(4),
-        tabs,
-        container(below).height(Length::Fill),
-    ]
-    .spacing(14)
-    .height(Length::Fill);
+    let page = column![header, middle, progress(app), controls(app), tabs].spacing(14).height(Length::Fill);
 
     let tint = app.covers.tint_of(art_of(track));
     let drift = if app.playback.is_playing() { motion::drift(Duration::from_secs(14)) } else { 0.0 };
@@ -98,20 +135,24 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
         .into()
 }
 
-/// La barra trascinabile a tutta larghezza, con il tempo trascorso e la durata sotto i due capi.
+/// La barra a tutta larghezza, con il tempo trascorso e la durata sotto i due capi. È alta quanto
+/// un bersaglio di tocco, e il dito la trascina (`touch_seek`), non solo la tocca.
 fn progress(app: &App) -> Element<'_, Message> {
     let duration = app.queue.current().map(|t| t.duration()).unwrap_or_default();
-    let position = app.shown_position().min(duration);
+    let position = app.playback.scrubbing.map_or_else(
+        || app.shown_position().min(duration),
+        |fraction| seek::seek_fraction(fraction, duration),
+    );
     let value = app.playback.scrubbing.unwrap_or_else(|| progress_of(position, duration));
     let bar = slider(0.0..=1.0, value, Message::Scrub)
         .step(0.001_f32)
+        .height(theme::TOUCH_TARGET)
         .on_release(Message::ScrubReleased)
         .style(theme::progress_slider);
     column![
-        bar,
+        stack![bar, touch_seek(Message::Scrub, Message::ScrubReleased)],
         row![small(format_time(position)), Space::with_width(Length::Fill), small(format_time(duration))],
     ]
-    .spacing(2)
     .into()
 }
 

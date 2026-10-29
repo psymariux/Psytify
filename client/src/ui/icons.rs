@@ -83,6 +83,9 @@ icons! {
     Sparkle => "sparkle.svg",
     UserPlus => "user-plus.svg",
     Chart => "chart.svg",
+    Google => "brand-google.svg",
+    GitHub => "brand-github.svg",
+    Discord => "brand-discord.svg",
 }
 
 /// Icona tinta nel colore indicato.

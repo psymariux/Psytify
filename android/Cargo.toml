@@ -54,11 +54,18 @@ target_sdk_version = 35
 [[package.metadata.android.uses_permission]]
 name = "android.permission.INTERNET"
 
+# La notifica dei comandi multimediali (schermata di blocco): da Android 13 si chiede a runtime
+# (`PsytifyMedia.start`).
+[[package.metadata.android.uses_permission]]
+name = "android.permission.POST_NOTIFICATIONS"
+
 [package.metadata.android.application]
 label = "Psytify"
 icon = "@mipmap/ic_launcher"
 # A development backend speaks HTTP on the local network; in production the backend is HTTPS.
 uses_cleartext_traffic = true
+# Il codice Java (`classes.dex`, la sessione multimediale): senza `hasCode`, Android non carica il dex.
+has_code = true
 
 [package.metadata.android.application.activity]
 # Every declarable configuration change: without them, Android recreates the activity and a

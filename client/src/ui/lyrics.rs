@@ -38,6 +38,8 @@ pub const PANEL: Look = Look { size: 22.0, gap: 14.0, anchor: 0.3 };
 /// A tutto schermo, e con meno spazio.
 pub const STAGE: Look = Look { size: 38.0, gap: 20.0, anchor: 0.4 };
 pub const STAGE_NARROW: Look = Look { size: 30.0, gap: 16.0, anchor: 0.4 };
+/// Nel player del telefono, quando il testo prende tutto lo spazio fra il brano e i controlli.
+pub const PHONE: Look = Look { size: 26.0, gap: 16.0, anchor: 0.32 };
 
 /// Interlinea dei versi.
 const LEADING: f32 = 1.2;
@@ -67,6 +69,11 @@ const PER_CHAR: f32 = 0.065;
 const DOTS: &str = "•  •  •";
 
 pub fn view(app: &App) -> Element<'_, Message> {
+    view_as(app, PANEL)
+}
+
+/// Il testo con l'aspetto `look`.
+pub fn view_as(app: &App, look: Look) -> Element<'_, Message> {
     let body: Element<'_, Message> = match &app.lyrics {
         Load::Idle => empty_block("Scegli un brano per leggere il testo."),
         Load::Loading => loading(),
@@ -76,7 +83,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         ]
         .spacing(12)
         .into(),
-        Load::Ready(text) => ready(app, text),
+        Load::Ready(text) => ready(app, text, look),
     };
     column![body, small("Testi da LRCLIB")].spacing(12).height(Length::Fill).into()
 }
@@ -89,9 +96,9 @@ fn loading<'a>() -> Element<'a, Message> {
     column(rows).spacing(PANEL.gap + 8.0).padding(Padding { top: 12.0, ..Padding::ZERO }).into()
 }
 
-fn ready<'a>(app: &'a App, shown: &'a Text) -> Element<'a, Message> {
+fn ready<'a>(app: &'a App, shown: &'a Text, look: Look) -> Element<'a, Message> {
     if shown.is_synced() {
-        responsive(move |size| synced(app, shown, PANEL, size.width, size.height)).into()
+        responsive(move |size| synced(app, shown, look, size.width, size.height)).into()
     } else if let Some(plain) = &shown.plain {
         scrollable(text(plain.as_str()).size(theme::FS_BODY).color(theme::MUTED))
             .height(Length::Fill)

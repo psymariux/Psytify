@@ -832,8 +832,14 @@ pub fn track_table<'a>(
 }
 
 /// Righe con copertina (ricerca): media da 50px su un passo di 64px.
+/// Stretta (telefono), come la tabella: niente durata e solo cuore e altro.
 pub fn track_rows<'a>(app: &App, tracks: &Arc<[Track]>, width: f32) -> Element<'a, Message> {
-    let text_width = width - 2.0 * ROW_PADDING - 50.0 - DURATION_WIDTH - ACTIONS_WIDTH - CELL_GAP * 3.0;
+    let compact = width < COMPACT_TABLE_BELOW;
+    let text_width = if compact {
+        width - 2.0 * ROW_PADDING - 50.0 - COMPACT_ACTIONS_WIDTH - CELL_GAP * 2.0
+    } else {
+        width - 2.0 * ROW_PADDING - 50.0 - DURATION_WIDTH - ACTIONS_WIDTH - CELL_GAP * 3.0
+    };
     let entered = app.page_motion.elapsed();
     column(tracks.iter().enumerate().map(|(index, track)| {
         let playing = app.is_current(track.id);
@@ -844,32 +850,38 @@ pub fn track_rows<'a>(app: &App, tracks: &Arc<[Track]>, width: f32) -> Element<'
             None => format!("{} · Singolo", track.artist.name),
         };
         let source = TrackSource::Catalogue;
-        let item = button(centered(
-            row![
-                cover(&app.covers, art_of(track), 50.0),
-                column![
-                    line(
-                        &track.title,
-                        text_width,
-                        faded(if playing { PLAYING_LINE } else { TITLE_LINE }, progress)
-                    ),
-                    line(&subtitle, text_width, faded(SUB_LINE, progress)),
-                ]
-                .spacing(4)
-                .width(Length::Fill),
-                container(muted(duration_label(track.duration_ms)))
-                    .width(DURATION_WIDTH)
-                    .align_x(alignment::Horizontal::Right),
-                row_actions(app, track, source, hot),
+        let mut cells = row![
+            cover(&app.covers, art_of(track), 50.0),
+            column![
+                line(
+                    &track.title,
+                    text_width,
+                    faded(if playing { PLAYING_LINE } else { TITLE_LINE }, progress)
+                ),
+                line(&subtitle, text_width, faded(SUB_LINE, progress)),
             ]
-            .spacing(CELL_GAP)
-            .align_y(Alignment::Center),
-        ))
-        .height(theme::ROW_MEDIA)
-        .width(Length::Fill)
-        .padding(Padding::from([0.0, ROW_PADDING]))
-        .style(theme::row(playing))
-        .on_press(row_press(tracks, index, playing));
+            .spacing(4)
+            .width(Length::Fill),
+        ]
+        .spacing(CELL_GAP)
+        .align_y(Alignment::Center);
+        cells = if compact {
+            cells.push(compact_actions(app, track, source, hot))
+        } else {
+            cells
+                .push(
+                    container(muted(duration_label(track.duration_ms)))
+                        .width(DURATION_WIDTH)
+                        .align_x(alignment::Horizontal::Right),
+                )
+                .push(row_actions(app, track, source, hot))
+        };
+        let item = button(centered(cells))
+            .height(theme::ROW_MEDIA)
+            .width(Length::Fill)
+            .padding(Padding::from([0.0, ROW_PADDING]))
+            .style(theme::row(playing))
+            .on_press(row_press(tracks, index, playing));
         hoverable(track.id, true, Some(MenuTarget::track(track, source)), item.into())
     }))
     .into()

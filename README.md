@@ -48,7 +48,9 @@ footprint even while it plays.
 | **Library** | Local playlists, liked songs, followed artists, saved albums |
 | **Downloads** | Save a track at the quality you pick, when its license permits |
 | **System integration** | Media keys and desktop widgets via MPRIS on Linux; headphone controls |
-| **Account** | Optional sign-in with [Clerk](https://clerk.com) (OAuth 2.0 + PKCE in the browser) |
+| **Account** | Optional in-app sign-in with [Clerk](https://clerk.com): password, email code, GitHub, Google or Discord |
+| **Friends** | Profiles, friend requests, what friends are playing, recent listens, top artists, public playlists, mutual friends |
+| **Discord** | Rich Presence on desktop: "Listening to Psytify" with track, artist, cover and time |
 
 Keyboard: <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> seek ±5 s · <kbd>Ctrl</kbd>+<kbd>F</kbd> search.
 
@@ -121,11 +123,15 @@ to `<Downloads>/Psytify`.
 <details>
 <summary><b>Optional sign-in with Clerk</b></summary>
 
-Create a **public** OAuth application in your Clerk dashboard (PKCE, scopes `openid profile email`)
-with the redirect URI `http://127.0.0.1:53682/callback`, then set `clerk_issuer` and
-`clerk_client_id` in the configuration file, or the `PSYTIFY_CLERK_ISSUER` and
-`PSYTIFY_CLERK_CLIENT_ID` environment variables. The refresh token is stored in `session.json`
-next to the configuration, readable only by your user.
+The sign-in form is part of the app and talks to the Clerk Frontend API as a native client. In your
+Clerk dashboard enable email, username and password with email-code verification, enable
+**Native applications**, and, for GitHub, Google or Discord, allow the redirect URL
+`http://127.0.0.1:53682/callback` (port in `oauth_port`). Then set `clerk_issuer` in the
+configuration file or the `PSYTIFY_CLERK_ISSUER` environment variable. The Clerk client token is
+stored in `session.json` next to the configuration, readable only by your user.
+
+The backend must accept Clerk session tokens for profiles and friends to work; see
+[docs/API.md](docs/API.md), section "Profili e amici".
 
 </details>
 
@@ -180,7 +186,8 @@ Handy switches:
 | `PSYTIFY_API_URL` | Backend address for this run |
 | `PSYTIFY_PHONE=1` | Open the phone layout in a desktop window |
 | `PSYTIFY_DEFAULT_API_URL` | *Compile time:* backend baked into a distribution build |
-| `PSYTIFY_DEFAULT_CLERK_ISSUER`, `PSYTIFY_DEFAULT_CLERK_CLIENT_ID` | *Compile time:* Clerk sign-in (Frontend API and public OAuth client ID) baked into a distribution build |
+| `PSYTIFY_DEFAULT_CLERK_ISSUER` | *Compile time:* Clerk Frontend API baked into a distribution build |
+| `PSYTIFY_DEFAULT_DISCORD_APP_ID` | *Compile time:* Discord Application ID for Rich Presence (set `discord_app_id` at run time instead) |
 
 The interface is documented in [docs/STYLE.md](docs/STYLE.md): three panels on black, the cover art
 tints the background, lime is the brand color, no glass effects. Colors and sizes come only from

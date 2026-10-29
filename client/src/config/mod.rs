@@ -23,15 +23,17 @@ pub const DEFAULT_API_URL: &str = match option_env!("PSYTIFY_DEFAULT_API_URL") {
     Some(url) if !url.is_empty() => url,
     _ => "http://127.0.0.1:8080",
 };
-/// Il login con Clerk di una build di distribuzione: issuer (Frontend API) e client ID
-/// dell'applicazione OAuth, compilati come il backend (`.env.build`). Non sono segreti. Valgono
-/// quando `config.json` non ne sceglie altri; vuoti, il login resta spento.
-const DEFAULT_CLERK_ISSUER: &str = match option_env!("PSYTIFY_DEFAULT_CLERK_ISSUER") {
-    Some(issuer) => issuer,
+/// L'app Discord della build (Rich Presence): l'Application ID non è un segreto. Vuoto, niente
+/// Discord finché `config.json` non ne indica uno.
+pub const DEFAULT_DISCORD_APP_ID: &str = match option_env!("PSYTIFY_DEFAULT_DISCORD_APP_ID") {
+    Some(id) => id,
     None => "",
 };
-const DEFAULT_CLERK_CLIENT_ID: &str = match option_env!("PSYTIFY_DEFAULT_CLERK_CLIENT_ID") {
-    Some(id) => id,
+/// Il login con Clerk di una build di distribuzione: la Frontend API dell'istanza, compilata come il
+/// backend (`.env.build`). Non è un segreto. Vale quando `config.json` non ne sceglie un'altra;
+/// vuota, il login resta spento.
+const DEFAULT_CLERK_ISSUER: &str = match option_env!("PSYTIFY_DEFAULT_CLERK_ISSUER") {
+    Some(issuer) => issuer,
     None => "",
 };
 /// Indirizzi predefiniti delle build di sviluppo (desktop ed emulatore Android). Le versioni
@@ -43,7 +45,7 @@ pub const API_URL_ENV: &str = "PSYTIFY_API_URL";
 /// Variabili d'ambiente che sostituiscono `clerk_issuer` e `clerk_client_id`.
 pub const CLERK_ISSUER_ENV: &str = "PSYTIFY_CLERK_ISSUER";
 pub const CLERK_CLIENT_ID_ENV: &str = "PSYTIFY_CLERK_CLIENT_ID";
-/// Porta di loopback del login: va registrata come redirect URI su Clerk.
+/// Porta di loopback per il ritorno dal browser (GitHub, Google, Discord).
 pub const DEFAULT_OAUTH_PORT: u16 = 53682;
 pub const MAX_PLAYLIST_NAME: usize = 80;
 /// Brani ascoltati di recente che l'app ricorda.
@@ -81,11 +83,14 @@ pub struct Playlist {
     /// volta, anche dopo un riavvio.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending: Vec<SourceItem>,
+    /// Visibile sul proprio profilo (a chi è collegato), con i brani del catalogo.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub public: bool,
 }
 
 impl Playlist {
     pub fn new(name: &str, tracks: Vec<Track>) -> Self {
-        Self { id: Uuid::new_v4(), name: clean_name(name), tracks, pending: Vec::new() }
+        Self { id: Uuid::new_v4(), name: clean_name(name), tracks, pending: Vec::new(), public: false }
     }
 
     pub fn contains(&self, track_id: Uuid) -> bool {
@@ -174,8 +179,14 @@ pub struct Config {
     pub download_quality: DownloadQuality,
     /// Frontend API dell'istanza Clerk (`https://...`); vuoto = login disattivato.
     pub clerk_issuer: String,
+    /// Dell'applicazione OAuth del login nel browser delle versioni precedenti: il login dentro
+    /// l'app non lo usa più, resta per non perdere il valore.
     pub clerk_client_id: String,
     pub oauth_port: u16,
+    /// Mostra su Discord cosa si ascolta (Rich Presence), se Discord è aperto sullo stesso PC.
+    pub discord_presence: bool,
+    /// Application ID dell'app Discord «Psytify»; vuoto = quello della build.
+    pub discord_app_id: String,
     /// Equalizzatore a 10 bande, acceso o spento con le sue regolazioni.
     pub equalizer: eq::Settings,
     /// Artisti seguiti: le loro uscite compaiono in «Novità».
@@ -218,6 +229,8 @@ impl Default for Config {
             clerk_issuer: String::new(),
             clerk_client_id: String::new(),
             oauth_port: DEFAULT_OAUTH_PORT,
+            discord_presence: true,
+            discord_app_id: String::new(),
             equalizer: eq::Settings::default(),
             followed: Vec::new(),
             saved_albums: Vec::new(),
@@ -257,13 +270,9 @@ pub fn remember_search(history: &mut Vec<String>, query: &str) {
 }
 
 impl Config {
-    /// L'applicazione OAuth di Clerk, se configurata con un issuer https e un client ID.
+    /// L'istanza Clerk del login, se configurata con un issuer https.
     pub fn clerk_app(&self) -> Option<ClerkApp> {
-        clerk_app_from(
-            or_default(&self.clerk_issuer, DEFAULT_CLERK_ISSUER),
-            or_default(&self.clerk_client_id, DEFAULT_CLERK_CLIENT_ID),
-            self.oauth_port,
-        )
+        clerk_app_from(or_default(&self.clerk_issuer, DEFAULT_CLERK_ISSUER), self.oauth_port)
     }
 
     /// Ripara valori fuori intervallo letti da disco.
@@ -303,16 +312,13 @@ fn or_default<'a>(value: &'a str, default: &'a str) -> &'a str {
     if value.trim().is_empty() { default } else { value }
 }
 
-/// L'applicazione OAuth, se issuer (`https://`) e client ID sono validi.
-fn clerk_app_from(issuer: &str, client_id: &str, port: u16) -> Option<ClerkApp> {
+/// L'istanza Clerk, se l'issuer è un indirizzo `https://` valido.
+fn clerk_app_from(issuer: &str, port: u16) -> Option<ClerkApp> {
     let issuer = issuer.trim().trim_end_matches('/');
-    let client_id = client_id.trim();
     let valid = issuer.starts_with("https://")
         && issuer.len() > "https://".len()
-        && !issuer.contains(['?', '#', ' '])
-        && !client_id.is_empty()
-        && client_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
-    valid.then(|| ClerkApp { issuer: issuer.to_owned(), client_id: client_id.to_owned(), port })
+        && !issuer.contains(['?', '#', ' ']);
+    valid.then(|| ClerkApp { issuer: issuer.to_owned(), port })
 }
 
 /// Backend predefinito scelto da chi avvia l'app (Android: fissato alla compilazione, perché sul

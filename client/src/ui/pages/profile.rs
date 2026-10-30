@@ -221,7 +221,7 @@ pub fn playlist_view(app: &App, width: f32) -> Element<'_, Message> {
     );
     let mut page = column![
         crate::ui::components::hero(art, "Playlist pubblica", &playlist.name, &meta, width),
-        crate::ui::components::play_bar(&playlist.tracks, vec![owner]),
+        crate::ui::components::play_bar(app, &playlist.tracks, vec![owner]),
     ]
     .spacing(24);
     page = if playlist.tracks.is_empty() {

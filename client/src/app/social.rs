@@ -379,7 +379,8 @@ impl App {
                 self.social.form = SignInForm::default();
                 self.social.published.clear();
                 let leave = if self.screen == Screen::SignIn { self.go_back_or_home() } else { Task::none() };
-                Task::batch([leave, self.load_friends()])
+                let avatar = self.signed_in_profile().and_then(|p| p.avatar_url.clone());
+                Task::batch([leave, self.load_friends(), self.fetch_covers(avatar.into_iter().collect())])
             }
             Err(err) => {
                 self.account = Account::SignedOut;
@@ -495,7 +496,8 @@ impl App {
                     me.profile = Some(profile);
                 }
                 self.notice = Some(Notice::Info("Profilo salvato".into()));
-                Task::none()
+                let avatar = self.signed_in_profile().and_then(|p| p.avatar_url.clone());
+                self.fetch_covers(avatar.into_iter().collect())
             }
             Err(AppError::Api { status: 409, .. }) => {
                 self.notice = Some(Notice::Error("Questo nome utente è già preso.".into()));

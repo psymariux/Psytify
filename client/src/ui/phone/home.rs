@@ -4,10 +4,10 @@
 
 use std::sync::Arc;
 
-use iced::widget::{Space, button, column, container, row, text};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding};
 
-use super::{settings_icon, touch_icon};
+use super::touch_icon;
 use crate::api::Track;
 use crate::app::{App, LibraryFilter, Load, Message, Screen};
 use crate::config::{FollowedArtist, SavedAlbum};
@@ -16,10 +16,12 @@ use crate::ui::components::{
     skeleton_tiles, text_button, tile_row, wrapped,
 };
 use crate::ui::cover::cover;
-use crate::ui::icons::{Icon, icon, mark};
+use crate::ui::icons::{Icon, icon};
 use crate::ui::shelf::{self, release_art, release_play};
 use crate::ui::{motion, pages, theme};
 
+/// L'avatar in cima alla Home: grande abbastanza da essere il tasto del cassetto.
+const AVATAR: f32 = 44.0;
 /// Copertina dell'uscita in evidenza.
 const FEATURED_COVER: f32 = 128.0;
 /// Il Play dell'uscita in evidenza.
@@ -118,18 +120,35 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     page.into()
 }
 
-/// Il marchio a sinistra, gli amici e le impostazioni a destra.
+/// In cima, l'avatar di chi ascolta (apre il cassetto con profilo, amici e impostazioni) e le
+/// scorciatoie a ciò che si usa di più: novità, amici e jam.
 fn header(app: &App) -> Element<'_, Message> {
+    let me = button(super::avatar(app, AVATAR)).padding(0).style(theme::bare).on_press(Message::OpenDrawer);
+    let chip = |label: &'static str, dot: bool, message: Message| -> Element<'_, Message> {
+        let mut face = row![text(label).size(theme::FS_BODY).font(theme::FONT_MEDIUM)]
+            .spacing(6)
+            .align_y(Alignment::Center);
+        if dot {
+            face = face.push(container(Space::new(6.0, 6.0)).style(theme::bar(theme::ACCENT, 3.0)));
+        }
+        button(face).padding([8, 16]).style(theme::pill(false)).on_press(message).into()
+    };
     row![
-        mark(26.0),
-        text("Psytify").size(theme::FS_PHONE_TITLE - 4.0).font(theme::FONT_SEMIBOLD),
-        Space::with_width(Length::Fill),
-        super::friends_icon(app),
-        settings_icon(),
+        me,
+        scrollable(
+            row![
+                chip("Novità", app.unread_news() > 0, Message::Navigate(Screen::News)),
+                chip("Amici", app.friend_requests() > 0, Message::Navigate(Screen::Friends)),
+                chip("Jam", false, Message::OpenJam),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new().width(0).scroller_width(0)))
+        .width(Length::Fill),
     ]
-    .spacing(10)
+    .spacing(14)
     .align_y(Alignment::Center)
-    .height(theme::TOUCH_TARGET)
     .into()
 }
 

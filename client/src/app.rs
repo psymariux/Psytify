@@ -21,7 +21,7 @@ pub use listening::{Feed, HERO_PERIOD, HERO_SWAP, Hero, SleepChoice, SleepTimer}
 pub use menu::{ContextMenu, Dialog, MenuTarget, OpenDialog, TrackSource};
 pub use social::{AuthField, AuthMode, SignInForm, SocialState};
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -619,6 +619,13 @@ pub enum Message {
     MenuPlaylists(bool),
     /// Apre o chiude l'elenco delle qualità di download accanto al menu.
     MenuDownloads(bool),
+    /// Apre o chiude l'elenco dei timer di spegnimento nel menu del player (telefono).
+    MenuTimers(bool),
+    /// Apre il cassetto dell'avatar (telefono).
+    OpenDrawer,
+    CloseDrawer,
+    /// Chiude il cassetto ed esegue il messaggio: la voce scelta.
+    DrawerGo(Box<Message>),
     OpenDialog(Dialog),
     DialogInput(String),
     DialogSubmit,
@@ -886,6 +893,10 @@ pub struct App {
     /// Brano del gruppo da raggiungere: quando il suo audio parte, si salta alla posizione condivisa.
     jam_target: Option<JamTarget>,
     pub downloading: HashSet<Uuid>,
+    /// «Scarica tutto» in corso: i brani vanno giù due alla volta e arriva un solo avviso alla fine.
+    pub download_batch: Option<DownloadBatch>,
+    /// Il cassetto del telefono è aperto dall'istante indicato.
+    pub drawer: Option<Instant>,
     /// Copertine scaricate, per URL.
     pub covers: Covers,
     pub notice: Option<Notice>,
@@ -1017,6 +1028,8 @@ impl App {
             jam_code: String::new(),
             jam_target: None,
             downloading: HashSet::new(),
+            download_batch: None,
+            drawer: None,
             covers: Covers::default(),
             saving: false,
             save_pending: false,
@@ -1202,17 +1215,13 @@ impl App {
         if before == after {
             return task;
         }
-        let mut keyboard = Task::none();
+        let keyboard = Task::none();
         if before.screen != after.screen {
             self.page_motion = Tween::new(0.0, 1.0, tokens::MOTION_BASE);
-            // Sul telefono non c'è Ctrl F: entrando in Cerca il campo prende il fuoco e si apre la
-            // tastiera del sistema; uscendo, la tastiera se ne va.
-            let searching = after.screen == Screen::Search;
-            if is_phone() && searching != (before.screen == Screen::Search) {
-                crate::soft_keyboard(searching);
-                if searching {
-                    keyboard = text_input::focus(text_input::Id::new(SEARCH_INPUT));
-                }
+            // Sul telefono la tastiera non si apre da sola entrando in Cerca: coprirebbe la pagina
+            // prima che si veda cosa c'è. Si apre toccando il campo; uscendo da Cerca se ne va.
+            if is_phone() && before.screen == Screen::Search && after.screen != Screen::Search {
+                crate::soft_keyboard(false);
             }
         }
         if before.panel_open != after.panel_open {
@@ -1299,6 +1308,7 @@ impl App {
             || self.like_pop.is_some_and(|(_, since)| since.elapsed() < tokens::MOTION_PANEL)
             || self.play_pop.is_some_and(|since| since.elapsed() < tokens::MOTION_PANEL)
             || self.menu.as_ref().is_some_and(|menu| menu.since.elapsed() < tokens::MOTION_BASE)
+            || self.drawer.is_some_and(|since| since.elapsed() < tokens::MOTION_PANEL)
             || self.dialog.as_ref().is_some_and(|open| open.since.elapsed() < tokens::MOTION_PANEL)
             || self.shortcuts.is_some_and(|since| since.elapsed() < tokens::MOTION_PANEL)
     }
@@ -2011,6 +2021,7 @@ impl App {
                 if let Some(menu) = &mut self.menu {
                     menu.playlists = open;
                     menu.downloads &= !open;
+                    menu.timers &= !open;
                 }
                 Task::none()
             }
@@ -2018,6 +2029,27 @@ impl App {
                 if let Some(menu) = &mut self.menu {
                     menu.downloads = open;
                     menu.playlists &= !open;
+                    menu.timers &= !open;
+                }
+                Task::none()
+            }
+            Message::OpenDrawer => {
+                self.drawer = Some(Instant::now());
+                Task::none()
+            }
+            Message::CloseDrawer => {
+                self.drawer = None;
+                Task::none()
+            }
+            Message::DrawerGo(message) => {
+                self.drawer = None;
+                self.handle(*message)
+            }
+            Message::MenuTimers(open) => {
+                if let Some(menu) = &mut self.menu {
+                    menu.timers = open;
+                    menu.playlists &= !open;
+                    menu.downloads &= !open;
                 }
                 Task::none()
             }
@@ -2044,7 +2076,12 @@ impl App {
             }
             Message::Escape => self.escape(),
             Message::SystemBack => {
-                if self.menu.is_some() || self.dialog.is_some() || self.shortcuts.is_some() || self.focus {
+                if self.menu.is_some()
+                    || self.drawer.is_some()
+                    || self.dialog.is_some()
+                    || self.shortcuts.is_some()
+                    || self.focus
+                {
                     self.escape()
                 } else {
                     self.go_back()
@@ -2081,13 +2118,42 @@ impl App {
             }
             Message::DownloadAs(track, quality) => self.download(track, quality),
             Message::DownloadAll(tracks) => {
-                let quality = self.download_quality;
-                Task::batch(
-                    tracks.iter().filter(|t| t.downloadable).cloned().map(|t| self.download(t, quality)),
-                )
+                if !tracks.iter().any(|t| t.downloadable) {
+                    self.notice = Some(Notice::Info(
+                        "Nessuno di questi brani si può scaricare: la licenza non lo permette".into(),
+                    ));
+                    return Task::none();
+                }
+                let batch = self.download_batch.get_or_insert_with(DownloadBatch::default);
+                for track in tracks.iter().filter(|t| t.downloadable) {
+                    let known = batch.pending.iter().any(|queued| queued.id == track.id)
+                        || batch.active.contains(&track.id)
+                        || self.downloading.contains(&track.id);
+                    if !known {
+                        batch.pending.push_back(track.clone());
+                        batch.total += 1;
+                    }
+                }
+                if batch.total == 0 {
+                    self.download_batch = None;
+                    self.notice = Some(Notice::Info("Niente da scaricare: i brani sono già in corso".into()));
+                    return Task::none();
+                }
+                self.pump_downloads()
             }
             Message::DownloadFinished(id, result) => {
                 self.downloading.remove(&id);
+                if let Some(batch) = self.download_batch.as_mut().filter(|b| b.active.contains(&id)) {
+                    batch.active.remove(&id);
+                    match &result {
+                        Ok(_) => batch.done += 1,
+                        Err(err) => {
+                            batch.failed += 1;
+                            batch.last_error = Some(err.to_string());
+                        }
+                    }
+                    return self.pump_downloads();
+                }
                 self.notice = Some(match result {
                     Ok(done) => Notice::Info(saved_message(&done)),
                     Err(err) => Notice::Error(format!("Download non riuscito. {err}")),
@@ -2322,6 +2388,8 @@ impl App {
                 Some((current, load)) if *current == id && !load.needs_load() => Task::none(),
                 _ => self.open_artist(id),
             },
+            // Sul telefono il campo prende il fuoco solo se lo si tocca.
+            Screen::Search if is_phone() => Task::none(),
             Screen::Search => text_input::focus(text_input::Id::new(SEARCH_INPUT)),
             Screen::Friends => self.load_friends(),
             _ => Task::none(),
@@ -2971,9 +3039,40 @@ impl App {
 
     // ---------- Download e persistenza ----------
 
+    /// Fa partire i prossimi brani di «Scarica tutto» fino a `BATCH_PARALLEL` insieme; finiti tutti,
+    /// un solo avviso riassume com'è andata.
+    fn pump_downloads(&mut self) -> Task<Message> {
+        let quality = self.download_quality;
+        let mut starts = Vec::new();
+        while let Some(batch) = self.download_batch.as_mut().filter(|b| b.active.len() < BATCH_PARALLEL) {
+            let Some(track) = batch.pending.pop_front() else { break };
+            batch.active.insert(track.id);
+            starts.push(track);
+        }
+        let tasks: Vec<_> = starts.into_iter().map(|track| self.download(track, quality)).collect();
+        if let Some(batch) =
+            self.download_batch.as_ref().filter(|b| b.pending.is_empty() && b.active.is_empty())
+        {
+            self.notice = Some(batch.summary());
+            self.download_batch = None;
+        }
+        Task::batch(tasks)
+    }
+
+    /// Quanti brani di «Scarica tutto» sono finiti e quanti erano in tutto, se c'è un lotto in corso.
+    pub fn download_progress(&self) -> Option<(usize, usize)> {
+        self.download_batch.as_ref().map(|b| (b.done + b.failed, b.total))
+    }
+
     fn download(&mut self, track: Track, quality: DownloadQuality) -> Task<Message> {
-        // Il pulsante compare solo per i brani scaricabili; il controllo resta anche qui.
-        if !track.downloadable || !self.downloading.insert(track.id) {
+        // Il controllo sta qui: il player del telefono mostra il tasto anche per i brani che non si
+        // possono scaricare, e dice perché.
+        if !track.downloadable {
+            self.notice =
+                Some(Notice::Info("Questo brano non si può scaricare: la licenza non lo permette".into()));
+            return Task::none();
+        }
+        if !self.downloading.insert(track.id) {
             return Task::none();
         }
         let id = track.id;
@@ -3262,6 +3361,34 @@ fn into_load<T>(result: Result<T, AppError>) -> Load<T> {
 }
 
 /// Testo di ricerca pronto per il backend: senza caratteri di controllo, da 1 a 100 caratteri.
+/// Quanti brani di «Scarica tutto» scaricano insieme: abbastanza per tenere occupata la rete, pochi
+/// per non soffocare il telefono.
+const BATCH_PARALLEL: usize = 2;
+
+/// Un «Scarica tutto» in corso.
+#[derive(Debug, Default)]
+pub struct DownloadBatch {
+    pending: VecDeque<Track>,
+    active: HashSet<Uuid>,
+    total: usize,
+    done: usize,
+    failed: usize,
+    last_error: Option<String>,
+}
+
+impl DownloadBatch {
+    /// L'avviso finale: quanti brani sono arrivati e, se qualcuno no, l'ultimo errore.
+    fn summary(&self) -> Notice {
+        match (self.failed, &self.last_error) {
+            (0, _) => Notice::Info(format!("Scaricati {} brani", self.done)),
+            (_, Some(err)) => {
+                Notice::Error(format!("Scaricati {} brani su {}. {err}", self.done, self.done + self.failed))
+            }
+            _ => Notice::Error(format!("Scaricati {} brani su {}", self.done, self.done + self.failed)),
+        }
+    }
+}
+
 /// La piattaforma scelta all'avvio (vedi `crate::run`).
 static PLATFORM: std::sync::OnceLock<Platform> = std::sync::OnceLock::new();
 
@@ -3415,6 +3542,20 @@ fn inserted_char(old: &str, new: &str) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn download_batch_summary_counts_what_arrived() {
+        let batch = DownloadBatch { total: 3, done: 3, ..DownloadBatch::default() };
+        assert!(matches!(batch.summary(), Notice::Info(text) if text == "Scaricati 3 brani"));
+        let batch = DownloadBatch {
+            total: 3,
+            done: 2,
+            failed: 1,
+            last_error: Some("rete".into()),
+            ..DownloadBatch::default()
+        };
+        assert!(matches!(batch.summary(), Notice::Error(text) if text.starts_with("Scaricati 2 brani su 3")));
+    }
 
     #[test]
     fn one_inserted_character_is_found_anywhere() {

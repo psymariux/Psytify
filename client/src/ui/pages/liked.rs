@@ -19,7 +19,7 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     let meta = format!("{} · {}", count_label(tracks.len()), total_label(total));
     let mut page = column![
         hero(liked_cover(HERO_COVER), "Playlist", "Brani che ti piacciono", &meta, width),
-        play_bar(&tracks, vec![]),
+        play_bar(app, &tracks, vec![]),
     ]
     .spacing(24);
     if tracks.is_empty() {

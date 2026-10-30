@@ -8,6 +8,7 @@
 //! In Cerca il campo sta in cima alla pagina e la tastiera del sistema si apre entrando
 //! (`App::update`).
 
+pub mod drawer;
 pub mod home;
 pub mod library;
 mod player;
@@ -16,7 +17,7 @@ use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length, Padding, Size};
 
 use super::components::{Line, art_of, heart, line};
-use super::cover::cover;
+use super::cover::{Art, cover, cover_round};
 use super::icons::{Icon, icon};
 use super::{motion, theme};
 use crate::app::{Account, App, Message, Screen, phone_tab_of};
@@ -127,6 +128,27 @@ pub fn touch_icon<'a>(glyph: Icon, color: iced::Color, on_press: Message) -> Ele
         .into()
 }
 
+/// L'avatar di chi è collegato (la foto, o un colore con l'iniziale); senza accesso, un tondo con
+/// l'icona dell'account.
+pub fn avatar<'a>(app: &App, size: f32) -> Element<'a, Message> {
+    match app.signed_in_profile() {
+        Some(profile) => cover_round(
+            &app.covers,
+            Art {
+                id: crate::ui::pages::search::art_id(&profile.handle),
+                title: &profile.display_name,
+                url: profile.avatar_url.as_deref(),
+            },
+            size,
+        ),
+        None => container(icon(Icon::Account, size * 0.5, theme::MUTED))
+            .center_x(Length::Fixed(size))
+            .center_y(Length::Fixed(size))
+            .style(theme::bar(theme::RAISED, size / 2.0))
+            .into(),
+    }
+}
+
 /// Gli amici, dalla Home e dalla Libreria; un punto lime se c'è una richiesta da guardare.
 pub fn friends_icon(app: &App) -> Element<'_, Message> {
     let glyph = touch_icon(Icon::Account, theme::TEXT, Message::Navigate(Screen::Friends));
@@ -222,7 +244,7 @@ fn nav(app: &App) -> Element<'_, Message> {
 }
 
 /// Dove porta la scheda Profilo: il proprio profilo se c'è, altrimenti le impostazioni o l'accesso.
-fn profile_target(app: &App) -> Message {
+pub(super) fn profile_target(app: &App) -> Message {
     match &app.account {
         Account::SignedIn(me) => match &me.profile {
             Some(profile) => Message::OpenProfile(profile.handle.clone()),

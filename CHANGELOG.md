@@ -6,8 +6,18 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Phone: opening Search no longer pops up the keyboard, and the equalizer bands can be dragged with a finger.
+
 ### Added
 
+- Phone: a bottom-sheet menu for tracks, albums, artists, playlists and the player (cover and title on
+  top, big rows, and full-screen lists for playlists, download quality and the sleep timer).
+- Phone: an avatar at the top of Home opens a drawer from the right with profile, news, friends, Jam,
+  settings and sign-out; quick chips next to it replace the old logo and title.
+- Phone: a download button in the player, and a Spotify-style action row on playlists with
+  "download all" (two tracks at a time, one summary notice at the end).
 - Phone: a Profile tab in the tab bar, and a Jam button in the full-screen player.
 - In-app updates: at startup Psytify checks the latest release and offers it in Settings → About; the
   package comes through the backend, and Android hands it to the system installer.

@@ -59,7 +59,7 @@ pub fn view(app: &App, id: Uuid, width: f32) -> Element<'_, Message> {
     }
     let kicker = if playlist.public { "Playlist pubblica" } else { "Playlist" };
     let mut page =
-        column![hero(art, kicker, &playlist.name, &meta, width), play_bar(&tracks, extra)].spacing(24);
+        column![hero(art, kicker, &playlist.name, &meta, width), play_bar(app, &tracks, extra)].spacing(24);
     if !playlist.pending.is_empty() {
         let source = playlist.pending[0].source.label();
         page = page.push(small(format!(

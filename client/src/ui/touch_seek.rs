@@ -1,9 +1,10 @@
-//! Il trascinamento col dito sulla barra di avanzamento del telefono.
+//! Il trascinamento col dito sulla barra di avanzamento e sugli slider dell'equalizzatore.
 //!
 //! Su Android i gesti arrivano ai widget già tradotti (`android/vendor/iced_winit`, `touch.rs`): un
 //! tocco breve è un clic, ma un trascinamento diventa una rotella in pixel, e lo `slider` di Iced
-//! la ignora. Questo strato invisibile sta sopra la barra (`stack!`): quando il dito scorre in
-//! orizzontale sulla barra, la posizione segue il dito; quando il dito si stacca, il brano salta lì.
+//! la ignora. Questo strato invisibile sta sopra la barra (`stack!`): quando il dito scorre lungo
+//! la barra, il valore segue il dito; quando il dito si stacca, arriva il rilascio. La barra del
+//! brano è orizzontale, le bande dell'equalizzatore verticali.
 //! Tutto il resto (il tocco breve, il mouse) passa alla barra sotto.
 //!
 //! Il dito che si stacca si riconosce da due segni: il puntatore che se ne va (`CursorLeft`, dopo
@@ -14,9 +15,17 @@ use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{Tree, Widget, tree};
 use iced::advanced::{Clipboard, Shell, renderer};
 use iced::event::{self, Event};
-use iced::{Element, Length, Rectangle, Size, mouse};
+use iced::{Element, Length, Point, Rectangle, Size, mouse};
+
+/// Lungo quale asse scorre la barra.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Axis {
+    Horizontal,
+    Vertical,
+}
 
 pub struct TouchSeek<Message> {
+    axis: Axis,
     on_change: Box<dyn Fn(f32) -> Message>,
     on_release: Message,
 }
@@ -27,7 +36,15 @@ pub fn touch_seek<Message>(
     on_change: impl Fn(f32) -> Message + 'static,
     on_release: Message,
 ) -> TouchSeek<Message> {
-    TouchSeek { on_change: Box::new(on_change), on_release }
+    TouchSeek { axis: Axis::Horizontal, on_change: Box::new(on_change), on_release }
+}
+
+/// Lo stesso per uno slider verticale: la frazione è 1 in alto e 0 in basso.
+pub fn touch_slider_vertical<Message>(
+    on_change: impl Fn(f32) -> Message + 'static,
+    on_release: Message,
+) -> TouchSeek<Message> {
+    TouchSeek { axis: Axis::Vertical, on_change: Box::new(on_change), on_release }
 }
 
 #[derive(Debug, Default)]
@@ -36,6 +53,14 @@ struct State {
     dragging: bool,
     /// Il puntatore si è mosso dall'ultima rotella: il dito è ancora giù.
     moved: bool,
+}
+
+/// Il gesto va lungo la barra: orizzontale per la barra del brano, verticale per le bande.
+fn along_axis(axis: Axis, x: f32, y: f32) -> bool {
+    match axis {
+        Axis::Horizontal => x.abs() > y.abs(),
+        Axis::Vertical => y.abs() > x.abs(),
+    }
 }
 
 impl<Message: Clone, Theme, Renderer: renderer::Renderer> Widget<Message, Theme, Renderer>
@@ -82,12 +107,15 @@ impl<Message: Clone, Theme, Renderer: renderer::Renderer> Widget<Message, Theme,
     ) -> event::Status {
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
-        let fraction = |x: f32| ((x - bounds.x) / bounds.width.max(1.0)).clamp(0.0, 1.0);
+        let fraction = |at: Point| match self.axis {
+            Axis::Horizontal => ((at.x - bounds.x) / bounds.width.max(1.0)).clamp(0.0, 1.0),
+            Axis::Vertical => (1.0 - (at.y - bounds.y) / bounds.height.max(1.0)).clamp(0.0, 1.0),
+        };
         match event {
             Event::Mouse(mouse::Event::CursorMoved { position }) => {
                 state.moved = true;
                 if state.dragging {
-                    shell.publish((self.on_change)(fraction(position.x)));
+                    shell.publish((self.on_change)(fraction(position)));
                     return event::Status::Captured;
                 }
                 event::Status::Ignored
@@ -102,9 +130,9 @@ impl<Message: Clone, Theme, Renderer: renderer::Renderer> Widget<Message, Theme,
                     return event::Status::Captured;
                 }
                 match cursor.position_over(bounds) {
-                    Some(at) if moved && x.abs() > y.abs() => {
+                    Some(at) if moved && along_axis(self.axis, x, y) => {
                         state.dragging = true;
-                        shell.publish((self.on_change)(fraction(at.x)));
+                        shell.publish((self.on_change)(fraction(at)));
                         event::Status::Captured
                     }
                     _ => event::Status::Ignored,

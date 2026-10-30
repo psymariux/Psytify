@@ -8,6 +8,8 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- Phone: the avatar drawer opens from the left, floats a little away from the screen edges with rounded
+  corners, and slides in with a short spring instead of snapping to the edge.
 - Windows: the volume and progress sliders (and the equalizer bands) show the hand cursor instead of
   the four-arrow move cursor.
 - Track lists: leaving a row no longer switches off the hover of the row you just entered, which could

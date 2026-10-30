@@ -1348,7 +1348,7 @@ impl App {
             || self.like_pop.is_some_and(|(_, since)| since.elapsed() < tokens::MOTION_PANEL)
             || self.play_pop.is_some_and(|since| since.elapsed() < tokens::MOTION_PANEL)
             || self.menu.as_ref().is_some_and(|menu| menu.since.elapsed() < tokens::MOTION_BASE)
-            || self.drawer.is_some_and(|since| since.elapsed() < tokens::MOTION_PANEL)
+            || self.drawer.is_some_and(|since| since.elapsed() < tokens::MOTION_SPRING)
             || self.dialog.as_ref().is_some_and(|open| open.since.elapsed() < tokens::MOTION_PANEL)
             || self.shortcuts.is_some_and(|since| since.elapsed() < tokens::MOTION_PANEL)
     }

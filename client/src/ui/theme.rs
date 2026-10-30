@@ -408,14 +408,15 @@ pub fn sheet(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     }
 }
 
-/// Il cassetto da destra del telefono: stessa superficie della sheet, angoli tondi sul lato sinistro.
+/// Il cassetto da sinistra del telefono: stessa superficie della sheet, angoli tondi tutti intorno
+/// perché galleggia staccato dai bordi.
 pub fn drawer(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: background(super::motion::fade(hex(0x1c1c1c), alpha)),
         border: iced::Border {
             color: Color::TRANSPARENT,
             width: 0.0,
-            radius: iced::border::Radius::new(0.0).top_left(SHEET_RADIUS).bottom_left(SHEET_RADIUS),
+            radius: iced::border::Radius::new(SHEET_RADIUS),
         },
         text_color: Some(super::motion::fade(TEXT, alpha)),
         shadow: floating_shadow(alpha),

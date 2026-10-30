@@ -8,6 +8,10 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- Windows: the volume and progress sliders (and the equalizer bands) show the hand cursor instead of
+  the four-arrow move cursor.
+- Track lists: leaving a row no longer switches off the hover of the row you just entered, which could
+  leave the like heart and the row actions on the wrong row.
 - Jam: creating or joining a room with nothing playing no longer hangs on "Connecting"; the room is read
   whether or not a track is playing.
 - Friends: requests you send now show up right away ("Request sent" next to the person, and in the
@@ -17,6 +21,12 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- Updates: a banner under the top bar (top of the page on the phone) when a new version is out, with
+  Download and a close button; Settings → About has "Check now" and says if you are up to date. The app
+  checks at startup and every six hours, and on Android a periodic check that finds a new release also
+  posts a system notification. Local builds only check when you ask.
+- Full-screen player: a vertical volume bar on the right edge that widens, turns lime and shows the
+  percentage while you drag it, then settles back to a thin line.
 - Jam: pick friends from the Jam page and send them an invite; invites appear in their Jam page and as a
   notice, with one tap to join. Joining a jam signed in uses your profile name by default.
 - Phone: a bottom-sheet menu for tracks, albums, artists, playlists and the player (cover and title on

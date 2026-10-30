@@ -12,6 +12,7 @@ mod menu;
 mod social;
 #[cfg(feature = "tour")]
 mod tour;
+mod updates;
 mod video;
 
 pub use artists::{ArtistsState, Discography};
@@ -20,6 +21,7 @@ pub use external::{ArtistExtras, ExternalState, ImportTarget};
 pub use listening::{Feed, HERO_PERIOD, HERO_SWAP, Hero, SleepChoice, SleepTimer};
 pub use menu::{ContextMenu, Dialog, MenuTarget, OpenDialog, TrackSource};
 pub use social::{AuthField, AuthMode, SignInForm, SocialState};
+pub use updates::{UpdateCheck, UpdateStatus};
 
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
@@ -79,6 +81,8 @@ const STALE_REFRESH: usize = 24;
 const TICK: Duration = Duration::from_millis(250);
 /// Ogni quanto, con l'accesso fatto, si chiedono al server richieste d'amicizia e inviti alle jam.
 const SOCIAL_POLL: Duration = Duration::from_secs(15);
+/// Quanto resta allargata la barra del volume dopo l'ultimo tocco.
+const VOLUME_LINGER: Duration = Duration::from_millis(1800);
 /// Sotto questa posizione "precedente" cambia brano, sopra riparte da capo.
 const RESTART_THRESHOLD: Duration = Duration::from_secs(3);
 /// Quanto prima della fine si comincia a scaricare tutto il brano successivo (la testata è già
@@ -488,8 +492,12 @@ pub enum Message {
     PlaySource(SourceKind, String),
     /// Copertina scaricata e decodificata; `None` se non si può mostrare.
     CoverLoaded(String, Option<CoverPixels>),
-    /// L'ultima release letta dal backend, se è da installare.
-    UpdateChecked(Option<api::update::Offer>),
+    /// Chiede l'ultima release: all'avvio, dal timer o con «Controlla ora».
+    UpdateCheck(UpdateCheck),
+    /// L'ultima release letta dal backend: l'offerta, se è da installare.
+    UpdateChecked(UpdateCheck, Result<Option<api::update::Offer>, AppError>),
+    /// Chiude il banner dell'aggiornamento (torna con la prossima release).
+    UpdateDismiss,
     UpdateRequested,
     UpdateDownloaded(Result<PathBuf, AppError>),
     Imported(String, Result<DiscoverImport, AppError>),
@@ -523,6 +531,10 @@ pub enum Message {
     Warmed(Uuid, Quality, Result<StreamBuffer, AppError>),
     /// Il mouse è entrato o uscito da un elemento; se è un brano e si ferma, se ne prepara la testata.
     Hover(Option<Hovered>),
+    /// Il mouse è uscito dall'elemento: conta solo se è ancora quello sotto il mouse. Due righe
+    /// vicine possono mandare ingresso e uscita in ordine inverso; senza l'identità, l'uscita della
+    /// riga di prima spegne l'hover della riga nuova.
+    HoverEnd(Uuid),
     /// Il mouse è rimasto sul brano abbastanza a lungo (generazione del passaggio).
     HoverSettled(u64, Uuid),
     TogglePlay,
@@ -533,6 +545,11 @@ pub enum Message {
     ScrubReleased,
     Volume(f32),
     VolumeReleased,
+    /// La barra del volume dei player a schermo intero: si allarga mentre la si usa.
+    VolumeSide(f32),
+    VolumeSideReleased,
+    /// La barra torna a filo, se nessuno l'ha toccata di nuovo (generazione del tocco).
+    VolumeCollapse(u64),
     ToggleMute,
     ToggleShuffle,
     CycleRepeat,
@@ -841,6 +858,9 @@ pub struct App {
     pub panel_open: bool,
     /// Apertura del pannello laterale, da 0 (chiuso) a 1.
     pub panel_motion: Tween,
+    /// La barra del volume dei player a schermo intero: 0 a filo, 1 allargata.
+    pub volume_motion: Tween,
+    volume_touch: u64,
     /// Scala della copertina grande: 1 mentre suona, `COVER_REST` in pausa (con la molla).
     pub cover_motion: Tween,
     /// Il cursore delle schede del pannello, misurato in schede (0, 1, 2), con la molla.
@@ -913,8 +933,14 @@ pub struct App {
     pub covers: Covers,
     pub notice: Option<Notice>,
     pub toast: Option<Toast>,
-    /// L'aggiornamento offerto in Informazioni, e a che punto è il download.
+    /// L'aggiornamento offerto (banner e Informazioni), e a che punto è il download.
     pub update: Option<UpdateState>,
+    /// Com'è andato l'ultimo controllo.
+    pub update_status: UpdateStatus,
+    /// La release il cui banner è stato chiuso.
+    update_dismissed: Option<String>,
+    /// La release per cui è già partita la notifica di sistema.
+    update_notified: Option<String>,
     toast_generation: u64,
     saving: bool,
     save_pending: bool,
@@ -955,6 +981,9 @@ impl App {
             notice: None,
             toast: None,
             update: None,
+            update_status: UpdateStatus::Idle,
+            update_dismissed: None,
+            update_notified: None,
             toast_generation: 0,
             api,
             server_draft: config.server.clone().unwrap_or_default(),
@@ -1024,6 +1053,8 @@ impl App {
             playlists: config.playlists,
             panel_open: config.panel_open,
             panel_motion: Tween::rest(if config.panel_open { 1.0 } else { 0.0 }),
+            volume_motion: Tween::rest(0.0),
+            volume_touch: 0,
             page_motion: Tween::rest(1.0),
             cover_motion: Tween::rest(tokens::COVER_REST).with_curve(Curve::Spring),
             side_tab_motion: Tween::rest(SideTab::default().index()).with_curve(Curve::Spring),
@@ -1109,7 +1140,7 @@ impl App {
             },
             Message::GpuDetected,
         );
-        let update = app.check_update();
+        let update = app.check_update(UpdateCheck::Startup);
         (
             app,
             Task::batch([
@@ -1127,24 +1158,6 @@ impl App {
                 update,
                 window::get_oldest().map(Message::WindowReady),
             ]),
-        )
-    }
-
-    /// Chiede una volta, all'avvio, se c'è una release più recente di questa copia. Senza rete, o
-    /// con una compilazione locale, non dice nulla.
-    fn check_update(&self) -> Task<Message> {
-        if api::update::BUILD_TAG.is_none() {
-            return Task::none();
-        }
-        let Ok(api) = self.api.clone() else { return Task::none() };
-        Task::perform(
-            async move {
-                api.latest_release()
-                    .await
-                    .ok()
-                    .and_then(|release| api::update::offer(release, api::update::BUILD_TAG))
-            },
-            Message::UpdateChecked,
         )
     }
 
@@ -1188,6 +1201,11 @@ impl App {
         }
         if self.needs_tick() {
             subscriptions.push(iced::time::every(TICK).map(|_| Message::Tick));
+        }
+        if self.polls_updates() {
+            subscriptions.push(
+                iced::time::every(updates::UPDATE_POLL).map(|_| Message::UpdateCheck(UpdateCheck::Poll)),
+            );
         }
         if self.polls_social() {
             subscriptions.push(iced::time::every(SOCIAL_POLL).map(|_| Message::SocialPoll));
@@ -1318,6 +1336,7 @@ impl App {
             // Le righe di una lista entrano una dopo l'altra: l'ultima finisce dopo la pagina.
             || self.page_motion.elapsed() < tokens::PAGE_ENTRY
             || self.panel_motion.is_running()
+            || self.volume_motion.is_running()
             || self.toast.as_ref().is_some_and(|toast| toast.motion.is_running() || self.notice.is_none())
             || self.covers.is_fading()
             || self.cover_motion.is_running()
@@ -1685,6 +1704,13 @@ impl App {
                     Message::HoverSettled(generation, id)
                 })
             }
+            Message::HoverEnd(id) => {
+                if self.hovered.is_some_and(|(hovered, _)| hovered.id == id) {
+                    self.hovered = None;
+                    self.hover_generation += 1;
+                }
+                Task::none()
+            }
             Message::HoverSettled(generation, id) => {
                 let still_there = self.hovered.is_some_and(|(hovered, _)| hovered.id == id);
                 if generation == self.hover_generation && still_there {
@@ -1764,6 +1790,28 @@ impl App {
                 Task::none()
             }
             Message::VolumeReleased => self.persist(),
+            Message::VolumeSide(volume) => {
+                self.volume_touch += 1;
+                self.volume_motion.retarget(1.0, tokens::MOTION_PANEL);
+                self.set_volume(volume);
+                self.volume_before_mute = None;
+                Task::none()
+            }
+            Message::VolumeSideReleased => {
+                let touch = self.volume_touch;
+                Task::batch([
+                    self.persist(),
+                    Task::perform(tokio::time::sleep(VOLUME_LINGER), move |()| {
+                        Message::VolumeCollapse(touch)
+                    }),
+                ])
+            }
+            Message::VolumeCollapse(touch) => {
+                if touch == self.volume_touch {
+                    self.volume_motion.retarget(0.0, tokens::MOTION_PANEL);
+                }
+                Task::none()
+            }
             Message::ToggleMute => {
                 match self.volume_before_mute.take() {
                     Some(previous) => self.set_volume(previous),
@@ -1966,8 +2014,10 @@ impl App {
                 // Il videoclip aperto riparte con il decoder scelto; il prossimo lo usa da sé.
                 Task::batch([self.persist(), self.reopen_video()])
             }
-            Message::UpdateChecked(offer) => {
-                self.update = offer.map(UpdateState::Offered);
+            Message::UpdateCheck(kind) => self.check_update(kind),
+            Message::UpdateChecked(kind, result) => self.update_checked(kind, result),
+            Message::UpdateDismiss => {
+                self.dismiss_update();
                 Task::none()
             }
             Message::UpdateRequested => {
@@ -3789,6 +3839,37 @@ mod tests {
         let _ = app.go_forward();
         assert_eq!(app.screen, Screen::Settings);
         assert!(!app.can_go_forward());
+    }
+
+    #[test]
+    fn the_exit_of_a_previous_row_does_not_switch_off_the_new_hover() {
+        let mut app = App::new().0;
+        let (a, b) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let _ = app.update(Message::Hover(Some(Hovered { id: b, track: false })));
+        // Salendo di riga, il mouse entra nella A e solo dopo esce dalla B.
+        let _ = app.update(Message::Hover(Some(Hovered { id: a, track: false })));
+        let _ = app.update(Message::HoverEnd(b));
+        assert_eq!(app.hovered.map(|(hovered, _)| hovered.id), Some(a));
+        let _ = app.update(Message::HoverEnd(a));
+        assert!(app.hovered.is_none());
+    }
+
+    #[test]
+    fn the_side_volume_widens_while_used_and_collapses_only_after_the_last_touch() {
+        let mut app = App::new().0;
+        let _ = app.update(Message::VolumeSide(0.4));
+        assert_eq!(app.playback.volume, 0.4);
+        assert_eq!(app.volume_motion.target(), 1.0, "toccata, la barra si allarga");
+        let first = app.volume_touch;
+
+        // Un secondo tocco prima che scada il tempo: il ritorno del primo non deve chiuderla.
+        let _ = app.update(Message::VolumeSide(0.5));
+        let _ = app.update(Message::VolumeCollapse(first));
+        assert_eq!(app.volume_motion.target(), 1.0);
+        assert_eq!(app.playback.volume, 0.5);
+
+        let _ = app.update(Message::VolumeCollapse(app.volume_touch));
+        assert_eq!(app.volume_motion.target(), 0.0, "dopo l'ultimo tocco torna a filo");
     }
 
     #[test]

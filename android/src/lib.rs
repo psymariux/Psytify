@@ -41,6 +41,7 @@ fn android_main(app: AndroidApp) {
     media::start(&app);
     psytify::set_phone_media(media::show);
     psytify::set_phone_installer(media::install);
+    psytify::set_phone_update_notifier(media::notify_update);
     let _ = iced_winit::ANDROID_APP.set(app);
     if let Err(err) = psytify::run(psytify::Platform::Phone) {
         log::error!("Psytify si è chiuso: {err}");

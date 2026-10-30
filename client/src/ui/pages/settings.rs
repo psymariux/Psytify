@@ -14,13 +14,17 @@ use iced::{Alignment, Element, Length, Theme};
 
 use crate::api::update;
 use crate::api::{DownloadQuality, Quality};
-use crate::app::{Account, App, MenuTarget, Message, SettingsTab, UpdateState, is_phone};
+use crate::app::{
+    Account, App, MenuTarget, Message, SettingsTab, UpdateCheck, UpdateState, UpdateStatus, is_phone,
+};
 use crate::config;
 use crate::player::eq::{self, PRESETS};
 use crate::ui::components::{h1, h2, muted, outlined_button, outlined_button_owned, primary_button, small};
 use crate::ui::icons::Icon;
+use crate::ui::pointer::pointer;
 use crate::ui::theme;
 use crate::ui::touch_seek::touch_slider_vertical;
+use crate::ui::update_banner;
 
 /// Frequenze delle bande, come le legge chi regola un equalizzatore.
 const BAND_LABELS: [&str; eq::BANDS] = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
@@ -302,13 +306,15 @@ fn sound(app: &App, fit: Fit) -> Element<'_, Message> {
     let bands = row(settings.gains.iter().enumerate().map(|(band, &gain)| {
         // Il dito che scorre arriva come rotella, che lo slider ignora: lo strato sopra lo fa
         // seguire. Occupa tutta la colonna della banda, larga abbastanza per un dito.
-        let slider = vertical_slider(-eq::MAX_GAIN_DB..=eq::MAX_GAIN_DB, gain, move |value| {
-            Message::EqualizerBand(band, value)
-        })
-        .step(0.5_f32)
-        .height(BAND_HEIGHT)
-        .on_release(Message::EqualizerReleased)
-        .style(theme::volume_slider);
+        let slider = pointer(
+            vertical_slider(-eq::MAX_GAIN_DB..=eq::MAX_GAIN_DB, gain, move |value| {
+                Message::EqualizerBand(band, value)
+            })
+            .step(0.5_f32)
+            .height(BAND_HEIGHT)
+            .on_release(Message::EqualizerReleased)
+            .style(theme::volume_slider),
+        );
         let touch = touch_slider_vertical(
             move |fraction| Message::EqualizerBand(band, band_gain(fraction)),
             Message::EqualizerReleased,
@@ -482,7 +488,7 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
         ),
         setting("Server", server_detail(app), server_control(app, host_width), fit),
     ];
-    rows.extend(update_setting(app, fit));
+    rows.push(update_setting(app, fit));
     let mut groups = column![group("Psytify", rows, fit)];
     if !is_phone() {
         groups = groups.push(group("Scorciatoie", shortcuts, fit));
@@ -500,17 +506,27 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
         .into()
 }
 
-/// La riga dell'aggiornamento: l'offerta da scaricare, il download in corso o il file pronto.
-fn update_setting(app: &App, fit: Fit) -> Option<Element<'_, Message>> {
-    let (detail, control): (String, Element<'_, Message>) = match app.update.as_ref()? {
-        UpdateState::Offered(offer) => (
+/// La riga dell'aggiornamento: l'ultimo controllo con «Controlla ora», l'offerta da scaricare, il
+/// download in corso o il file pronto. C'è sempre, anche in una compilazione locale.
+fn update_setting(app: &App, fit: Fit) -> Element<'_, Message> {
+    let (detail, control): (String, Element<'_, Message>) = match app.update.as_ref() {
+        Some(UpdateState::Offered(offer)) => (
             format!("Versione {} disponibile.", offer.tag),
             primary_button("Scarica", None, Message::UpdateRequested),
         ),
-        UpdateState::Downloading(tag) => (format!("Download di {tag} in corso"), muted("In corso").into()),
-        UpdateState::Downloaded(path) => (format!("Scaricato in {}", path.display()), muted("Pronto").into()),
+        Some(UpdateState::Downloading(tag)) => {
+            (format!("Download di {tag} in corso"), muted("In corso").into())
+        }
+        Some(UpdateState::Downloaded(path)) => {
+            (format!("Scaricato in {}", path.display()), muted("Pronto").into())
+        }
+        None => {
+            let checking = app.update_status == UpdateStatus::Checking;
+            let press = (!checking).then_some(Message::UpdateCheck(UpdateCheck::Manual));
+            (update_banner::status_line(app).to_owned(), outlined_button("Controlla ora", None, press))
+        }
     };
-    Some(setting("Aggiornamento", detail, control, fit))
+    setting("Aggiornamento", detail, control, fit)
 }
 
 /// Dove arriva il catalogo, e se è il server predefinito o uno scelto qui.

@@ -148,7 +148,16 @@ const STEPS: &[Step] = &[
             app.update(Message::OpenPanel(SideTab::Lyrics))
         }
     }),
+    // Una versione nuova offerta: il banner sotto la barra alta (desktop) o in cima alla pagina.
+    ("update-banner", 2000, |app| {
+        let asset = crate::api::update::Asset { name: "psytify-v9.9.9-linux-x86_64.tar.gz".into(), size: 1 };
+        app.update =
+            Some(super::UpdateState::Offered(crate::api::update::Offer { tag: "v9.9.9".into(), asset }));
+        go(app, [Message::Navigate(Screen::Home)])
+    }),
     ("focus-lyrics", 4000, |app| go(app, [Message::SideTab(SideTab::NowPlaying), Message::ToggleFocus])),
+    // La barra del volume dei player a schermo intero, allargata come quando la si tocca.
+    ("volume-side", 2000, |app| go(app, [Message::VolumeSide(0.30)])),
     // Sul telefono: il testo e la coda aperti nel player a schermo intero.
     ("player-lyrics", 4000, |app| app.update(Message::SideTab(SideTab::Lyrics))),
     // Sul telefono: la sheet del menu sul brano in corso, sul player e con l'elenco dei timer.

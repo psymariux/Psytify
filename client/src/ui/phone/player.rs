@@ -17,8 +17,9 @@ use crate::ui::components::{H1_LINE, MUTED_LINE, TITLE_LINE, art_of, heart, line
 use crate::ui::cover::cover;
 use crate::ui::focus::breathing_cover;
 use crate::ui::icons::{Icon, icon};
+use crate::ui::pointer::pointer;
 use crate::ui::touch_seek::touch_seek;
-use crate::ui::{lyrics, motion, side_panel, theme};
+use crate::ui::{lyrics, motion, side_panel, theme, volume_side};
 
 /// Margine del player dai bordi.
 const GUTTER: f32 = 24.0;
@@ -76,7 +77,7 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
             ]
             .spacing(8)
             .align_y(Alignment::Center);
-            column![
+            let cover_and_title = column![
                 container(breathing_cover(app, track, side))
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -84,8 +85,13 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
                 title,
             ]
             .spacing(16)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+            // Il volume sta sul bordo destro, sopra la copertina che resta al centro.
+            let bar = (window.height * 0.26).clamp(130.0, 230.0);
+            stack![cover_and_title, volume_side::overlay(app, bar, true)]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
         }
         tab => {
             let title_width = width - MINI_COVER - theme::TOUCH_TARGET - 2.0 * 12.0;
@@ -160,11 +166,13 @@ fn progress(app: &App) -> Element<'_, Message> {
         |fraction| seek::seek_fraction(fraction, duration),
     );
     let value = app.playback.scrubbing.unwrap_or_else(|| progress_of(position, duration));
-    let bar = slider(0.0..=1.0, value, Message::Scrub)
-        .step(0.001_f32)
-        .height(theme::TOUCH_TARGET)
-        .on_release(Message::ScrubReleased)
-        .style(theme::progress_slider);
+    let bar = pointer(
+        slider(0.0..=1.0, value, Message::Scrub)
+            .step(0.001_f32)
+            .height(theme::TOUCH_TARGET)
+            .on_release(Message::ScrubReleased)
+            .style(theme::progress_slider),
+    );
     column![
         stack![bar, touch_seek(Message::Scrub, Message::ScrubReleased)],
         row![small(format_time(position)), Space::with_width(Length::Fill), small(format_time(duration))],

@@ -73,7 +73,7 @@ impl Tween {
     }
 
     #[cfg(test)]
-    fn target(&self) -> f32 {
+    pub(crate) fn target(&self) -> f32 {
         self.to
     }
 

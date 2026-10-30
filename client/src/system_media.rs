@@ -61,8 +61,9 @@ pub use other::{Handle, subscription};
 pub use phone::{Handle, subscription};
 #[cfg(target_os = "android")]
 pub use phone::{
-    command as phone_command, install as phone_install, register as set_phone_media,
-    register_install as set_phone_installer,
+    command as phone_command, install as phone_install, notify_update as phone_notify_update,
+    register as set_phone_media, register_install as set_phone_installer,
+    register_update_notifier as set_phone_update_notifier,
 };
 
 #[cfg(target_os = "linux")]
@@ -205,6 +206,7 @@ mod phone {
 
     static SHOW: OnceLock<Show> = OnceLock::new();
     static INSTALL: OnceLock<Box<dyn Fn(&Path) + Send + Sync>> = OnceLock::new();
+    static NOTIFY_UPDATE: OnceLock<Box<dyn Fn(&str) + Send + Sync>> = OnceLock::new();
     static COMMANDS: OnceLock<Commands> = OnceLock::new();
 
     fn commands() -> &'static Commands {
@@ -222,6 +224,18 @@ mod phone {
     /// Il guscio Android registra come si installa un pacchetto scaricato dall'app.
     pub fn register_install(install: impl Fn(&Path) + Send + Sync + 'static) {
         let _ = INSTALL.set(Box::new(install));
+    }
+
+    /// Il guscio Android registra come si mostra la notifica di una versione nuova.
+    pub fn register_update_notifier(notify: impl Fn(&str) + Send + Sync + 'static) {
+        let _ = NOTIFY_UPDATE.set(Box::new(notify));
+    }
+
+    /// Avvisa con una notifica di sistema che c'è la versione `tag`.
+    pub fn notify_update(tag: &str) {
+        if let Some(notify) = NOTIFY_UPDATE.get() {
+            notify(tag);
+        }
     }
 
     /// Passa il pacchetto al sistema, che chiede la conferma all'utente e installa.

@@ -21,7 +21,7 @@ use super::cover::{backdrop, cover};
 use super::icons::Icon;
 use super::motion::{self, fade};
 use super::pages::video;
-use super::{lyrics as ui_lyrics, now_playing, theme, top_bar};
+use super::{lyrics as ui_lyrics, now_playing, theme, top_bar, volume_side};
 use crate::api::Track;
 use crate::app::{App, Load, Message};
 
@@ -48,11 +48,15 @@ pub fn view(app: &App) -> Option<Element<'_, Message>> {
         return None;
     }
     let track = app.queue.current()?;
-    Some(if app.focus_video && app.video_available() {
+    let stage = if app.focus_video && app.video_available() {
         video_stage(app, track)
     } else {
         lyrics_stage(app, track)
-    })
+    };
+    // Il volume sta sul bordo destro; il margine lo stacca dalla finestra e dal testo.
+    let bar = (app.window_size.height * 0.30).clamp(140.0, 260.0);
+    let volume = container(volume_side::overlay(app, bar, false)).padding([0, 16]);
+    Some(stack![stage, volume].width(Length::Fill).height(Length::Fill).into())
 }
 
 /// Chiude la vista; i pulsanti per passare all'altra stanno a sinistra della X.

@@ -75,6 +75,10 @@ pub fn view(app: &App, window: Size) -> Element<'_, Message> {
     if !root {
         screen = screen.push(back_bar(app));
     }
+    // Una versione nuova si vede in cima a ogni scheda, non solo in Impostazioni.
+    if root && let Some(banner) = crate::ui::update_banner::view(app, true) {
+        screen = screen.push(banner);
+    }
     // In Cerca il titolo e il campo restano fermi sopra i risultati, come nelle app da telefono.
     if app.screen == Screen::Search {
         screen = screen.push(search_header(app));

@@ -621,7 +621,7 @@ pub fn hoverable<'a>(
 ) -> Element<'a, Message> {
     let area = mouse_area(content)
         .on_enter(Message::Hover(Some(Hovered { id, track })))
-        .on_exit(Message::Hover(None));
+        .on_exit(Message::HoverEnd(id));
     match menu {
         Some(target) => area.on_right_press(Message::OpenMenu(target)).into(),
         None => area.into(),

@@ -624,6 +624,17 @@ pub fn cover_gradient(from: Color, to: Color) -> impl Fn(&Theme) -> container::S
     }
 }
 
+/// Il banner dell'aggiornamento: una fascia sul livello delle card con un filo lime, perché si veda
+/// senza gridare (niente fondo colorato).
+pub fn update_banner(_: &Theme) -> container::Style {
+    container::Style {
+        background: background(SURFACE),
+        border: border(1.0, ACCENT, RADIUS_PILL),
+        text_color: Some(TEXT),
+        ..container::Style::default()
+    }
+}
+
 /// Riquadro di uno stato vuoto o d'errore: linea tratteggiata non disponibile in Iced, quindi
 /// un bordo pieno di 1px al livello dei controlli.
 pub fn notice_box(_: &Theme) -> container::Style {
@@ -964,6 +975,39 @@ fn level_slider(fill: Color, grown: f32) -> impl Fn(&Theme, slider::Status) -> s
                 border_color: Color::TRANSPARENT,
             },
         }
+    }
+}
+
+/// Il volume dei player a schermo intero. `open` (0 a riposo, 1 toccato) allarga la barra, la
+/// accende di lime e fa comparire la maniglia: a riposo è un filo sottile e spento.
+pub fn side_volume(open: f32) -> impl Fn(&Theme, slider::Status) -> slider::Style {
+    move |_, _| {
+        let width = 4.0 + 6.0 * open;
+        slider::Style {
+            rail: slider::Rail {
+                backgrounds: (
+                    Background::Color(super::motion::mix(super::motion::fade(TEXT, 0.55), ACCENT, open)),
+                    Background::Color(super::motion::mix(super::motion::fade(TEXT, 0.18), CONTROL, open)),
+                ),
+                width,
+                border: border(0.0, Color::TRANSPARENT, width / 2.0),
+            },
+            handle: slider::Handle {
+                shape: slider::HandleShape::Circle { radius: 1.0 + 8.0 * open },
+                background: Background::Color(TEXT),
+                border_width: 0.0,
+                border_color: Color::TRANSPARENT,
+            },
+        }
+    }
+}
+
+/// La pastiglia dietro il volume: invisibile a riposo, un fondo pieno quando è toccato.
+pub fn volume_pill(open: f32) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: background(super::motion::fade(SURFACE, 0.94 * open)),
+        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+        ..container::Style::default()
     }
 }
 

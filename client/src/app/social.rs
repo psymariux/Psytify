@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use super::{Account, App, Load, Message, Notice, Screen, into_load};
 use crate::api::social::{
-    Friends, MyProfile, Profile, ProfileDraft, PublicPlaylist, Relation, UserPage, suggest_handle,
+    Friends, JamInvite, MyProfile, Profile, ProfileDraft, PublicPlaylist, Relation, UserPage, suggest_handle,
 };
 use crate::api::{ApiClient, Me, Track};
 use crate::auth::{self, ClerkUser, CodeStep, Provider, Session, Step};
@@ -124,6 +124,13 @@ pub struct SocialState {
     pub playlist: Option<Load<Arc<PublicPlaylist>>>,
     /// Nomi utente con un'azione d'amicizia in corso.
     pub pending: Vec<String>,
+    /// Inviti alle jam ricevuti dagli amici, dal più recente.
+    pub jam_invites: Vec<JamInvite>,
+    /// Codici degli inviti già annunciati con un avviso: ognuno si annuncia una volta sola.
+    announced_invites: Vec<String>,
+    /// Amici scelti nella schermata Jam, da invitare, e l'invio in corso.
+    pub invitees: Vec<String>,
+    pub inviting: bool,
     sent: Option<SentPresence>,
     /// Il brano appena contato come ascoltato, da mandare.
     pub(super) listen_due: Option<Uuid>,
@@ -538,7 +545,13 @@ impl App {
                             .iter()
                             .chain(f.now_playing.iter().filter_map(|n| n.track.cover_url.as_ref()))
                     })
-                    .chain(friends.incoming.iter().filter_map(|p| p.avatar_url.as_ref()))
+                    .chain(
+                        friends
+                            .incoming
+                            .iter()
+                            .chain(&friends.outgoing)
+                            .filter_map(|p| p.avatar_url.as_ref()),
+                    )
                     .cloned()
                     .collect();
                 self.fetch_covers(urls)
@@ -546,11 +559,136 @@ impl App {
             Err(_) => Task::none(),
         };
         let expired = result == Err(AppError::AuthExpired);
+        // Un aggiornamento periodico che fallisce non cancella la lista già mostrata.
+        if result.is_err() && matches!(self.social.friends, Load::Ready(_)) && !expired {
+            return covers;
+        }
         self.social.friends = into_load(result);
         if expired {
             return self.social_synced(Err(AppError::AuthExpired));
         }
         covers
+    }
+
+    /// Ogni tanto: richieste d'amicizia e inviti alle jam arrivano senza che l'utente faccia nulla.
+    pub(super) fn poll_social(&mut self) -> Task<Message> {
+        Task::batch([self.load_friends(), self.load_jam_invites()])
+    }
+
+    /// Serve il timer del polling: solo con un accesso e un profilo.
+    pub(super) fn polls_social(&self) -> bool {
+        self.social.session.is_some() && self.signed_in_profile().is_some()
+    }
+
+    // ---------- Inviti alla jam ----------
+
+    pub(super) fn load_jam_invites(&mut self) -> Task<Message> {
+        let Some(session) = self.social.session.clone() else { return Task::none() };
+        if self.signed_in_profile().is_none() {
+            return Task::none();
+        }
+        Task::perform(
+            with_token(session, self.api(), |api, token| async move { api.jam_invites(&token).await }),
+            Message::JamInvitesLoaded,
+        )
+    }
+
+    pub(super) fn jam_invites_loaded(&mut self, result: Result<Vec<JamInvite>, AppError>) -> Task<Message> {
+        let invites = match result {
+            Ok(invites) => invites,
+            Err(AppError::AuthExpired) => return self.social_synced(Err(AppError::AuthExpired)),
+            // Un aggiornamento mancato si riprova al prossimo giro.
+            Err(_) => return Task::none(),
+        };
+        // Chi è già in una jam non ha bisogno dell'invito a una stanza in cui si trova.
+        let current = self.jam.as_ref().and_then(|jam| jam.code.clone());
+        let fresh: Vec<&JamInvite> = invites
+            .iter()
+            .filter(|i| Some(&i.code) != current.as_ref() && !self.social.announced_invites.contains(&i.code))
+            .collect();
+        if let Some(first) = fresh.first() {
+            let more = fresh.len() - 1;
+            let text = if more == 0 {
+                format!("{} ti invita in una jam", first.from_name)
+            } else {
+                format!("{} e altri {more} ti invitano in una jam", first.from_name)
+            };
+            self.notice = Some(Notice::Info(text));
+        }
+        let announced: Vec<String> = fresh.iter().map(|i| i.code.clone()).collect();
+        self.social.announced_invites.extend(announced);
+        // Si ricordano solo i codici ancora in giro: la lista non cresce senza fondo.
+        self.social.announced_invites.retain(|code| invites.iter().any(|i| i.code == *code));
+        self.social.jam_invites = invites;
+        Task::none()
+    }
+
+    /// Aggiunge o toglie un amico dalla scelta di chi invitare.
+    pub(super) fn toggle_invitee(&mut self, handle: String) {
+        if let Some(at) = self.social.invitees.iter().position(|h| *h == handle) {
+            self.social.invitees.remove(at);
+        } else if self.social.invitees.len() < crate::jam::MAX_MEMBERS {
+            self.social.invitees.push(handle);
+        }
+    }
+
+    /// Manda l'invito agli amici scelti, per la jam in cui si è.
+    pub(super) fn send_jam_invites(&mut self) -> Task<Message> {
+        let Some(session) = self.social.session.clone() else { return Task::none() };
+        let Some(code) = self.jam.as_ref().and_then(|jam| jam.code.clone()) else {
+            self.notice = Some(Notice::Info("Aspetta che la jam sia pronta".into()));
+            return Task::none();
+        };
+        if self.social.invitees.is_empty() || self.social.inviting {
+            return Task::none();
+        }
+        self.social.inviting = true;
+        let handles = self.social.invitees.clone();
+        Task::perform(
+            with_token(session, self.api(), move |api, token| async move {
+                api.invite_to_jam(&token, &code, &handles).await
+            }),
+            Message::JamInviteSent,
+        )
+    }
+
+    pub(super) fn jam_invite_sent(&mut self, result: Result<usize, AppError>) -> Task<Message> {
+        self.social.inviting = false;
+        match result {
+            Ok(count) => {
+                self.social.invitees.clear();
+                let text =
+                    if count == 1 { "Invito mandato".to_owned() } else { format!("{count} inviti mandati") };
+                self.notice = Some(Notice::Info(text));
+                Task::none()
+            }
+            Err(err) => {
+                self.notice = Some(Notice::Error(err.to_string()));
+                self.social_synced(Err(err))
+            }
+        }
+    }
+
+    /// Entra nella jam di un invito e lo toglie dall'elenco.
+    pub(super) fn accept_jam_invite(&mut self, code: String) -> Task<Message> {
+        if self.jam.is_some() {
+            self.notice = Some(Notice::Info("Sei già in una jam: esci prima da quella".into()));
+            return Task::none();
+        }
+        let dismiss = self.dismiss_jam_invite(code.clone());
+        Task::batch([dismiss, self.start_jam(crate::jam::Target::Join(code))])
+    }
+
+    /// Toglie l'invito subito dalla vista e lo fa togliere anche dal server.
+    pub(super) fn dismiss_jam_invite(&mut self, code: String) -> Task<Message> {
+        self.social.jam_invites.retain(|i| i.code != code);
+        let Some(session) = self.social.session.clone() else { return Task::none() };
+        Task::perform(
+            with_token(session, self.api(), move |api, token| async move {
+                api.dismiss_jam_invite(&token, &code).await
+            }),
+            Message::JamInviteDismissed,
+        )
     }
 
     pub(super) fn user_query(&mut self, query: String) -> Task<Message> {
@@ -909,6 +1047,51 @@ mod tests {
         assert!(form.can_submit());
         form.busy = true;
         assert!(!form.can_submit());
+    }
+
+    fn invite(code: &str, from: &str) -> JamInvite {
+        JamInvite { code: code.into(), from_handle: from.into(), from_name: from.to_uppercase() }
+    }
+
+    #[test]
+    fn friends_are_chosen_and_unchosen_for_a_jam() {
+        let mut app = App::new().0;
+        app.toggle_invitee("luca".into());
+        app.toggle_invitee("sara".into());
+        app.toggle_invitee("luca".into());
+        assert_eq!(app.social.invitees, ["sara"]);
+        for i in 0..20 {
+            app.toggle_invitee(format!("u{i}"));
+        }
+        assert_eq!(app.social.invitees.len(), crate::jam::MAX_MEMBERS, "non più dei posti della stanza");
+    }
+
+    #[test]
+    fn each_jam_invite_is_announced_once() {
+        let mut app = App::new().0;
+        let _ = app.jam_invites_loaded(Ok(vec![invite("K7QXM3", "luca")]));
+        assert!(matches!(&app.notice, Some(Notice::Info(text)) if text.contains("LUCA")));
+        assert_eq!(app.social.jam_invites.len(), 1);
+
+        app.notice = None;
+        let _ = app.jam_invites_loaded(Ok(vec![invite("K7QXM3", "luca")]));
+        assert!(app.notice.is_none(), "lo stesso invito non si annuncia di nuovo");
+
+        let _ = app.jam_invites_loaded(Ok(Vec::new()));
+        assert!(app.social.jam_invites.is_empty());
+        assert!(app.social.announced_invites.is_empty(), "i codici chiusi si dimenticano");
+    }
+
+    #[test]
+    fn a_failed_refresh_keeps_the_invites_and_the_friends_already_shown() {
+        let mut app = App::new().0;
+        let _ = app.jam_invites_loaded(Ok(vec![invite("K7QXM3", "luca")]));
+        let _ = app.jam_invites_loaded(Err(AppError::Network));
+        assert_eq!(app.social.jam_invites.len(), 1);
+
+        app.social.friends = Load::Ready(Friends::default());
+        let _ = app.friends_loaded(Err(AppError::Network));
+        assert!(matches!(app.social.friends, Load::Ready(_)));
     }
 
     #[test]

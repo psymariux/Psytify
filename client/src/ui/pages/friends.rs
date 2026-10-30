@@ -91,6 +91,7 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
         .into();
     }
     let pending = |handle: &str| app.social.pending.iter().any(|h| h == handle);
+    let loaded = app.social.friends.ready();
 
     let search = row![
         text_input("Cerca per nome utente", &app.social.query)
@@ -112,12 +113,30 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
         Load::Ready(found) if found.is_empty() => page = page.push(small("Nessuno con questo nome.")),
         Load::Ready(found) => {
             let rows = found.iter().map(|profile| {
-                let add = outlined_button(
-                    "Aggiungi",
-                    Some(Icon::UserPlus),
-                    (!pending(&profile.handle)).then(|| Message::FriendAction(profile.handle.clone(), true)),
-                );
-                person_row(app, profile, None, vec![add], width)
+                let handle = profile.handle.as_str();
+                // Lo stato viene dalla lista degli amici: dopo la richiesta il pulsante lo dice.
+                let state = loaded.and_then(|f| {
+                    if f.friends.iter().any(|x| x.profile.handle == handle) {
+                        Some("Amici")
+                    } else if f.outgoing.iter().any(|p| p.handle == handle) {
+                        Some("Richiesta inviata")
+                    } else {
+                        None
+                    }
+                });
+                let incoming = loaded.is_some_and(|f| f.incoming.iter().any(|p| p.handle == handle));
+                let action = match state {
+                    Some(label) => outlined_button(label, Some(Icon::Check), None),
+                    None if incoming => {
+                        primary_button("Accetta", None, Message::FriendAction(profile.handle.clone(), true))
+                    }
+                    None => outlined_button(
+                        "Aggiungi",
+                        Some(Icon::UserPlus),
+                        (!pending(handle)).then(|| Message::FriendAction(profile.handle.clone(), true)),
+                    ),
+                };
+                person_row(app, profile, None, vec![action], width)
             });
             page = page.push(section("Persone", None, column(rows).spacing(4).into()));
         }
@@ -144,6 +163,17 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
         });
         page = page.push(section("Richieste", None, column(rows).spacing(4).into()));
     }
+    if !friends.outgoing.is_empty() {
+        let rows = friends.outgoing.iter().map(|profile| {
+            let cancel = outlined_button(
+                "Ritira",
+                None,
+                (!pending(&profile.handle)).then(|| Message::FriendAction(profile.handle.clone(), false)),
+            );
+            person_row(app, profile, Some("Richiesta inviata".into()), vec![cancel], width)
+        });
+        page = page.push(section("In attesa", None, column(rows).spacing(4).into()));
+    }
     let body: Element<'_, Message> = if friends.friends.is_empty() {
         empty_state(
             "Ancora nessun amico",
@@ -162,17 +192,6 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     };
     let count = text(friends.friends.len().to_string()).size(theme::FS_BODY).color(theme::MUTED);
     page = page.push(section("I tuoi amici", Some(count.into()), body));
-    if !friends.outgoing.is_empty() {
-        let rows = friends.outgoing.iter().map(|profile| {
-            let cancel = outlined_button(
-                "Ritira",
-                None,
-                (!pending(&profile.handle)).then(|| Message::FriendAction(profile.handle.clone(), false)),
-            );
-            person_row(app, profile, Some("Richiesta inviata".into()), vec![cancel], width)
-        });
-        page = page.push(section("In attesa", None, column(rows).spacing(4).into()));
-    }
     page.push(Space::with_height(8))
         .push(container(small(format!("Sei @{}", me.profile.as_ref().map_or("", |p| p.handle.as_str())))))
         .into()

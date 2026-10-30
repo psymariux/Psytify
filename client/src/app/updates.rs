@@ -162,6 +162,8 @@ mod tests {
     #[test]
     fn a_manual_check_always_answers_and_a_poll_stays_quiet() {
         let mut app = App::new().0;
+        // Su una macchina senza configurazione l'avvio ha già un suo avviso: qui conta solo il resto.
+        app.notice = None;
         let _ = app.update_checked(UpdateCheck::Poll, Ok(None));
         assert!(app.notice.is_none());
         assert_eq!(app.update_status, UpdateStatus::Current);

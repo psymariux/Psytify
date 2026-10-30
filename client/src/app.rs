@@ -77,6 +77,8 @@ const SEEK_LONG_SECS: i64 = 15;
 const STALE_REFRESH: usize = 24;
 /// Ogni quanto batte il Tick mentre suona.
 const TICK: Duration = Duration::from_millis(250);
+/// Ogni quanto, con l'accesso fatto, si chiedono al server richieste d'amicizia e inviti alle jam.
+const SOCIAL_POLL: Duration = Duration::from_secs(15);
 /// Sotto questa posizione "precedente" cambia brano, sopra riparte da capo.
 const RESTART_THRESHOLD: Duration = Duration::from_secs(3);
 /// Quanto prima della fine si comincia a scaricare tutto il brano successivo (la testata è già
@@ -687,6 +689,16 @@ pub enum Message {
     ProfileSave(Option<bool>),
     ProfileSaved(Result<MyProfile, AppError>),
     FriendsLoaded(Result<Friends, AppError>),
+    /// Ogni tanto, con l'accesso fatto: amici, richieste e inviti alle jam si aggiornano da soli.
+    SocialPoll,
+    JamInvitesLoaded(Result<Vec<crate::api::social::JamInvite>, AppError>),
+    /// Schermata Jam: sceglie o toglie un amico da invitare, manda gli inviti, entra o rifiuta.
+    JamInviteToggle(String),
+    JamInviteSend,
+    JamInviteSent(Result<usize, AppError>),
+    JamInviteAccept(String),
+    JamInviteDismiss(String),
+    JamInviteDismissed(Result<(), AppError>),
     UserQuery(String),
     UserSearch,
     UsersFound(Result<Vec<Profile>, AppError>),
@@ -1174,13 +1186,22 @@ impl App {
             // Il testo che scorre è il movimento più frequente (a ogni verso): basta la metà dei frame.
             subscriptions.push(iced::time::every(tokens::AMBIENT_FRAME).map(|_| Message::Frame));
         }
-        if self.playback.is_playing() {
+        if self.needs_tick() {
             subscriptions.push(iced::time::every(TICK).map(|_| Message::Tick));
+        }
+        if self.polls_social() {
+            subscriptions.push(iced::time::every(SOCIAL_POLL).map(|_| Message::SocialPoll));
         }
         if self.hero_rotates() {
             subscriptions.push(iced::time::every(HERO_PERIOD).map(|_| Message::HeroNext));
         }
         Subscription::batch(subscriptions)
+    }
+
+    /// Il Tick serve mentre suona un brano e in una jam, anche a player fermo: è lui che legge gli
+    /// eventi della stanza (ingresso, membri, stato degli altri) e manda il proprio stato.
+    fn needs_tick(&self) -> bool {
+        self.playback.is_playing() || self.jam.is_some()
     }
 
     pub fn api_host(&self) -> String {
@@ -1861,6 +1882,7 @@ impl App {
                 // Chiudere il collegamento basta: la stanza libera il posto e avvisa gli altri.
                 self.jam = None;
                 self.jam_target = None;
+                self.social.invitees.clear();
                 self.notice = Some(Notice::Info("Sei uscito dalla jam".into()));
                 Task::none()
             }
@@ -2208,6 +2230,17 @@ impl App {
             Message::ProfileSave(share) => self.save_profile(share),
             Message::ProfileSaved(result) => self.profile_saved(result),
             Message::FriendsLoaded(result) => self.friends_loaded(result),
+            Message::SocialPoll => self.poll_social(),
+            Message::JamInvitesLoaded(result) => self.jam_invites_loaded(result),
+            Message::JamInviteToggle(handle) => {
+                self.toggle_invitee(handle);
+                Task::none()
+            }
+            Message::JamInviteSend => self.send_jam_invites(),
+            Message::JamInviteSent(result) => self.jam_invite_sent(result),
+            Message::JamInviteAccept(code) => self.accept_jam_invite(code),
+            Message::JamInviteDismiss(code) => self.dismiss_jam_invite(code),
+            Message::JamInviteDismissed(result) => self.social_synced(result),
             Message::UserQuery(query) => self.user_query(query),
             Message::UserSearch => self.search_users(),
             Message::UsersFound(result) => self.users_found(result),
@@ -3090,7 +3123,13 @@ impl App {
             self.notice = Some(Notice::Info("Sei già in una jam".into()));
             return Task::none();
         }
-        let link = Link::start(&self.api_base_url, target, self.jam_name.trim().to_owned());
+        // Senza un nome scelto per la stanza, con un profilo ci si presenta con il proprio.
+        let typed = self.jam_name.trim();
+        let name = match self.signed_in_profile() {
+            Some(profile) if typed.is_empty() => profile.display_name.clone(),
+            _ => typed.to_owned(),
+        };
+        let link = Link::start(&self.api_base_url, target, name);
         self.jam = Some(JamSession {
             link,
             code: None,
@@ -3146,6 +3185,7 @@ impl App {
             Event::Closed(reason) => {
                 self.jam = None;
                 self.jam_target = None;
+                self.social.invitees.clear();
                 self.notice = Some(Notice::Error(reason));
                 Task::none()
             }
@@ -3749,6 +3789,25 @@ mod tests {
         let _ = app.go_forward();
         assert_eq!(app.screen, Screen::Settings);
         assert!(!app.can_go_forward());
+    }
+
+    #[test]
+    fn a_jam_needs_the_tick_even_when_nothing_plays() {
+        let mut app = App::new().0;
+        assert!(!app.needs_tick());
+        // Porta chiusa: il collegamento fallisce subito, ma intanto la sessione esiste.
+        let link = Link::start("http://127.0.0.1:9", Target::Join("ABCDEF".into()), String::new());
+        app.jam = Some(JamSession {
+            link,
+            code: None,
+            you: None,
+            members: Vec::new(),
+            last_sent: None,
+            synced: false,
+            fetching: false,
+        });
+        assert!(!app.playback.is_playing());
+        assert!(app.needs_tick(), "senza Tick la stanza non si legge mai e la jam resta in connessione");
     }
 
     #[test]

@@ -8,10 +8,17 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- Jam: creating or joining a room with nothing playing no longer hangs on "Connecting"; the room is read
+  whether or not a track is playing.
+- Friends: requests you send now show up right away ("Request sent" next to the person, and in the
+  "Pending" list above your friends), and requests and invites you receive arrive on their own every
+  15 seconds instead of only when the page is opened.
 - Phone: opening Search no longer pops up the keyboard, and the equalizer bands can be dragged with a finger.
 
 ### Added
 
+- Jam: pick friends from the Jam page and send them an invite; invites appear in their Jam page and as a
+  notice, with one tap to join. Joining a jam signed in uses your profile name by default.
 - Phone: a bottom-sheet menu for tracks, albums, artists, playlists and the player (cover and title on
   top, big rows, and full-screen lists for playlists, download quality and the sleep timer).
 - Phone: an avatar at the top of Home opens a drawer from the right with profile, news, friends, Jam,

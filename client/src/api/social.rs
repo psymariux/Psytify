@@ -99,6 +99,24 @@ pub struct Friends {
     pub outgoing: Vec<Profile>,
 }
 
+/// L'invito di un amico a una jam: il codice con cui entrare e chi l'ha mandato.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct JamInvite {
+    pub code: String,
+    pub from_handle: String,
+    pub from_name: String,
+}
+
+#[derive(Deserialize)]
+struct JamInvites {
+    invites: Vec<JamInvite>,
+}
+
+#[derive(Deserialize)]
+struct Invited {
+    invited: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PublicPlaylist {
     pub id: Uuid,
@@ -178,6 +196,31 @@ impl ApiClient {
     /// Toglie l'amicizia, ritira o rifiuta la richiesta.
     pub async fn remove_friend(&self, token: &str, handle: &str) -> Result<(), AppError> {
         let path = format!("/v1/friends/{}", path_segment(handle));
+        self.authed::<serde_json::Value>(Method::DELETE, &path, token, &[], None).await.map(|_| ())
+    }
+
+    /// Gli inviti alle jam ricevuti dagli amici e ancora validi.
+    pub async fn jam_invites(&self, token: &str) -> Result<Vec<JamInvite>, AppError> {
+        let reply: JamInvites = body(self.authed(Method::GET, "/v1/jam/invites", token, &[], None).await?)?;
+        Ok(reply.invites)
+    }
+
+    /// Invita degli amici nella jam `code`; restituisce quanti inviti sono partiti.
+    pub async fn invite_to_jam(
+        &self,
+        token: &str,
+        code: &str,
+        handles: &[String],
+    ) -> Result<usize, AppError> {
+        let path = format!("/v1/jam/{}/invite", path_segment(code));
+        let payload = json!({"handles": handles});
+        let reply: Invited = body(self.authed(Method::POST, &path, token, &[], Some(payload)).await?)?;
+        Ok(reply.invited)
+    }
+
+    /// Toglie gli inviti alla jam `code`, rifiutati o già accettati.
+    pub async fn dismiss_jam_invite(&self, token: &str, code: &str) -> Result<(), AppError> {
+        let path = format!("/v1/jam/invites/{}", path_segment(code));
         self.authed::<serde_json::Value>(Method::DELETE, &path, token, &[], None).await.map(|_| ())
     }
 
@@ -262,6 +305,16 @@ mod tests {
         assert_eq!(suggest_handle(None, None), "ascoltatore");
         assert_eq!(suggest_handle(Some("é"), None), "___");
         assert_eq!(suggest_handle(Some(&"x".repeat(40)), None).len(), 24);
+    }
+
+    #[test]
+    fn jam_invites_read_the_documented_shape() {
+        let reply: JamInvites = serde_json::from_value(json!({
+            "invites": [{"code": "K7QXM3", "from_handle": "luca", "from_name": "Luca Rossi"}]
+        }))
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(reply.invites[0].code, "K7QXM3");
+        assert_eq!(reply.invites[0].from_name, "Luca Rossi");
     }
 
     #[test]

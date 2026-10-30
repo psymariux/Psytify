@@ -15,6 +15,7 @@ pub mod motion;
 pub mod now_playing;
 pub mod pages;
 pub mod phone;
+pub mod pointer;
 pub mod shelf;
 pub mod shortcuts;
 pub mod side_panel;
@@ -24,6 +25,8 @@ pub mod theme;
 pub mod toast;
 pub mod top_bar;
 pub mod touch_seek;
+pub mod update_banner;
+pub mod volume_side;
 
 use iced::widget::{Space, column, container, mouse_area, responsive, row, scrollable, stack};
 use iced::{Color, Element, Length, Padding, Size, mouse};
@@ -119,19 +122,20 @@ fn frame(app: &App, window: Size) -> Element<'_, Message> {
         middle = middle.push(side);
     }
 
-    container(column![
-        top_bar::view(app),
-        container(middle.height(Length::Fill)).padding(Padding {
-            left: theme::OUTER_GAP,
-            right: theme::OUTER_GAP,
-            ..Padding::ZERO
-        }),
-        now_playing::view(app, window.width),
-    ])
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .style(theme::ground)
-    .into()
+    let mut screen = column![top_bar::view(app)];
+    if let Some(banner) = update_banner::view(app, false) {
+        screen = screen.push(banner);
+    }
+    screen = screen.push(container(middle.height(Length::Fill)).padding(Padding {
+        left: theme::OUTER_GAP,
+        right: theme::OUTER_GAP,
+        ..Padding::ZERO
+    }));
+    container(screen.push(now_playing::view(app, window.width)))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::ground)
+        .into()
 }
 
 /// La pagina della schermata corrente, impaginata su `width`.

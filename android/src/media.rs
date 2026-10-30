@@ -158,6 +158,24 @@ pub fn install(path: &Path) {
     }
 }
 
+/// Chiede a `PsytifyMedia.notifyUpdate` la notifica «versione nuova disponibile»: un tocco apre l'app.
+pub fn notify_update(tag: &str) {
+    let (Some(app), Some(class)) = (APP.get(), CLASS_REF.get()) else { return };
+    let Some(vm) = vm(app) else { return };
+    let Ok(mut env) = vm.attach_current_thread() else { return };
+    let result = env.with_local_frame(16, |env| -> jni::errors::Result<()> {
+        let class = JClass::from(env.new_local_ref(class.as_obj())?);
+        let tag = env.new_string(tag)?;
+        env.call_static_method(&class, "notifyUpdate", "(Ljava/lang/String;)V", &[JValue::Object(&tag)])?;
+        Ok(())
+    });
+    if let Err(err) = &result {
+        log::warn!("Notifica dell'aggiornamento non mostrata: {err}");
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+    }
+}
+
 fn vm(app: &AndroidApp) -> Option<JavaVM> {
     // SAFETY: `vm_as_ptr` è il `JavaVM*` del processo, valido finché il processo vive.
     unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()

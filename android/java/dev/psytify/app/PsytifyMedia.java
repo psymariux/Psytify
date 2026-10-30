@@ -38,6 +38,8 @@ import java.io.OutputStream;
 public final class PsytifyMedia extends MediaSession.Callback {
     private static final String CHANNEL = "playback";
     private static final int NOTIFICATION = 1;
+    private static final int UPDATE_NOTIFICATION = 2;
+    private static final String UPDATE_CHANNEL = "updates";
     private static final String ACTION = "dev.psytify.app.MEDIA";
     private static final String INSTALL_ACTION = "dev.psytify.app.INSTALL";
     private static final String TAG = "Psytify";
@@ -111,6 +113,9 @@ public final class PsytifyMedia extends MediaSession.Callback {
                 new NotificationChannel(CHANNEL, "Riproduzione", NotificationManager.IMPORTANCE_LOW);
         channel.setShowBadge(false);
         notifications.createNotificationChannel(channel);
+        // Le versioni nuove si annunciano: importanza normale, a differenza della riproduzione.
+        notifications.createNotificationChannel(
+                new NotificationChannel(UPDATE_CHANNEL, "Aggiornamenti", NotificationManager.IMPORTANCE_DEFAULT));
         // Prima di Android 13 i pulsanti della notifica sono azioni sue: tornano qui.
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
@@ -146,6 +151,27 @@ public final class PsytifyMedia extends MediaSession.Callback {
         } else {
             activity.registerReceiver(installResult, installFilter);
         }
+    }
+
+    /** Avvisa che c'è la versione `tag`: un tocco sulla notifica apre l'app, che offre il download. */
+    public static void notifyUpdate(final String tag) {
+        MAIN.post(() -> {
+            if (instance != null) {
+                instance.announceUpdate(tag);
+            }
+        });
+    }
+
+    private void announceUpdate(String tag) {
+        Notification.Builder notification = new Notification.Builder(activity, UPDATE_CHANNEL)
+                .setSmallIcon(smallIcon())
+                .setContentTitle("Nuova versione di Psytify")
+                .setContentText(tag + " è pronta da scaricare")
+                .setAutoCancel(true);
+        if (open != null) {
+            notification.setContentIntent(open);
+        }
+        notifications.notify(UPDATE_NOTIFICATION, notification.build());
     }
 
     /** Passa l'APK scaricato a `PackageInstaller`: Android chiede la conferma all'utente. */

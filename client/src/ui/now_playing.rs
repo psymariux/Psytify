@@ -10,6 +10,7 @@ use super::components::{
 };
 use super::cover::cover;
 use super::icons::{Icon, icon};
+use super::pointer::pointer;
 use super::{motion, theme};
 use crate::app::{App, MenuTarget, Message, Screen, SideTab, TrackSource};
 use crate::player::seek::{format_time, progress as progress_of};
@@ -133,10 +134,12 @@ pub(super) fn progress(app: &App) -> Element<'_, Message> {
     let duration = app.queue.current().map(|t| t.duration()).unwrap_or_default();
     let position = app.shown_position().min(duration);
     let value = app.playback.scrubbing.unwrap_or_else(|| progress_of(position, duration));
-    let bar = slider(0.0..=1.0, value, Message::Scrub)
-        .step(0.001_f32)
-        .on_release(Message::ScrubReleased)
-        .style(theme::progress_slider);
+    let bar = pointer(
+        slider(0.0..=1.0, value, Message::Scrub)
+            .step(0.001_f32)
+            .on_release(Message::ScrubReleased)
+            .style(theme::progress_slider),
+    );
     let time = |t| container(small(format_time(t))).width(44);
     row![container(time(position)).align_x(alignment::Horizontal::Right), bar, time(duration)]
         .spacing(10)
@@ -195,11 +198,13 @@ fn extras(app: &App) -> Element<'_, Message> {
             Some(Message::OpenMenu(MenuTarget::Player)),
         ),
         icon_button(volume_glyph, volume_label, false, Some(Message::ToggleMute)),
-        slider(0.0..=1.0, app.playback.volume, Message::Volume)
-            .step(0.01_f32)
-            .on_release(Message::VolumeReleased)
-            .width(100)
-            .style(theme::volume_slider),
+        pointer(
+            slider(0.0..=1.0, app.playback.volume, Message::Volume)
+                .step(0.01_f32)
+                .on_release(Message::VolumeReleased)
+                .width(100)
+                .style(theme::volume_slider),
+        ),
     ]
     .spacing(4)
     .align_y(Alignment::Center)

@@ -37,7 +37,10 @@ pub enum Platform {
 pub use config::{set_data_dir, set_default_api_url};
 /// Android: la sessione multimediale del sistema (schermata di blocco, notifica, cuffie).
 #[cfg(target_os = "android")]
-pub use system_media::{NowPlaying, phone_command, phone_install, set_phone_installer, set_phone_media};
+pub use system_media::{
+    NowPlaying, phone_command, phone_install, phone_notify_update, set_phone_installer, set_phone_media,
+    set_phone_update_notifier,
+};
 
 /// Chi mostra e nasconde la tastiera del sistema. Iced 0.13 non lo chiede mai alla finestra: su
 /// Android lo fa il guscio (`android/`), sul desktop non serve.

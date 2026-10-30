@@ -1,6 +1,9 @@
-//! Il cassetto del telefono: dall'avatar in cima alla Home si apre da destra, sopra la pagina.
+//! Il cassetto del telefono: dall'avatar in cima alla Home si apre da sinistra, sopra la pagina,
+//! staccato dai bordi come una scheda che galleggia.
 //! Raccoglie il profilo, le novità, gli amici, la jam e le impostazioni; chi non è collegato vede
 //! l'invito ad accedere al posto del nome.
+
+use std::time::Duration;
 
 use iced::widget::{Space, button, column, container, mouse_area, opaque, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length, Padding, Size};
@@ -17,11 +20,16 @@ const MAX_WIDTH: f32 = 340.0;
 const SHARE: f32 = 0.84;
 const AVATAR: f32 = 64.0;
 const PAD: f32 = 20.0;
+/// Margine fra il cassetto e i bordi dello schermo (sinistra, alto, basso).
+const GAP: f32 = 12.0;
 
 /// Il livello del cassetto, a tutta finestra; `None` se è chiuso.
 pub fn view(app: &App, window: Size) -> Option<Element<'_, Message>> {
     let since = app.drawer?;
+    // La scorrevole va con la molla, il velo e il colore con un'apparizione dolce: così il
+    // rimbalzo della molla non rende il fondo più scuro o più chiaro del dovuto.
     let shown = motion::appear(since, theme::MOTION_PANEL);
+    let slide = motion::spring_in(since, Duration::ZERO, theme::MOTION_SPRING);
     let width = (window.width * SHARE).min(MAX_WIDTH);
     let (top, bottom) = app.insets.map_or((0.0, 0.0), |edges| (edges.top, edges.bottom));
 
@@ -49,13 +57,17 @@ pub fn view(app: &App, window: Size) -> Option<Element<'_, Message>> {
     .padding(Padding { top: top + 16.0, bottom: bottom + 12.0, left: 0.0, right: 0.0 })
     .style(theme::drawer(shown));
 
+    // Il cassetto entra da sinistra: a riposo è tutto fuori schermo, poi scorre fino al margine.
+    let left = GAP - (1.0 - slide) * (width + GAP);
     Some(
         stack![
             mouse_area(container(Space::new(Length::Fill, Length::Fill)).style(theme::scrim(shown)))
                 .on_press(Message::CloseDrawer)
                 .on_right_press(Message::CloseDrawer),
-            // Il cassetto scorre da fuori schermo: a sinistra, uno spazio che si accorcia.
-            row![Space::with_width(Length::Fixed(window.width - width * shown)), opaque(panel)],
+            container(opaque(panel))
+                .padding(Padding { top: top + GAP, bottom: bottom + GAP, left, right: 0.0 })
+                .width(Length::Fill)
+                .height(Length::Fill),
         ]
         .into(),
     )

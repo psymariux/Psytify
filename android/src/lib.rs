@@ -9,12 +9,13 @@ mod media;
 
 use winit::platform::android::activity::AndroidApp;
 
-/// Il backend di una configurazione nuova: `PSYTIFY_DEFAULT_API_URL` alla compilazione (la build di
-/// distribuzione ci mette il proprio backend), altrimenti il PC che ospita l'emulatore.
+/// Il backend di una configurazione nuova, come nel client desktop (`client/src/config/mod.rs`): le
+/// build di debug usano il PC che ospita l'emulatore, le altre il backend pubblico.
 const API_URL: &str = match option_env!("PSYTIFY_DEFAULT_API_URL") {
-    // Una variabile definita ma vuota (CI senza backend di distribuzione) vale come assente.
+    // Una variabile definita ma vuota vale come assente.
     Some(url) if !url.is_empty() => url,
-    _ => "http://10.0.2.2:8080",
+    _ if cfg!(debug_assertions) => "http://10.0.2.2:8080",
+    _ => "https://music.psymariux.dev",
 };
 
 /// L'ingresso che la NativeActivity cerca per nome: deve restare senza «mangling», per questo

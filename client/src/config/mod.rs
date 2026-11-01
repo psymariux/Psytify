@@ -16,25 +16,29 @@ use crate::player::eq;
 pub mod taste;
 pub use taste::{FollowedArtist, PlayStat, SavedAlbum};
 
-/// Il backend di una configurazione nuova: `PSYTIFY_DEFAULT_API_URL` alla compilazione (la build di
-/// distribuzione ci mette il proprio backend), altrimenti un server sul proprio PC.
+/// Il backend pubblico: quello che le build di distribuzione (desktop, APK, pacchetto AUR) usano di
+/// default. Non è un segreto: è l'indirizzo che l'app contatta comunque.
+pub const DISTRIBUTION_API_URL: &str = "https://music.psymariux.dev";
+/// Il backend di una configurazione nuova. Le build di debug usano un server sul proprio PC, le
+/// altre il backend pubblico. `PSYTIFY_DEFAULT_API_URL` alla compilazione lo sostituisce.
 pub const DEFAULT_API_URL: &str = match option_env!("PSYTIFY_DEFAULT_API_URL") {
-    // Una variabile definita ma vuota (CI senza backend di distribuzione) vale come assente.
+    // Una variabile definita ma vuota vale come assente.
     Some(url) if !url.is_empty() => url,
-    _ => "http://127.0.0.1:8080",
+    _ if cfg!(debug_assertions) => "http://127.0.0.1:8080",
+    _ => DISTRIBUTION_API_URL,
 };
-/// L'app Discord della build (Rich Presence): l'Application ID non è un segreto. Vuoto, niente
-/// Discord finché `config.json` non ne indica uno.
+/// L'app Discord della build (Rich Presence): l'Application ID non è un segreto. Vuoto
+/// (`PSYTIFY_DEFAULT_DISCORD_APP_ID=""`), niente Discord finché `config.json` non ne indica uno.
 pub const DEFAULT_DISCORD_APP_ID: &str = match option_env!("PSYTIFY_DEFAULT_DISCORD_APP_ID") {
     Some(id) => id,
-    None => "",
+    None => "1565369762429804665",
 };
-/// Il login con Clerk di una build di distribuzione: la Frontend API dell'istanza, compilata come il
-/// backend (`.env.build`). Non è un segreto. Vale quando `config.json` non ne sceglie un'altra;
-/// vuota, il login resta spento.
+/// Il login con Clerk della build: la Frontend API dell'istanza. Non è un segreto. Vale quando
+/// `config.json` non ne sceglie un'altra; vuota (`PSYTIFY_DEFAULT_CLERK_ISSUER=""`), il login resta
+/// spento.
 const DEFAULT_CLERK_ISSUER: &str = match option_env!("PSYTIFY_DEFAULT_CLERK_ISSUER") {
     Some(issuer) => issuer,
-    None => "",
+    None => "https://needed-grouse-4672.clerk.accounts.dev",
 };
 /// Indirizzi predefiniti delle build di sviluppo (desktop ed emulatore Android). Le versioni
 /// precedenti li salvavano nel file anche senza una scelta dell'utente: letti lì, non valgono come

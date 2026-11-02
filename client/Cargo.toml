@@ -68,7 +68,7 @@ url = { version = "2", optional = true }
 # System media controls on Linux (MPRIS): media keys, desktop widgets,
 # headphones. `use_zbus` speaks D-Bus in pure Rust: no libdbus to install.
 [target.'cfg(target_os = "linux")'.dependencies]
-souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] }
+souvlaki = { version = "0.9", default-features = false, features = ["use_zbus"] }
 
 [features]
 # Without `video` the client builds even where GStreamer is missing: the video clip button disappears.

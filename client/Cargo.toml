@@ -55,7 +55,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Clerk sign-in (OAuth 2.0 + PKCE): SHA-256 for the code challenge, system random bytes for
 # verifier and state, opening the login page in the default browser (xdg-open, ShellExecute).
 sha2 = "0.10"
-getrandom = "0.3"
+getrandom = "0.4"
 open = "5"
 # Video clips inside the app with GStreamer: 0.5 is the last for Iced 0.13 and decodes only the video,
 # so the audio stays the player's. `url` is the type the widget accepts.

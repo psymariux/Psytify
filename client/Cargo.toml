@@ -62,7 +62,7 @@ open = "5"
 iced_video_player = { version = "0.5", optional = true }
 # The same GStreamer as iced_video_player (already compiled): it is only used to lower the rank of the
 # NVIDIA decoders, which on hybrid laptops would wake the discrete GPU for a video clip.
-gstreamer = { version = "0.22", optional = true }
+gstreamer = { version = "0.25", optional = true }
 url = { version = "2", optional = true }
 
 # System media controls on Linux (MPRIS): media keys, desktop widgets,

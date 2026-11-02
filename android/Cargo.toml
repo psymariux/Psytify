@@ -27,7 +27,7 @@ winit = { version = "0.30", features = ["android-native-activity"] }
 # The same version Iced already uses: needed here for the patch's `ANDROID_APP`.
 iced_winit = "0.13"
 # The app's logs (`log::warn!`) go to logcat instead of nowhere.
-android_logger = "0.14"
+android_logger = "0.15"
 # To ask Android where the system bars are (src/insets.rs). It is the version
 # audio (oboe) already brings in: no new crate to compile.
 jni = "0.21"

@@ -586,10 +586,18 @@ mod tests {
 
     use super::*;
 
-    const SECRET: &str = "hunter2-segreta";
+    /// A new value on every run, so no password is written in the source.
+    fn secret() -> String {
+        uuid::Uuid::new_v4().simple().to_string()
+    }
 
-    fn typed(identifier: &'static str, email: &'static str, password: usize, code: usize) -> Typed<'static> {
-        Typed { identifier, email, username: "", password_chars: password, code_chars: code }
+    fn typed(
+        identifier: &'static str,
+        email: &'static str,
+        password_len: usize,
+        code_len: usize,
+    ) -> Typed<'static> {
+        Typed { identifier, email, username: "", password_chars: password_len, code_chars: code_len }
     }
 
     #[test]
@@ -636,27 +644,27 @@ mod tests {
     #[test]
     fn the_sent_command_never_shows_the_secret() {
         let form = Stage::Form;
+        let secret = secret();
         let commands = [
-            command(Mode::SignIn, &form, &typed(" luca ", "", 15, 0), SECRET.to_owned()),
-            command(Mode::SignUp, &form, &typed("", "a@b.it", 15, 0), SECRET.to_owned()),
-            command(Mode::SignIn, &Stage::Code("x".into()), &typed("", "", 0, 6), SECRET.to_owned()),
+            command(Mode::SignIn, &form, &typed(" luca ", "", 15, 0), secret.clone()),
+            command(Mode::SignUp, &form, &typed("", "a@b.it", 15, 0), secret.clone()),
+            command(Mode::SignIn, &Stage::Code("x".into()), &typed("", "", 0, 6), secret.clone()),
         ];
         for command in commands {
             let command = command.expect("un comando");
             let printed = format!("{command:?}");
-            assert!(!printed.contains(SECRET), "{printed}");
+            assert!(!printed.contains(&secret), "{printed}");
             assert!(printed.contains("redacted"), "{printed}");
         }
-        match command(Mode::SignIn, &form, &typed(" luca ", "", 15, 0), SECRET.to_owned()) {
+        match command(Mode::SignIn, &form, &typed(" luca ", "", 15, 0), secret.clone()) {
             Some(SocialCmd::SignIn { identifier, password }) => {
                 assert_eq!(identifier, "luca");
-                assert_eq!(password.expose(), SECRET);
+                assert_eq!(password.expose(), secret);
             }
             other => panic!("{other:?}"),
         }
         assert!(
-            command(Mode::SignIn, &Stage::Waiting(Provider::GitHub), &typed("", "", 0, 0), String::new())
-                .is_none()
+            command(Mode::SignIn, &Stage::Waiting(Provider::GitHub), &typed("", "", 0, 0), secret).is_none()
         );
     }
 

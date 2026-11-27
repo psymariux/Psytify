@@ -1,25 +1,29 @@
-//! «Accedi a Psytify»: il modulo di accesso dentro l'app, senza pagine di Clerk. In cima il marchio,
+//! «Accedi a Psytify»: il modulo di accesso dentro l'app, senza pagine di Clerk. In cima Nastro,
 //! poi la scelta fra accedere e creare un account, i tre accessi con il browser (Google, GitHub,
 //! Discord) e i campi. Quando Clerk manda un codice via email, la colonna mostra solo quello.
 
 use iced::widget::{Space, button, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length, alignment};
 
+use psytify_core::snapshot::AuthView;
+
 use crate::app::{App, AuthField, AuthMode, Message, SignInForm};
 use crate::auth::Provider;
 use crate::ui::components::{muted, small, text_button};
-use crate::ui::icons::{Icon, icon, mark};
+use crate::ui::icons::{Icon, icon, sprite_image};
 use crate::ui::theme;
 
 pub const CODE_INPUT: &str = "sign-in-code";
 
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     let form = &app.social.form;
+    let auth = &app.social.view.auth;
     let column_width = width.min(theme::SIGN_IN_WIDTH);
     let header = column![
-        mark(56.0),
+        // Nastro, fermo sul primo frame: l'animazione di riposo chiederebbe un timer.
+        sprite_image(psytify_design::sprite::NASTRO_IDLE, 0, None, 1),
         text("Psytify").size(theme::FS_PAGE).font(theme::FONT_SEMIBOLD),
-        muted(match (&form.step, form.mode) {
+        muted(match (&auth.step, form.mode) {
             (Some(_), _) => "Controlla la posta",
             (None, AuthMode::SignIn) => "Accedi per ascoltare con i tuoi amici",
             (None, AuthMode::SignUp) => "Crea il tuo account",
@@ -28,15 +32,15 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     .spacing(10)
     .align_x(Alignment::Center);
 
-    let body: Element<'_, Message> = match &form.step {
-        Some(step) => code(form, &step.sent_to),
-        None if form.waiting.is_some() => waiting(form.waiting),
-        None => fields(form),
+    let body: Element<'_, Message> = match &auth.step {
+        Some(step) => code(form, auth, &step.sent_to),
+        None if auth.waiting.is_some() => waiting(auth.waiting),
+        None => fields(form, auth),
     };
     let mut page = column![header, body].spacing(28).width(column_width).align_x(Alignment::Center);
-    if let Some(error) = &form.error {
+    if let Some(error) = &auth.error {
         page =
-            page.push(text(error.as_str()).size(theme::FS_BODY).color(theme::NEGATIVE).width(Length::Fill));
+            page.push(text(error.to_string()).size(theme::FS_BODY).color(theme::ERROR).width(Length::Fill));
     }
     page = page.push(
         small("Catalogo e ascolto restano liberi anche senza account.")
@@ -106,7 +110,7 @@ fn provider(provider: Provider, enabled: bool) -> Element<'static, Message> {
     let label = format!("Continua con {}", provider.label());
     button(
         container(
-            row![icon(glyph, 18.0, theme::TEXT), text(label).size(theme::FS_BODY).font(theme::FONT_MEDIUM)]
+            row![icon(glyph, 20.0, theme::TEXT), text(label).size(theme::FS_BODY).font(theme::FONT_MEDIUM)]
                 .spacing(10)
                 .align_y(Alignment::Center),
         )
@@ -122,18 +126,18 @@ fn provider(provider: Provider, enabled: bool) -> Element<'static, Message> {
 
 /// «oppure» fra due righe sottili.
 fn divider<'a>() -> Element<'a, Message> {
-    let rule = || container(Space::new(Length::Fill, 1.0)).style(theme::bar(theme::CONTROL, 0.0));
+    let rule = || container(Space::new(Length::Fill, theme::AP)).style(theme::bar(theme::LINE));
     row![rule(), small("oppure"), rule()].spacing(12).align_y(Alignment::Center).into()
 }
 
-fn fields(form: &SignInForm) -> Element<'_, Message> {
-    let idle = !form.busy;
+fn fields<'a>(form: &'a SignInForm, auth: &AuthView) -> Element<'a, Message> {
+    let idle = !auth.busy;
     let socials = column(Provider::ALL.into_iter().map(|p| provider(p, idle))).spacing(10);
     let inputs: Element<'_, Message> = match form.mode {
         AuthMode::SignIn => column![
             field("Email o nome utente", &form.identifier, AuthField::Identifier, false, true),
             field("Password", &form.password, AuthField::Password, true, true),
-            submit("Accedi", form.can_submit(), form.busy),
+            submit("Accedi", form.can_submit(auth), auth.busy),
         ]
         .spacing(12)
         .into(),
@@ -141,7 +145,7 @@ fn fields(form: &SignInForm) -> Element<'_, Message> {
             field("Email", &form.email, AuthField::Email, false, true),
             field("Nome utente (facoltativo)", &form.username, AuthField::Username, false, true),
             field("Password, almeno 8 caratteri", &form.password, AuthField::Password, true, true),
-            submit("Crea l'account", form.can_submit(), form.busy),
+            submit("Crea l'account", form.can_submit(auth), auth.busy),
             small("Ti mandiamo un codice per confermare l'email."),
         ]
         .spacing(12)
@@ -150,7 +154,7 @@ fn fields(form: &SignInForm) -> Element<'_, Message> {
     column![modes(form), socials, divider(), inputs].spacing(20).width(Length::Fill).into()
 }
 
-fn code<'a>(form: &'a SignInForm, sent_to: &'a str) -> Element<'a, Message> {
+fn code<'a>(form: &'a SignInForm, auth: &AuthView, sent_to: &'a str) -> Element<'a, Message> {
     let to = if sent_to.is_empty() { "alla tua email".to_owned() } else { format!("a {sent_to}") };
     let input = text_input("Codice di 6 cifre", &form.code)
         .id(text_input::Id::new(CODE_INPUT))
@@ -162,7 +166,7 @@ fn code<'a>(form: &'a SignInForm, sent_to: &'a str) -> Element<'a, Message> {
     column![
         muted(format!("Abbiamo mandato un codice {to}. Scrivilo qui sotto.")).width(Length::Fill),
         input,
-        submit("Conferma", form.can_submit(), form.busy),
+        submit("Conferma", form.can_submit(auth), auth.busy),
         row![
             text_button("Invia di nuovo", Message::AuthResend),
             Space::with_width(Length::Fill),
@@ -181,7 +185,8 @@ fn waiting<'a>(provider: Option<Provider>) -> Element<'a, Message> {
     column![
         muted(format!("Completa l'accesso con {name} nel browser: l'app ti aspetta qui."))
             .width(Length::Fill),
-        small("Hai chiuso il browser? Torna fra qualche minuto, o riapri l'app."),
+        small("Hai chiuso il browser? Annulla qui sotto, o torna fra qualche minuto."),
+        text_button("Annulla", Message::AuthBack),
     ]
     .spacing(10)
     .width(Length::Fill)

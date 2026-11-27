@@ -10,6 +10,13 @@ yanked = "deny"
 # rustybuzz, ttf-parser, instant, paste) stay visible in `cargo audit` and are
 # tracked by Dependabot. They go away only with an Iced upgrade.
 unmaintained = "workspace"
+ignore = [
+    # chrono is declared unmaintained (every version, no upgrade possible): the
+    # server uses it for sqlx timestamps and serialization, and GPUI brings it too.
+    # No known vulnerability; replacing it with `time` or `jiff` is in the backlog (it needs sqlx and
+    # the server). It goes away from here when that migration is done.
+    "RUSTSEC-2026-0543",
+]
 
 [licenses]
 version = 2
@@ -30,8 +37,13 @@ allow = [
     "Unlicense",
 ]
 
-# The client itself.
-exceptions = [{ allow = ["AGPL-3.0-only"], crate = "psytify" }]
+# The apps themselves and their crates (core and design).
+exceptions = [
+    { allow = ["AGPL-3.0-only"], crate = "psytify" },
+    { allow = ["AGPL-3.0-only"], crate = "psytify-iced" },
+    { allow = ["AGPL-3.0-only"], crate = "psytify-core" },
+    { allow = ["AGPL-3.0-only"], crate = "psytify-design" },
+]
 
 [bans]
 multiple-versions = "allow"
@@ -41,3 +53,16 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# GPUI is pinned from Zed's git repository (owner decision 2026-11-22). Its
+# `Cargo.toml` also pins to a revision the forks and unpublished crates it needs
+# (wgpu for the renderer, font-kit, oo7, wasm_thread, xim-rs): they are the only other git sources
+# allowed, one by one, with the revision in `Cargo.lock`. Any other git dependency is still denied
+# by `unknown-git`.
+allow-git = [
+    "https://github.com/zed-industries/zed",
+    "https://github.com/gfx-rs/wgpu",
+    "https://github.com/zed-industries/font-kit",
+    "https://github.com/zed-industries/oo7",
+    "https://github.com/zed-industries/wasm_thread",
+    "https://github.com/zed-industries/xim-rs",
+]

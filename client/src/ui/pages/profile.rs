@@ -18,7 +18,7 @@ use crate::ui::pages::friends::avatar;
 use crate::ui::theme;
 
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
-    let Some((handle, load)) = &app.social.open else {
+    let Some((handle, load)) = &app.social.view.open else {
         return empty_block("Nessun profilo aperto.");
     };
     let open = match load {
@@ -28,7 +28,7 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
         Load::Ready(open) => open,
     };
     let page = &open.page;
-    let pending = app.social.pending.iter().any(|h| h == handle);
+    let pending = app.social.view.pending.iter().any(|h| h == handle);
     let mut body = column![header(app, page, pending, width)].spacing(32).width(Length::Fill);
 
     match &page.activity {
@@ -40,7 +40,20 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
                     row![
                         cover(&app.covers, art_of(&now.track), 64.0),
                         column![
-                            text(state).size(theme::FS_SMALL).font(theme::FONT_SEMIBOLD).color(theme::ACCENT),
+                            // Il punto lime è l'indicatore «dal vivo»; in pausa non c'è.
+                            row![
+                                container(Space::new(6.0, 6.0)).style(theme::bar(if now.paused {
+                                    iced::Color::TRANSPARENT
+                                } else {
+                                    theme::LIME
+                                })),
+                                text(state)
+                                    .size(theme::FS_SMALL)
+                                    .font(theme::FONT_SEMIBOLD)
+                                    .color(theme::TEXT),
+                            ]
+                            .spacing(6)
+                            .align_y(Alignment::Center),
                             line(&now.track.title, text_width, TITLE_LINE),
                             line(&now.track.artist.name, text_width, SUB_LINE),
                         ]
@@ -201,7 +214,7 @@ fn header<'a>(app: &'a App, page: &'a UserPage, pending: bool, width: f32) -> El
 
 /// La playlist pubblica di qualcuno: come una playlist locale, senza modifiche.
 pub fn playlist_view(app: &App, width: f32) -> Element<'_, Message> {
-    let playlist = match &app.social.playlist {
+    let playlist = match &app.social.view.playlist {
         None => return empty_block("Nessuna playlist aperta."),
         Some(Load::Idle | Load::Loading) => return skeleton_rows(8, theme::ROW_MEDIA, TableKind::Mixed),
         Some(Load::Failed(err)) => return error_block("la playlist", err),

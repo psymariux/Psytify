@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use iced::widget::{Space, button, column, container, row, text};
-use iced::{Alignment, Color, Element, Length, Padding, alignment};
+use iced::{Alignment, Element, Length, Padding, alignment};
 use uuid::Uuid;
 
 use super::components::{
@@ -88,13 +88,12 @@ fn source_playlist_tile_sized<'a>(app: &App, playlist: &SourcePlaylist, side: f3
 }
 
 /// Lato delle copertine grandi degli scaffali.
-pub const BIG_COVER: f32 = 184.0;
+pub const BIG_COVER: f32 = psytify_design::tokens::size::cover::COVER_M;
 /// Lato delle copertine tonde degli artisti.
-pub const ARTIST_COVER: f32 = 148.0;
+pub const ARTIST_COVER: f32 = psytify_design::tokens::size::cover::COVER_M;
+/// Testo secondario su una card: il grigio dei testi secondari.
+const ON_TINT_LINE: Line = Line { size: theme::FS_SMALL, font: theme::FONT, color: Some(theme::MUTED) };
 /// Il titolo dell'uscita in evidenza.
-/// Testo secondario sopra una scheda colorata: il bianco, un po' attenuato.
-const ON_TINT_LINE: Line =
-    Line { size: theme::FS_SMALL, font: theme::FONT, color: Some(Color { a: 0.75, ..Color::WHITE }) };
 const HERO_TITLE: Line =
     Line { size: theme::FS_FEATURE, font: theme::FONT_SEMIBOLD, color: Some(theme::TEXT) };
 
@@ -225,7 +224,7 @@ pub fn mix_card<'a>(app: &App, index: usize, mix: &Mix, side: f32) -> Element<'a
     let progress = hot_progress(app, id);
     let mut layers = iced::widget::stack![collage];
     if progress > 0.0 {
-        let play = container(icon(Icon::Play, 18.0, fade(theme::ON_PRIMARY, progress)))
+        let play = container(icon(Icon::Play, 0.0, fade(theme::ON_PRIMARY, progress)))
             .center(super::components::FAB)
             .style(theme::fab(progress));
         layers = layers.push(
@@ -234,7 +233,7 @@ pub fn mix_card<'a>(app: &App, index: usize, mix: &Mix, side: f32) -> Element<'a
                 .height(Length::Fill)
                 .align_x(alignment::Horizontal::Right)
                 .align_y(alignment::Vertical::Bottom)
-                .padding(Padding { right: 8.0, bottom: 8.0 - 6.0 * (1.0 - progress), ..Padding::ZERO }),
+                .padding(Padding { right: 8.0, bottom: 8.0, ..Padding::ZERO }),
         );
     }
     let item = button(
@@ -280,7 +279,7 @@ pub fn chart<'a>(app: &App, top: &[PlayStat], width: f32) -> Element<'a, Message
                         text((index + 1).to_string())
                             .size(theme::FS_TITLE)
                             .font(theme::FONT_SEMIBOLD)
-                            .color(fade(if index == 0 { theme::ACCENT } else { theme::MUTED }, progress)),
+                            .color(fade(if index == 0 { theme::TEXT } else { theme::MUTED }, progress)),
                     )
                     .width(RANK_WIDTH),
                     cover(&app.covers, super::components::art_of(track), theme::ROW_COVER),
@@ -331,8 +330,6 @@ pub fn hero<'a>(app: &'a App, width: f32) -> Option<Element<'a, Message>> {
     let releases = &app.home.feed.hero;
     let release = releases.get(app.home.hero.index)?;
     let shown = app.home.hero.since.map_or(1.0, |since| motion::appear(since, HERO_SWAP));
-    let tint = app.covers.tint_of(release_art(release));
-
     // Sul telefono (stretto) copertina più piccola e pulsanti sotto, a tutta larghezza: il titolo
     // ha lo spazio per due righe intere.
     let narrow = width < NARROW_HERO;
@@ -421,9 +418,8 @@ pub fn hero<'a>(app: &'a App, width: f32) -> Option<Element<'a, Message>> {
         None
     };
 
-    // La copertina sale di qualche pixel mentre entra.
-    let art = container(container(cover(&app.covers, release_art(release), side)).style(theme::lifted))
-        .padding(Padding { top: 10.0 * (1.0 - shown), bottom: 10.0 * shown, ..Padding::ZERO });
+    // La copertina com'è, piatta e ferma.
+    let art = cover(&app.covers, release_art(release), side);
     let top = row![art, body].spacing(gap).align_y(Alignment::Center);
 
     let mut card = column![top].spacing(16);
@@ -433,7 +429,7 @@ pub fn hero<'a>(app: &'a App, width: f32) -> Option<Element<'a, Message>> {
     if releases.len() > 1 {
         card = card.push(dots(releases.len(), app.home.hero.index));
     }
-    Some(container(card).padding(pad).width(Length::Fill).style(theme::hero_card(tint)).into())
+    Some(container(card).padding(pad).width(Length::Fill).style(theme::card).into())
 }
 
 /// I puntini del carosello: quello acceso è una barretta lunga.
@@ -441,7 +437,7 @@ fn dots<'a>(count: usize, active: usize) -> Element<'a, Message> {
     let items = (0..count).map(|n| {
         let on = n == active;
         let (width, color) = if on { (26.0, theme::TEXT) } else { (7.0, theme::FAINT) };
-        button(container(Space::new(Length::Fixed(width), Length::Fixed(7.0))).style(theme::bar(color, 3.5)))
+        button(container(Space::new(Length::Fixed(width), Length::Fixed(7.0))).style(theme::bar(color)))
             .padding([6, 3])
             .style(theme::bare)
             .on_press(Message::HeroGo(n))
@@ -461,7 +457,7 @@ pub fn stat<'a>(value: String, label: &'a str, width: f32) -> Element<'a, Messag
     .into()
 }
 
-/// Ascolti e tempo ascoltato, in stile «Replay»: tre numeri grandi su una scheda sfumata.
+/// Ascolti e tempo ascoltato: tre numeri grandi su una card.
 pub fn listening_card<'a>(app: &App, width: f32) -> Option<Element<'a, Message>> {
     if app.stats.is_empty() && app.listened_ms == 0 {
         return None;
@@ -473,14 +469,6 @@ pub fn listening_card<'a>(app: &App, width: f32) -> Option<Element<'a, Message>>
     let time =
         if hours >= 1.0 { format!("{hours:.1} h") } else { format!("{} min", (hours * 60.0).round() as u64) };
     let favourite = top.first().map_or_else(|| "—".to_string(), |a| a.artist.name.clone());
-    let tint = top
-        .first()
-        .and_then(|a| {
-            a.cover_url
-                .as_deref()
-                .map(|url| app.covers.tint_of(Art { id: a.artist.id, title: &a.artist.name, url: Some(url) }))
-        })
-        .unwrap_or(theme::BRAND_TINT);
     let body = row![
         stat(time, "ascoltati", cell),
         stat(plays.to_string(), if plays == 1 { "brano riprodotto" } else { "brani riprodotti" }, cell),
@@ -491,7 +479,7 @@ pub fn listening_card<'a>(app: &App, width: f32) -> Option<Element<'a, Message>>
         container(
             column![
                 row![
-                    icon(Icon::Chart, 18.0, theme::TEXT),
+                    icon(Icon::Chart, 0.0, theme::TEXT),
                     text("Il tuo ascolto").size(theme::FS_SECTION).font(theme::FONT_SEMIBOLD),
                 ]
                 .spacing(10)
@@ -505,7 +493,7 @@ pub fn listening_card<'a>(app: &App, width: f32) -> Option<Element<'a, Message>>
         )
         .padding(theme::PAD)
         .width(Length::Fill)
-        .style(theme::hero_card(tint))
+        .style(theme::card)
         .into(),
     )
 }
@@ -513,18 +501,16 @@ pub fn listening_card<'a>(app: &App, width: f32) -> Option<Element<'a, Message>>
 // ---------- Sfoglia tutto ----------
 
 /// Altezza di una scheda di «Sfoglia tutto».
-const BROWSE_HEIGHT: f32 = 104.0;
+const BROWSE_HEIGHT: f32 = 80.0;
 
-/// Una scheda: nome, riga di spiegazione e una grande icona sull'angolo.
+/// Una voce dell'indice: nome, riga di spiegazione e una piccola icona sull'angolo. Nessun colore.
 fn browse_card<'a>(
-    index: usize,
     glyph: Icon,
     title: &'a str,
     detail: &'a str,
     on_press: Message,
     width: f32,
 ) -> Element<'a, Message> {
-    let color = theme::BROWSE[index % theme::BROWSE.len()];
     let label = column![
         line(
             title,
@@ -535,19 +521,18 @@ fn browse_card<'a>(
     ]
     .spacing(4)
     .width(Length::Fill);
-    let art = container(icon(glyph, 52.0, Color { a: 0.42, ..Color::WHITE }))
-        .height(Length::Fill)
-        .align_y(alignment::Vertical::Bottom);
+    let art =
+        container(icon(glyph, 0.0, theme::FAINT)).height(Length::Fill).align_y(alignment::Vertical::Bottom);
     button(row![label, art].spacing(8).align_y(Alignment::Start))
         .width(Length::Fill)
         .height(BROWSE_HEIGHT)
         .padding(16)
-        .style(theme::browse_card(color))
+        .style(theme::browse_card)
         .on_press(on_press)
         .into()
 }
 
-/// «Sfoglia tutto»: le porte d'ingresso al catalogo, a colori, due o tre per riga.
+/// «Sfoglia tutto»: le porte d'ingresso al catalogo, due o tre per riga.
 pub fn browse_grid<'a>(app: &App, width: f32) -> Element<'a, Message> {
     use crate::app::LibraryFilter;
     let mut cards: Vec<(Icon, &str, &str, Message)> = vec![
@@ -571,12 +556,12 @@ pub fn browse_grid<'a>(app: &App, width: f32) -> Element<'a, Message> {
     let columns = if width >= 700.0 { 3 } else { 2 };
     let cell = (width - theme::GRID_GAP * (columns as f32 - 1.0)) / columns as f32;
     let mut rows = column![].spacing(theme::GRID_GAP);
-    let mut cards = cards.into_iter().enumerate();
+    let mut cards = cards.into_iter();
     loop {
         let mut line_cells = row![].spacing(theme::GRID_GAP);
         let mut filled = 0;
-        for (index, (glyph, title, detail, message)) in cards.by_ref().take(columns) {
-            line_cells = line_cells.push(browse_card(index, glyph, title, detail, message, cell));
+        for (glyph, title, detail, message) in cards.by_ref().take(columns) {
+            line_cells = line_cells.push(browse_card(glyph, title, detail, message, cell));
             filled += 1;
         }
         if filled == 0 {

@@ -4,6 +4,7 @@
 //! con una configurazione a parte (`XDG_CONFIG_HOME`) e il volume a zero: suona davvero.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use iced::{Size, Task, window};
@@ -91,7 +92,7 @@ const STEPS: &[Step] = &[
         )
     }),
     ("friends", 8000, |app| {
-        let enter = if app.social.form.step.is_some() {
+        let enter = if app.social.view.auth.step.is_some() {
             vec![Message::AuthInput(AuthField::Code, "424242".into()), Message::AuthSubmit]
         } else {
             Vec::new()
@@ -110,7 +111,7 @@ const STEPS: &[Step] = &[
         }
     }),
     ("friend-playlist", 4000, |app| {
-        let Some((handle, Load::Ready(open))) = app.social.open.as_ref() else { return Task::none() };
+        let Some((handle, Load::Ready(open))) = app.social.view.open.as_ref() else { return Task::none() };
         match open.page.playlists.first().map(|p| (handle.clone(), p.id)) {
             Some((handle, id)) => app.update(Message::OpenFriendPlaylist(handle, id)),
             None => Task::none(),
@@ -131,7 +132,8 @@ const STEPS: &[Step] = &[
         // Con una configurazione nuova non ci sono brani che piacciono: suonano gli ultimi arrivati.
         let start = match &app.home.recent {
             _ if !app.queue.is_empty() => Message::TogglePlay,
-            _ if !app.liked.is_empty() => Message::ShufflePlay(app.liked.clone().into()),
+            // `liked` è una lista condivisa del core (`Shared`) dal passo 4.2: per suonarla serve una copia.
+            _ if !app.liked.is_empty() => Message::ShufflePlay(Arc::from(app.liked.as_slice())),
             Load::Ready(tracks) => Message::PlayTracks(tracks.clone(), 0),
             _ => Message::TogglePlay,
         };
@@ -151,7 +153,9 @@ const STEPS: &[Step] = &[
     // Una versione nuova offerta: il banner sotto la barra alta (desktop) o in cima alla pagina.
     ("update-banner", 2000, |app| {
         let asset = crate::api::update::Asset { name: "psytify-v9.9.9-linux-x86_64.tar.gz".into(), size: 1 };
-        app.update =
+        // L'offerta la darebbe il core (un controllo che trova una release): il tour la scrive nella
+        // copia della vista, che basta a disegnare il banner.
+        Arc::make_mut(&mut app.downloads).update.state =
             Some(super::UpdateState::Offered(crate::api::update::Offer { tag: "v9.9.9".into(), asset }));
         go(app, [Message::Navigate(Screen::Home)])
     }),

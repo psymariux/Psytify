@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Arch package of the desktop client and the database of a pacman repository.
+# Builds the Arch package of the desktop (GPUI) and the database of a pacman repository.
 #
 # Usage: [CHECK=0] [SIGN=<GPG key>] scripts/arch-package.sh [--install]
 #   --install   installs the package on this machine (pacman -U, asks for sudo)
@@ -17,7 +17,7 @@
 # (remember that pacman looks for the files in <Server>/psytify.db: if the server has no
 # `x86_64` subfolder, use `Server = https://<host>/arch`).
 #
-# The PKGBUILD lives in client/ but `makepkg` would use `client/src` (the code) as its working folder:
+# The PKGBUILD lives in desktop/ but `makepkg` would use `desktop/src` (the code) as its working folder:
 # here BUILDDIR, SRCDEST and PKGDEST point elsewhere.
 set -euo pipefail
 
@@ -45,7 +45,7 @@ if [ "$(id -u)" = 0 ]; then
   exit 1
 fi
 
-cd "$ROOT/client"
+cd "$ROOT/desktop"
 makepkg "${args[@]}"
 
 pkg=$(ls -t "$OUT"/psytify-*-x86_64.pkg.tar.zst | head -1)

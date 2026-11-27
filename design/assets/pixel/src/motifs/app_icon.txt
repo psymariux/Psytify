@@ -1,0 +1,19 @@
+# app_icon: Nastro's face for the launcher: a bright shell around a dark label, two ringed reels with lime hubs (the playing state), a tape guide.
+# Flat (no ribbon, no ground shadow) so it survives 2x-9x scaling; the launcher tool crops to the art and centres it.
+@frame
+................
+.gggggggggggggg.
+gwwwwwwwwwwwwwwg
+gwoooooooooooowg
+gwokkkkkkkkkkowg
+gwokpppkkpppkowg
+gwokplpkkplpkowg
+gwokpppkkpppkowg
+gwokkkkkkkkkkowg
+gwoooooooooooowg
+gwwwwwwwwwwwwwwg
+gmmiiiiiiiiiimmg
+.gmcooccccoocmg.
+..gcccccccccccg.
+...gggggggggg...
+................

@@ -1,19 +1,28 @@
 # Automatic labels by path (actions/labeler).
+desktop:
+  - changed-files:
+      - any-glob-to-any-file: ["desktop/src/**", "desktop/Cargo.toml"]
 client:
   - changed-files:
-      - any-glob-to-any-file: ["client/src/**", "client/tests/**", "client/Cargo.toml"]
+      - any-glob-to-any-file: ["client/src/**", "client/Cargo.toml"]
+core:
+  - changed-files:
+      - any-glob-to-any-file: ["core/src/**", "core/tests/**", "core/Cargo.toml"]
+design:
+  - changed-files:
+      - any-glob-to-any-file: ["design/**", "docs/design/**"]
 ui:
   - changed-files:
-      - any-glob-to-any-file: ["client/src/ui/**", "client/assets/**", "docs/STYLE.md"]
+      - any-glob-to-any-file: ["desktop/src/**", "client/src/ui/**", "client/assets/**", "docs/STYLE.md"]
 audio:
   - changed-files:
-      - any-glob-to-any-file: ["client/src/player/**"]
+      - any-glob-to-any-file: ["core/src/player/**"]
 android:
   - changed-files:
       - any-glob-to-any-file: ["android/**", "scripts/android-*", "docs/ANDROID.md"]
 packaging:
   - changed-files:
-      - any-glob-to-any-file: ["client/PKGBUILD", "client/psytify.desktop", "scripts/arch-package.sh"]
+      - any-glob-to-any-file: ["desktop/PKGBUILD", "client/psytify.desktop", "scripts/arch-package.sh"]
 ci:
   - changed-files:
       - any-glob-to-any-file: [".github/**"]

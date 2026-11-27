@@ -1,4 +1,4 @@
-//! Barra "now playing" (88px) sul nero: brano corrente con il cuore, controlli e avanzamento al
+//! Barra "now playing" (72 dp) sul chrome: brano corrente con il cuore, controlli e avanzamento al
 //! centro, pannelli e volume a destra.
 
 use iced::widget::{Space, button, column, container, row, slider};
@@ -11,14 +11,14 @@ use super::components::{
 use super::cover::cover;
 use super::icons::{Icon, icon};
 use super::pointer::pointer;
-use super::{motion, theme};
+use super::theme;
 use crate::app::{App, MenuTarget, Message, Screen, SideTab, TrackSource};
 use crate::player::seek::{format_time, progress as progress_of};
 use crate::player::{PlaybackState, Repeat};
 
 const PADDING: f32 = 16.0;
 const SPACING: f32 = 24.0;
-const COVER: f32 = 56.0;
+const COVER: f32 = psytify_design::tokens::size::cover::COVER_S;
 /// «Riprova» e la distanza dal messaggio d'errore.
 const RETRY_WIDTH: f32 = 64.0;
 
@@ -26,15 +26,19 @@ pub fn view(app: &App, window: f32) -> Element<'_, Message> {
     // Le tre zone dividono la larghezza 3:4:3; il testo del brano sta dopo copertina e cuore.
     let info_width =
         (window - 2.0 * PADDING - 2.0 * SPACING) * 0.3 - COVER - 14.0 - super::components::ICON_BUTTON - 8.0;
-    row![
-        container(track_info(app, info_width)).width(Length::FillPortion(3)),
-        container(transport(app)).width(Length::FillPortion(4)).align_x(alignment::Horizontal::Center),
-        container(extras(app)).width(Length::FillPortion(3)).align_x(alignment::Horizontal::Right),
-    ]
+    container(
+        row![
+            container(track_info(app, info_width)).width(Length::FillPortion(3)),
+            container(transport(app)).width(Length::FillPortion(4)).align_x(alignment::Horizontal::Center),
+            container(extras(app)).width(Length::FillPortion(3)).align_x(alignment::Horizontal::Right),
+        ]
+        .padding([0.0, PADDING])
+        .spacing(SPACING)
+        .align_y(Alignment::Center),
+    )
     .height(theme::NOW_PLAYING_HEIGHT)
-    .padding([0.0, PADDING])
-    .spacing(SPACING)
-    .align_y(Alignment::Center)
+    .align_y(alignment::Vertical::Center)
+    .style(theme::panel_box)
     .into()
 }
 
@@ -46,7 +50,7 @@ fn track_info(app: &App, width: f32) -> Element<'_, Message> {
         PlaybackState::Loading { .. } => small("Caricamento…").into(),
         // Una riga sola: il messaggio si accorcia (intero è nell'avviso) e «Riprova» resta intero.
         PlaybackState::Error(message) => row![
-            line(message, (width - RETRY_WIDTH).max(0.0), Line { color: Some(theme::NEGATIVE), ..META_LINE }),
+            line(message, (width - RETRY_WIDTH).max(0.0), Line { color: Some(theme::ERROR), ..META_LINE }),
             text_button("Riprova", Message::TogglePlay),
         ]
         .spacing(8)
@@ -90,18 +94,12 @@ pub(super) fn transport(app: &App) -> Element<'_, Message> {
 pub(super) fn controls(app: &App) -> Element<'_, Message> {
     let has_track = app.queue.current().is_some();
     let play_glyph = if app.playback.is_playing() { Icon::Pause } else { Icon::Play };
-    // Al cambio fra Play e Pausa l'icona rimbalza un poco; il tasto resta della sua misura.
-    let pop = app.play_pop.map_or(0.0, |since| motion::pop(since, theme::MOTION_PANEL));
     let play = button(
-        container(icon(
-            play_glyph,
-            18.0 * (1.0 + 0.28 * pop),
-            if has_track { theme::ON_PRIMARY } else { theme::FAINT },
-        ))
-        .center(Length::Fill),
+        container(icon(play_glyph, 0.0, if has_track { theme::ON_PRIMARY } else { theme::DISABLED }))
+            .center(Length::Fill),
     )
-    .width(theme::CONTROL_HEIGHT + 4.0)
-    .height(theme::CONTROL_HEIGHT + 4.0)
+    .width(theme::FIELD_HEIGHT)
+    .height(theme::FIELD_HEIGHT)
     .padding(0)
     .style(theme::primary)
     .on_press_maybe(has_track.then_some(Message::TogglePlay));
@@ -133,7 +131,7 @@ pub(super) fn controls(app: &App) -> Element<'_, Message> {
 pub(super) fn progress(app: &App) -> Element<'_, Message> {
     let duration = app.queue.current().map(|t| t.duration()).unwrap_or_default();
     let position = app.shown_position().min(duration);
-    let value = app.playback.scrubbing.unwrap_or_else(|| progress_of(position, duration));
+    let value = app.scrubbing.unwrap_or_else(|| progress_of(position, duration));
     let bar = pointer(
         slider(0.0..=1.0, value, Message::Scrub)
             .step(0.001_f32)
@@ -159,7 +157,7 @@ fn extras(app: &App) -> Element<'_, Message> {
     let showing = |tab: SideTab| app.panel_open && app.side_tab == tab;
     // Il videoclip e il testo a tutto schermo hanno un tasto ciascuno.
     let video: Element<'_, Message> = if app.video_available() {
-        toggle_button(
+        icon_button(
             Icon::Video,
             "Videoclip a tutto schermo",
             app.focus && app.focus_video,
@@ -168,7 +166,7 @@ fn extras(app: &App) -> Element<'_, Message> {
     } else {
         Space::with_width(0).into()
     };
-    let lyrics_full = toggle_button(
+    let lyrics_full = icon_button(
         Icon::Expand,
         "Testo a tutto schermo (F)",
         app.focus && !app.focus_video,
@@ -177,21 +175,21 @@ fn extras(app: &App) -> Element<'_, Message> {
     row![
         video,
         lyrics_full,
-        toggle_button(
+        icon_button(
             Icon::Note,
             "In riproduzione",
             showing(SideTab::NowPlaying),
             Some(Message::OpenPanel(SideTab::NowPlaying))
         ),
-        toggle_button(
+        icon_button(
             Icon::Lyrics,
             "Testo",
             showing(SideTab::Lyrics),
             Some(Message::OpenPanel(SideTab::Lyrics))
         ),
-        toggle_button(Icon::Queue, "Coda", showing(SideTab::Queue), Some(Message::OpenPanel(SideTab::Queue))),
+        icon_button(Icon::Queue, "Coda", showing(SideTab::Queue), Some(Message::OpenPanel(SideTab::Queue))),
         // Vista immersiva, equalizzatore, riproduzione automatica e timer di spegnimento.
-        toggle_button(
+        icon_button(
             if app.sleep.is_some() { Icon::Moon } else { Icon::More },
             "Altro: timer, equalizzatore, vista immersiva",
             app.sleep.is_some(),

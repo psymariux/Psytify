@@ -1,182 +1,206 @@
-//! Token di stile e funzioni di stile per i widget (vedi docs/STYLE.md).
+//! Token di stile e funzioni di stile per i widget. Ogni colore e ogni misura arriva da
+//! `psytify-design` (`docs/design/PSYTIFY_DESIGN_TOKENS.md`): qui si convertono nei tipi di Iced e si
+//! danno i nomi che usa il resto di `ui/`. Nessuno definisce un valore suo.
 //!
-//! Struttura "tre pannelli su nero" come nei player moderni: la finestra è nera, la barra laterale,
-//! il contenuto e il pannello destro sono pannelli arrotondati un gradino sopra. L'elevazione
-//! si fa con gradini di luminosità; l'ombra compare solo su ciò che galleggia (menu, finestre di
-//! dialogo) e i gradienti solo come tinta della copertina in testa a una pagina. Il lime è il
-//! colore del marchio: avanzamento, brano in riproduzione, "mi piace", interruttori accesi e il
-//! pulsante di riproduzione in evidenza.
+//! L'identità è monocromatica: quattro grigi caldi per le superfici, tre livelli di testo, nessun
+//! raggio (gli angoli sono vivi), nessuna sfumatura, nessuna ombra sfocata. Il lime (`LIME`) vale solo
+//! come stato: riproduzione in corso, voce di navigazione scelta, interruttore acceso, «dal vivo».
+//! Il colore vero sullo schermo è quello delle copertine, mai tinte né usate per colorare altro.
+//! Le regioni sono a filo e le divide una linea da 1 AP: la finestra è del colore della linea e
+//! gli spazi tra i pannelli (`OUTER_GAP`) la lasciano vedere.
 
-use std::f32::consts::{FRAC_PI_2, PI};
 use std::time::Duration;
 
 use iced::border::Radius;
 use iced::font::Weight;
-use iced::gradient::Linear;
-use iced::widget::{button, container, scrollable, slider, svg, text_input, toggler};
-use iced::{Background, Border, Color, Font, Gradient, Shadow, Theme, Vector, theme};
+use iced::widget::{button, container, scrollable, slider, text_input, toggler};
+use iced::{Background, Border, Color, Font, Shadow, Theme, Vector, theme};
+use psytify_design::tokens::color as ds;
+use psytify_design::tokens::color::Rgba;
+use psytify_design::tokens::{size as sz, space, type_};
 
-const fn hex(rgb: u32) -> Color {
+/// Un token del design come colore di Iced: la conversione si fa una volta, a compilazione.
+pub const fn color(token: Rgba) -> Color {
     Color {
-        r: ((rgb >> 16) & 0xff) as f32 / 255.0,
-        g: ((rgb >> 8) & 0xff) as f32 / 255.0,
-        b: (rgb & 0xff) as f32 / 255.0,
-        a: 1.0,
+        r: token.r() as f32 / 255.0,
+        g: token.g() as f32 / 255.0,
+        b: token.b() as f32 / 255.0,
+        a: token.a() as f32 / 255.0,
     }
 }
 
-// Superfici
-/// La finestra: nero puro, si vede tra i pannelli.
-pub const GROUND: Color = hex(0x000000);
-/// Barra laterale, contenuto e pannello destro.
-pub const PANEL: Color = hex(0x121212);
-/// Card dentro un pannello e riga selezionata.
-pub const SURFACE: Color = hex(0x1b1b1b);
-/// Passaggio del mouse.
-pub const HOVER: Color = hex(0x252525);
-/// Binari degli slider, bordo degli stati vuoti, menu.
-pub const RAISED: Color = hex(0x2e2e2e);
-pub const SKELETON: Color = hex(0x1f1f1f);
-// Linee
-pub const CONTROL: Color = hex(0x4d4d4d);
-// Testo (tutti oltre 4.5:1 su GROUND, PANEL, SURFACE, HOVER e RAISED)
-pub const TEXT: Color = hex(0xffffff);
-pub const MUTED: Color = hex(0xb8b8b8);
-pub const FAINT: Color = hex(0x9c9c9c);
+/// Il verso opposto, per la cache degli sprite (la chiave è un `Rgba`): l'alfa si perde, l'opacità
+/// dell'icona la dà il widget.
+pub fn rgba_of(c: Color) -> Rgba {
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Rgba::rgb(byte(c.r), byte(c.g), byte(c.b))
+}
+
+// Superfici (quattro grigi: sezione 1 dei token)
+/// La tela del contenuto: nero pieno.
+pub const CANVAS: Color = color(ds::SURFACE_CANVAS);
+/// Barra del titolo, laterale, pannello destro, barra del player, schede del telefono.
+pub const CHROME: Color = color(ds::SURFACE_CHROME);
+/// Hover, card, menu, finestre di dialogo, campo del segnaposto delle copertine.
+pub const RAISED: Color = color(ds::SURFACE_RAISED);
+/// Riga scelta, fill premuto, binario degli slider.
+pub const SELECTED: Color = color(ds::SURFACE_SELECTED);
+/// Il pozzetto dei campi di testo.
+pub const WELL: Color = color(ds::SURFACE_WELL);
+/// Le linee a filo che dividono le regioni, i separatori dei menu e delle liste.
+pub const LINE: Color = color(ds::LINE_SUBTLE);
+/// La finestra, che si vede negli spazi tra le regioni: il colore delle linee.
+pub const GROUND: Color = LINE;
+/// Bordo dei livelli che galleggiano (menu, dialoghi, avvisi) e separatore forte.
+pub const LINE_STRONG: Color = color(ds::LINE_STRONG);
+// Controlli
+pub const CONTROL: Color = color(ds::CONTROL_BORDER);
+pub const CONTROL_HOVER: Color = color(ds::CONTROL_BORDER_HOVER);
+pub const FOCUS: Color = color(ds::FOCUS_RING);
+// Testo e icone (tutti oltre 4.5:1 sulle quattro superfici: test in `psytify-design`)
+pub const TEXT: Color = color(ds::TEXT_PRIMARY);
+pub const MUTED: Color = color(ds::TEXT_SECONDARY);
+pub const FAINT: Color = color(ds::TEXT_TERTIARY);
 /// Un controllo che non si può usare ora (il download di un brano senza licenza).
-pub const DISABLED: Color = hex(0x636363);
-pub const NAV_IDLE: Color = hex(0xbdbdbd);
-// Marchio, dati e stati
-pub const ACCENT: Color = hex(0xc6f24e);
-pub const ACCENT_HOVER: Color = hex(0xd6ff5e);
-pub const NEGATIVE: Color = hex(0xe5566f);
-pub const ON_PRIMARY: Color = hex(0x000000);
+pub const DISABLED: Color = color(ds::TEXT_DISABLED);
+pub const NAV_IDLE: Color = color(ds::ICON_IDLE);
+/// Icone attive: bianco caldo, come il testo (il cuore dei brani che piacciono è questo).
+pub const ICON_ACTIVE: Color = color(ds::ICON_ACTIVE);
+// Stati
+/// L'unica luce accesa dell'app: solo stato (riproduzione, navigazione scelta, interruttori, live).
+pub const LIME: Color = color(ds::STATE_ON);
+pub const ERROR: Color = color(ds::TEXT_ERROR);
+pub const ON_PRIMARY: Color = color(ds::TEXT_ON_LIGHT);
+/// Il pulsante primario: bianco caldo; al passaggio bianco pieno.
+const PRIMARY_HOVER: Color = color(ds::FOCUS_RING);
+/// Il nero dei velo e delle ombre.
+const BLACK: Color = color(ds::DEEP_BLACK);
+/// Il velo dietro le finestre di dialogo: nero al 72 %.
+const SCRIM: Color = color(ds::SCRIM);
 
-// Misure
-/// Tinte delle pagine che non hanno una copertina: la casa (il verde del marchio, molto scuro),
-/// la neutra delle impostazioni e quella dei brani che piacciono.
-pub const BRAND_TINT: Color = hex(0x4d6a14);
-pub const NEUTRAL_TINT: Color = hex(0x3a3a3a);
-pub const LIKED_TINT: Color = hex(0x8a2f48);
-
-pub const RADIUS_PANEL: f32 = 14.0;
-pub const RADIUS_CARD: f32 = 14.0;
-pub const RADIUS_TILE: f32 = 10.0;
-/// Angolo di una copertina, in frazione del lato: 7% (a 188px sono 13px, a 40px quasi 3).
-pub const COVER_CORNER: f32 = 0.07;
-pub const RADIUS_ROW: f32 = 8.0;
-pub const RADIUS_PILL: f32 = 999.0;
-pub const PAD: f32 = 22.0;
-/// Margine del contenuto dentro il pannello centrale.
-pub const GUTTER: f32 = 28.0;
-/// Spazio tra i pannelli e dal bordo della finestra.
-pub const OUTER_GAP: f32 = 8.0;
-pub const CONTROL_HEIGHT: f32 = 36.0;
-/// Il modulo di accesso: una colonna stretta al centro della pagina.
-pub const SIGN_IN_WIDTH: f32 = 380.0;
-/// Campi e pulsanti del modulo di accesso: più alti dei controlli, per il pollice e per leggere.
-pub const FIELD_HEIGHT: f32 = 44.0;
+// Misure (dp). Sezione 3 e 6 dei token.
+/// Un pixel d'arte in dp: linee e bordi sono larghi uno.
+pub const AP: f32 = space::AP_DP;
+pub const PAD: f32 = space::SPACE_6;
+/// Margine del contenuto dentro la tela.
+pub const GUTTER: f32 = sz::PAGE_GUTTER;
+/// Lo spazio tra le regioni: la linea che le divide, larga un AP.
+pub const OUTER_GAP: f32 = space::AP_DP;
+pub const CONTROL_HEIGHT: f32 = sz::CONTROL_H;
+/// Il modulo di accesso: una colonna al centro della pagina.
+pub const SIGN_IN_WIDTH: f32 = 360.0;
+/// Campi e pulsanti del modulo di accesso.
+pub const FIELD_HEIGHT: f32 = sz::CONTROL_H_LARGE;
 /// L'avatar grande in testa a un profilo e quello piccolo nelle righe delle persone.
-pub const AVATAR_PROFILE: f32 = 128.0;
-pub const AVATAR_ROW: f32 = 44.0;
-pub const SIDEBAR_WIDTH: f32 = 252.0;
-pub const TOP_BAR_HEIGHT: f32 = 56.0;
-pub const NAV_PITCH: f32 = 40.0;
-pub const NOW_PLAYING_HEIGHT: f32 = 88.0;
+pub const AVATAR_PROFILE: f32 = sz::cover::AVATAR_M;
+pub const AVATAR_ROW: f32 = sz::cover::AVATAR_S;
+pub const SIDEBAR_WIDTH: f32 = sz::SIDEBAR_W;
+pub const TOP_BAR_HEIGHT: f32 = sz::TITLE_BAR_H;
+pub const NAV_PITCH: f32 = sz::NAV_ITEM_H + space::SPACE_2;
+pub const NOW_PLAYING_HEIGHT: f32 = sz::PLAYER_BAR_H;
 /// Pannello destro (in riproduzione, coda, testo).
-pub const SIDE_PANEL_WIDTH: f32 = 340.0;
-pub const ROW_PLAIN: f32 = 56.0;
-/// Copertina nelle righe delle liste miste: 40px su un passo di 56 (40 + 16).
-pub const ROW_COVER: f32 = 40.0;
-/// Riga di ricerca con copertina da 50px.
-pub const ROW_MEDIA: f32 = 64.0;
-/// Filtri a pillola della Libreria.
-pub const PILL_HEIGHT: f32 = 32.0;
+pub const SIDE_PANEL_WIDTH: f32 = sz::SIDE_PANEL_W;
+pub const ROW_PLAIN: f32 = sz::TRACK_ROW_H;
+/// Copertina nelle righe delle liste miste.
+pub const ROW_COVER: f32 = sz::cover::COVER_XS;
+/// Riga di ricerca con copertina da 48.
+pub const ROW_MEDIA: f32 = sz::TRACK_ROW_H + space::SPACE_5;
+/// Altezza dei filtri e dei segmenti.
+pub const PILL_HEIGHT: f32 = sz::CONTROL_H;
 /// Lato minimo di una copertina nella griglia degli album: le colonne si calcolano da qui.
-pub const ALBUM_TILE_MIN: f32 = 168.0;
+pub const ALBUM_TILE_MIN: f32 = sz::TILE_MIN_W;
 /// Spazio tra le tessere della griglia, in orizzontale e in verticale.
-pub const GRID_GAP: f32 = 16.0;
+pub const GRID_GAP: f32 = sz::GRID_GAP;
 /// Larghezza di un menu contestuale e altezza di una sua voce.
-pub const MENU_WIDTH: f32 = 276.0;
-pub const MENU_ITEM: f32 = 38.0;
-/// Riga di una sheet dal basso (telefono): alta quanto basta a un dito.
-pub const SHEET_ITEM: f32 = 56.0;
+pub const MENU_WIDTH: f32 = sz::MENU_W;
+pub const MENU_ITEM: f32 = sz::MENU_ITEM_H;
+/// Riga di una sheet dal basso (telefono).
+pub const SHEET_ITEM: f32 = sz::phone::SHEET_ITEM_H;
 /// Testo delle voci della sheet.
-pub const FS_SHEET: f32 = 16.0;
-/// Angoli superiori della sheet.
-pub const SHEET_RADIUS: f32 = 20.0;
+pub const FS_SHEET: f32 = type_::phone::TYPE_TRACK_TITLE.size;
 
 // Telefono (ui/phone/).
-/// Barra di navigazione in basso, mini-player sopra di lei, margine laterale delle pagine.
-pub const PHONE_NAV_HEIGHT: f32 = 60.0;
-pub const PHONE_MINI_HEIGHT: f32 = 60.0;
-pub const PHONE_GUTTER: f32 = 16.0;
+/// Barra delle schede in basso, mini-player sopra di lei, margine laterale delle pagine.
+pub const PHONE_NAV_HEIGHT: f32 = sz::phone::PHONE_TAB_BAR_H;
+pub const PHONE_MINI_HEIGHT: f32 = sz::phone::PHONE_MINI_PLAYER_H;
+pub const PHONE_GUTTER: f32 = sz::phone::PHONE_GUTTER;
 /// Barra delle pagine aperte da un'altra: solo «Indietro».
-pub const PHONE_TOP_HEIGHT: f32 = 48.0;
-/// Titolo delle quattro schermate principali: grande, come nelle app da telefono.
-pub const FS_PHONE_TITLE: f32 = 30.0;
-/// Copertine degli scaffali: due e mezza per riga, quella tagliata invita a scorrere.
-pub const PHONE_COVER: f32 = 148.0;
+pub const PHONE_TOP_HEIGHT: f32 = sz::phone::PHONE_TOP_BAR_H;
+/// Titolo delle schermate principali.
+pub const FS_PHONE_TITLE: f32 = type_::PIXEL_SIZE;
+/// Copertine degli scaffali.
+pub const PHONE_COVER: f32 = sz::phone::PHONE_SHELF_COVER;
 pub const PHONE_ARTIST: f32 = 120.0;
 /// Righe delle liste: copertina e passo.
-pub const PHONE_ROW_COVER: f32 = 56.0;
-pub const PHONE_ROW: f32 = 68.0;
+pub const PHONE_ROW_COVER: f32 = sz::cover::COVER_S;
+pub const PHONE_ROW: f32 = sz::phone::PHONE_ROW_H;
 /// Copertina del player a schermo intero: al massimo questa parte dell'altezza.
 pub const PHONE_PLAYER_COVER: f32 = 0.42;
 /// Spazio per la barra di stato e per quella dei gesti di Android, che stanno sopra l'app.
 pub const PHONE_STATUS_INSET: f32 = 28.0;
 pub const PHONE_GESTURE_INSET: f32 = 14.0;
 /// Bersaglio minimo di un tocco.
-pub const TOUCH_TARGET: f32 = 44.0;
+pub const TOUCH_TARGET: f32 = sz::phone::TOUCH_TARGET;
 
-// Movimento (vedi ui/motion.rs).
-/// Uscite: chi se ne va si toglie di mezzo più in fretta di chi arriva.
-pub const MOTION_FAST: Duration = Duration::from_millis(120);
+/// La barra di avanzamento dei download: dieci scatti di pixel art, ciascuno largo `STEP_W` e alto
+/// `STEP_H`, a distanza `STEP_GAP` (componenti, §19: nessun lime, solo bianco di stato).
+pub const STEP_W: f32 = 8.0 * AP;
+pub const STEP_H: f32 = 3.0 * AP;
+pub const STEP_GAP: f32 = AP;
+/// Il segno «scaricato» nelle righe strette: un'icona da 12 AP senza il tasto intorno.
+pub const MARK_SLOT: f32 = 12.0 * AP;
+
+// Movimento (vedi ui/motion.rs). Due orologi: gli sprite a scatti, la UI con ease-out brevi.
+/// Uscite e hover.
+pub const MOTION_FAST: Duration =
+    Duration::from_millis(psytify_design::tokens::motion::MOTION_FAST.ms as u64);
 /// Ingresso di pagine, avvisi e copertine.
-pub const MOTION_BASE: Duration = Duration::from_millis(220);
-/// Pannello laterale e finestre: sono larghi, gli serve un po' più tempo per non sembrare uno scatto.
-pub const MOTION_PANEL: Duration = Duration::from_millis(260);
+pub const MOTION_BASE: Duration =
+    Duration::from_millis(psytify_design::tokens::motion::MOTION_BASE.ms as u64);
+/// Pannello laterale e finestre.
+pub const MOTION_PANEL: Duration =
+    Duration::from_millis(psytify_design::tokens::motion::MOTION_PANEL.ms as u64);
 /// Il testo scorre da un verso al successivo.
-pub const MOTION_LYRICS: Duration = Duration::from_millis(480);
-/// Passo dei movimenti frequenti che non chiedono il vsync (il testo che scorre): 24 al secondo,
-/// come il cinema. Scorre di una riga in 480 ms: undici passi bastano a non vederli.
+pub const MOTION_LYRICS: Duration =
+    Duration::from_millis(psytify_design::tokens::motion::MOTION_LYRICS.ms as u64);
+/// Passo dei movimenti frequenti che non chiedono il vsync (il testo che scorre): 24 al secondo.
 pub const AMBIENT_FRAME: Duration = Duration::from_millis(42);
-/// Movimenti con la molla (`motion::spring`): la copertina che respira con il Play, il cursore delle
-/// schede del pannello. Più lunghi dell'ease-out perché il rimbalzo deve avere il tempo di posarsi.
-pub const MOTION_SPRING: Duration = Duration::from_millis(620);
-/// In pausa la copertina grande scende a questa scala; al Play torna intera con la molla.
-pub const COVER_REST: f32 = 0.9;
-/// Splash d'ingresso: dura tanto in tutto, e da `SPLASH_EXIT` il velo sfuma e scopre l'app.
-pub const SPLASH_TOTAL: Duration = Duration::from_millis(1750);
-pub const SPLASH_EXIT: Duration = Duration::from_millis(1250);
-/// Una pagina nuova sale di tanto mentre entra.
-pub const PAGE_RISE: f32 = 16.0;
-/// Le righe e le tessere di una pagina entrano una dopo l'altra, a distanza di tanto.
-/// Durata complessiva dell'ingresso di una pagina con la sua lista (quattordici righe scaglionate).
-pub const PAGE_ENTRY: Duration = Duration::from_millis(14 * 28 + 220);
-pub const STAGGER: Duration = Duration::from_millis(28);
-/// L'avviso sale di tanto dal bordo del player.
-pub const TOAST_RISE: f32 = 12.0;
+/// Il cassetto del telefono.
+pub const MOTION_SPRING: Duration = MOTION_PANEL;
+/// La copertina grande non respira più: resta intera anche in pausa.
+pub const COVER_REST: f32 = 1.0;
+/// Splash d'ingresso: sotto 1,2 s in tutto; da `SPLASH_EXIT` si scopre l'app in un taglio.
+pub const SPLASH_TOTAL: Duration = Duration::from_millis(1200);
+pub const SPLASH_EXIT: Duration = Duration::from_millis(1100);
+/// Una pagina nuova entra con un taglio e una dissolvenza: non sale più.
+pub const PAGE_RISE: f32 = 0.0;
+/// Durata dell'ingresso di una pagina e distanza fra una riga e la successiva (nessuna).
+pub const PAGE_ENTRY: Duration = MOTION_BASE;
+pub const STAGGER: Duration = Duration::ZERO;
+/// L'avviso compare solo con l'opacità.
+pub const TOAST_RISE: f32 = 0.0;
 /// Distanza dell'avviso dal player.
-pub const TOAST_GAP: f32 = 16.0;
-pub const TOAST_WIDTH: f32 = 420.0;
+pub const TOAST_GAP: f32 = space::SPACE_5;
+pub const TOAST_WIDTH: f32 = sz::TOAST_W;
 /// Un avviso informativo sparisce da solo dopo tanto; un errore resta finché non si chiude.
-pub const TOAST_INFO_TIME: Duration = Duration::from_secs(4);
+pub const TOAST_INFO_TIME: Duration =
+    Duration::from_millis(psytify_design::tokens::motion::TOAST_HOLD_MS as u64);
 /// Un ciclo della pulsazione degli scheletri, e il colore al suo picco.
 pub const PULSE_PERIOD: Duration = Duration::from_millis(1400);
-pub const SKELETON_PEAK: Color = hex(0x2a2a2a);
+pub const SKELETON_PEAK: Color = SELECTED;
 
-// Tipografia: Inter con cifre tabellari incorporate (assets/fonts, vedi docs/STYLE.md).
+// Tipografia: Inter (assets/fonts). Departure Mono, per i titoli di pagina, non è ancora incorporato:
+// finché non c'è, quei titoli usano Inter alla stessa misura.
 /// Titolo di una pagina di contenuto (album, playlist): il nome grande in testa.
-pub const FS_HERO: f32 = 44.0;
-/// Titolo del carosello della Home; con poco spazio scende a `FS_PAGE` e va a capo.
-pub const FS_FEATURE: f32 = 40.0;
-/// Titolo di pagina (h1): il nome della schermata, la cosa che si legge per prima.
-pub const FS_PAGE: f32 = 28.0;
-pub const FS_TITLE: f32 = 20.0;
-pub const FS_SECTION: f32 = 18.0;
-pub const FS_BODY: f32 = 14.0;
-pub const FS_SMALL: f32 = 12.0;
+pub const FS_HERO: f32 = type_::TYPE_DISPLAY.size;
+/// Titolo del carosello della Home.
+pub const FS_FEATURE: f32 = type_::TYPE_DISPLAY.size;
+/// Titolo di pagina (h1): il nome della schermata.
+pub const FS_PAGE: f32 = type_::PIXEL_SIZE;
+pub const FS_TITLE: f32 = type_::TYPE_HEADING.size;
+pub const FS_SECTION: f32 = type_::TYPE_HEADING.size;
+pub const FS_BODY: f32 = type_::TYPE_BODY.size;
+pub const FS_SMALL: f32 = type_::TYPE_META.size;
 pub const FONT: Font = Font::with_name("Inter");
 pub const FONT_MEDIUM: Font = Font { weight: Weight::Medium, ..FONT };
 pub const FONT_SEMIBOLD: Font = Font { weight: Weight::Semibold, ..FONT };
@@ -184,347 +208,187 @@ pub const FONT_SEMIBOLD: Font = Font { weight: Weight::Semibold, ..FONT };
 pub fn theme() -> Theme {
     Theme::custom(
         "Psytify".to_string(),
-        theme::Palette { background: GROUND, text: TEXT, primary: TEXT, success: ACCENT, danger: NEGATIVE },
+        theme::Palette { background: CANVAS, text: TEXT, primary: TEXT, success: LIME, danger: ERROR },
     )
 }
 
-fn border(width: f32, color: Color, radius: f32) -> Border {
-    Border { width, color, radius: Radius::from(radius) }
+/// Un bordo vivo (nessun raggio: gli angoli arrotondati rompono la griglia dei pixel).
+fn border(width: f32, color: Color) -> Border {
+    Border { width, color, radius: Radius::from(0.0) }
 }
 
 fn background(color: Color) -> Option<Background> {
     Some(Background::Color(color))
 }
 
-/// La tinta di una copertina per la testa di una pagina: il suo colore, scurito e sciolto nel pannello.
-pub fn header_tint(cover: Color) -> Color {
-    super::motion::mix(PANEL, cover, 0.62)
+/// L'ombra dei livelli che galleggiano: dura, sfalsata di 2 AP, senza sfocatura.
+fn floating_shadow(alpha: f32) -> Shadow {
+    Shadow {
+        color: Color { a: alpha.clamp(0.0, 1.0), ..BLACK },
+        offset: Vector::new(2.0 * AP, 2.0 * AP),
+        blur_radius: 0.0,
+    }
 }
 
 // ---------- Contenitori ----------
 
+/// La finestra: del colore delle linee, che si vede negli spazi tra le regioni.
 pub fn ground(_: &Theme) -> container::Style {
     container::Style { background: background(GROUND), text_color: Some(TEXT), ..container::Style::default() }
 }
 
-/// Un pannello arrotondato sul fondo nero.
+/// Una regione del chrome (barra laterale, pannello destro, barra del player): grigio quasi nero.
 pub fn panel_box(_: &Theme) -> container::Style {
-    container::Style {
-        background: background(PANEL),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PANEL),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
+    container::Style { background: background(CHROME), text_color: Some(TEXT), ..container::Style::default() }
 }
 
-/// Un pannello con la tinta di una copertina in alto, che si scioglie nel grigio del pannello a
-/// metà altezza. Il pannello centrale e il pannello "In riproduzione" prendono il colore di ciò
-/// che si guarda o si ascolta.
-pub fn tinted_panel(tint: Color) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: Some(Background::Gradient(Gradient::Linear(
-            Linear::new(PI).add_stop(0.0, header_tint(tint)).add_stop(0.5, PANEL).add_stop(1.0, PANEL),
-        ))),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PANEL),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
-}
-
-/// Un oggetto sollevato dalla pagina (la copertina grande): solo un'ombra.
-pub fn lifted(_: &Theme) -> container::Style {
-    container::Style {
-        shadow: Shadow {
-            color: Color { a: 0.5, ..GROUND },
-            offset: Vector::new(0.0, 10.0),
-            blur_radius: 30.0,
-        },
-        ..container::Style::default()
-    }
-}
-
-/// Come `tinted_panel`, ma la sfumatura respira: l'angolo oscilla piano e un secondo colore, più
-/// chiaro della tinta, sale e scende. Per il pannello «In riproduzione» mentre il brano suona.
-pub fn aurora(tint: Color, drift: f32) -> impl Fn(&Theme) -> container::Style {
-    move |_| {
-        let base = header_tint(tint);
-        let glow = super::motion::mix(base, super::motion::mix(tint, ACCENT, 0.3), 0.45);
-        container::Style {
-            background: Some(Background::Gradient(Gradient::Linear(
-                Linear::new(PI + 0.4 * drift)
-                    .add_stop(0.0, base)
-                    .add_stop((0.32 + 0.1 * drift).clamp(0.1, 0.6), glow)
-                    .add_stop(0.78, PANEL)
-                    .add_stop(1.0, PANEL),
-            ))),
-            border: border(0.0, Color::TRANSPARENT, RADIUS_PANEL),
-            text_color: Some(TEXT),
-            ..container::Style::default()
-        }
-    }
-}
-
-/// Il banner in cima alla Home: la tinta della copertina a sinistra, sciolta nel pannello a destra.
-pub fn hero_card(tint: Color) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: Some(Background::Gradient(Gradient::Linear(
-            Linear::new(FRAC_PI_2)
-                .add_stop(0.0, super::motion::mix(PANEL, tint, 0.8))
-                .add_stop(1.0, super::motion::mix(PANEL, tint, 0.22)),
-        ))),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_CARD),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
-}
-
-/// I colori delle schede di «Sfoglia tutto»: toni pieni e scuri, tutti con lo stesso peso.
-pub const BROWSE: [Color; 9] = [
-    hex(0x8d2f5a),
-    hex(0x1e5f74),
-    hex(0x5e3a98),
-    hex(0x9a5b13),
-    hex(0x2e6b3d),
-    hex(0x7a2a2a),
-    hex(0x2a4d8f),
-    hex(0x56622a),
-    hex(0x2f5f58),
-];
-
-/// Una scheda di «Sfoglia tutto»: un colore pieno, angoli come le copertine.
-pub fn browse_card(color: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
-    move |_, status| {
-        let fill = match status {
-            button::Status::Hovered | button::Status::Pressed => {
-                super::motion::mix(color, Color::WHITE, 0.08)
-            }
-            _ => color,
-        };
-        button::Style {
-            background: background(fill),
-            text_color: TEXT,
-            border: border(0.0, Color::TRANSPARENT, RADIUS_CARD),
-            shadow: Shadow::default(),
-        }
-    }
-}
-
-/// Come `aurora`, ma a tutta finestra: senza angoli arrotondati e con la tinta che arriva più in
-/// basso. Per la vista immersiva.
-pub fn aurora_full(tint: Color, drift: f32) -> impl Fn(&Theme) -> container::Style {
-    move |_| {
-        let base = super::motion::mix(GROUND, tint, 0.7);
-        let glow = super::motion::mix(base, super::motion::mix(tint, ACCENT, 0.3), 0.4);
-        container::Style {
-            background: Some(Background::Gradient(Gradient::Linear(
-                Linear::new(PI + 0.5 * drift)
-                    .add_stop(0.0, base)
-                    .add_stop((0.4 + 0.12 * drift).clamp(0.15, 0.7), glow)
-                    .add_stop(1.0, GROUND),
-            ))),
-            text_color: Some(TEXT),
-            ..container::Style::default()
-        }
-    }
-}
-
-/// Velo sopra la copertina sfocata delle viste a tutto schermo: scurisce quanto basta a leggere il
-/// testo bianco, di più ai lati, dove l'immagine ingrandita finisce.
-pub fn veil(_: &Theme) -> container::Style {
-    let shade = |a: f32| Color { a, ..GROUND };
-    container::Style {
-        background: Some(Background::Gradient(Gradient::Linear(
-            Linear::new(FRAC_PI_2)
-                .add_stop(0.0, shade(0.86))
-                .add_stop(0.14, shade(0.6))
-                .add_stop(0.86, shade(0.6))
-                .add_stop(1.0, shade(0.86)),
-        ))),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
+/// La tela del contenuto: nero pieno, piatto. Nessuna tinta, per nessuna pagina.
+pub fn canvas(_: &Theme) -> container::Style {
+    container::Style { background: background(CANVAS), text_color: Some(TEXT), ..container::Style::default() }
 }
 
 pub fn card(_: &Theme) -> container::Style {
-    container::Style {
-        background: background(SURFACE),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_CARD),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
+    container::Style { background: background(RAISED), text_color: Some(TEXT), ..container::Style::default() }
 }
 
 pub fn panel(_: &Theme) -> container::Style {
     container::Style {
-        background: background(RAISED),
-        border: border(0.0, Color::TRANSPARENT, 6.0),
+        background: background(SELECTED),
         text_color: Some(TEXT),
         ..container::Style::default()
     }
 }
 
-/// Scheletro di un contenuto in arrivo: pulsa tra due gradini di luminosità.
+/// Scheletro di un contenuto in arrivo: pulsa tra due gradini di grigio.
 pub fn skeleton(_: &Theme) -> container::Style {
     let glow = super::motion::pulse(PULSE_PERIOD);
     container::Style {
-        background: background(super::motion::mix(SKELETON, SKELETON_PEAK, glow)),
-        border: border(0.0, Color::TRANSPARENT, 4.0),
+        background: background(super::motion::mix(RAISED, SKELETON_PEAK, glow)),
         ..container::Style::default()
     }
 }
 
-/// Avviso in basso: un gradino sopra il pannello, opaco a riposo; `alpha` sotto 1 solo mentre entra
-/// o esce. Galleggia, quindi ha un'ombra.
+/// Avviso in basso: sul livello delle card, con il filo dei livelli che galleggiano; `alpha` sotto 1
+/// solo mentre entra o esce.
 pub fn toast(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: background(super::motion::fade(RAISED, alpha)),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_TILE),
+        border: border(AP, super::motion::fade(LINE_STRONG, alpha)),
         text_color: Some(super::motion::fade(TEXT, alpha)),
         shadow: floating_shadow(alpha),
     }
 }
 
-/// Menu contestuale e sottomenu: `alpha` e `scale` li fanno comparire.
+/// Menu contestuale e sottomenu: `alpha` li fa comparire.
 pub fn menu_box(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: background(super::motion::fade(RAISED, alpha)),
-        border: border(1.0, super::motion::fade(hex(0x3a3a3a), alpha), RADIUS_TILE + 2.0),
+        border: border(AP, super::motion::fade(LINE_STRONG, alpha)),
         text_color: Some(super::motion::fade(TEXT, alpha)),
         shadow: floating_shadow(alpha),
     }
 }
 
-/// La sheet dal basso del telefono: superficie rialzata con gli angoli superiori tondi.
+/// La sheet dal basso del telefono: superficie rialzata con il filo in alto.
 pub fn sheet(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: background(super::motion::fade(hex(0x1c1c1c), alpha)),
-        border: iced::Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: iced::border::Radius::new(0.0).top(SHEET_RADIUS),
-        },
+        background: background(super::motion::fade(RAISED, alpha)),
+        border: border(AP, super::motion::fade(LINE_STRONG, alpha)),
         text_color: Some(super::motion::fade(TEXT, alpha)),
         shadow: floating_shadow(alpha),
     }
 }
 
-/// Il cassetto da sinistra del telefono: stessa superficie della sheet, angoli tondi tutti intorno
-/// perché galleggia staccato dai bordi.
+/// Il cassetto da sinistra del telefono: stessa superficie della sheet.
 pub fn drawer(alpha: f32) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: background(super::motion::fade(hex(0x1c1c1c), alpha)),
-        border: iced::Border {
-            color: Color::TRANSPARENT,
-            width: 0.0,
-            radius: iced::border::Radius::new(SHEET_RADIUS),
-        },
-        text_color: Some(super::motion::fade(TEXT, alpha)),
-        shadow: floating_shadow(alpha),
-    }
+    sheet(alpha)
 }
 
 /// Finestra di dialogo al centro.
 pub fn dialog_box(alpha: f32) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: background(super::motion::fade(hex(0x1c1c1c), alpha)),
-        border: border(1.0, super::motion::fade(hex(0x333333), alpha), RADIUS_CARD + 2.0),
-        text_color: Some(super::motion::fade(TEXT, alpha)),
-        shadow: floating_shadow(alpha),
-    }
+    sheet(alpha)
 }
 
 /// Velo scuro dietro una finestra di dialogo.
 pub fn scrim(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: background(Color { a: 0.62 * alpha.clamp(0.0, 1.0), ..GROUND }),
+        background: background(Color { a: SCRIM.a * alpha.clamp(0.0, 1.0), ..BLACK }),
         ..container::Style::default()
     }
 }
 
-/// Tasto Play tondo che spunta sulla copertina al passaggio del mouse: `alpha` lo fa entrare.
+/// Tasto Play che spunta sulla copertina al passaggio del mouse: un quadrato primario, bianco con
+/// l'icona nera. Non è lime: non indica uno stato. `alpha` lo fa entrare.
 pub fn fab(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: background(super::motion::fade(ACCENT, alpha)),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+        background: background(super::motion::fade(TEXT, alpha)),
         text_color: Some(ON_PRIMARY),
-        shadow: floating_shadow(alpha * 0.8),
+        shadow: floating_shadow(alpha),
+        ..container::Style::default()
     }
 }
 
-/// Il Play tondo della copertina quando è un pulsante vero: si schiarisce al passaggio.
+/// Il Play della copertina quando è un pulsante vero: si schiarisce al passaggio.
 pub fn fab_button(alpha: f32) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let fill = match status {
-            button::Status::Hovered => ACCENT_HOVER,
-            button::Status::Pressed => hex(0xa9d63a),
-            _ => ACCENT,
+            button::Status::Hovered => PRIMARY_HOVER,
+            button::Status::Pressed => MUTED,
+            _ => TEXT,
         };
         button::Style {
             background: background(super::motion::fade(fill, alpha)),
             text_color: ON_PRIMARY,
-            border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
-            shadow: floating_shadow(alpha * 0.8),
+            border: border(0.0, Color::TRANSPARENT),
+            shadow: floating_shadow(alpha),
         }
     }
 }
 
-/// Etichetta sull'angolo di una copertina («Nuovo»): il verde del marchio, piena.
-/// Una pillola che contiene più controlli (le ricerche recenti): il grigio delle pillole spente.
+/// Un riquadro che contiene più controlli (le ricerche recenti).
 pub fn chip(_: &Theme) -> container::Style {
     container::Style {
         background: background(RAISED),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+        border: border(0.0, Color::TRANSPARENT),
         text_color: Some(TEXT),
         ..container::Style::default()
     }
 }
 
-/// Il tasto di una scorciatoia: un riquadro rialzato con il bordo, come un tasto vero.
+/// Il tasto di una scorciatoia: un riquadro con il bordo dei controlli.
 pub fn key_cap(_: &Theme) -> container::Style {
     container::Style {
         background: background(RAISED),
-        border: border(1.0, CONTROL, RADIUS_ROW - 2.0),
+        border: border(AP, CONTROL),
         text_color: Some(TEXT),
         ..container::Style::default()
     }
 }
 
-/// Etichetta della qualità «Lossless»: contorno e testo lime, senza riempimento (il pieno è del Play).
+/// Etichetta della qualità («Lossless»): contorno e testo neutri. La qualità è un fatto, non uno
+/// stato, quindi niente lime.
 pub fn accent_chip(_: &Theme) -> container::Style {
     container::Style {
         background: None,
-        border: border(1.0, ACCENT, RADIUS_PILL),
-        text_color: Some(ACCENT),
+        border: border(AP, CONTROL),
+        text_color: Some(MUTED),
         ..container::Style::default()
     }
 }
 
 /// Binario del selettore a schede del pannello destro.
 pub fn segment_track(_: &Theme) -> container::Style {
-    container::Style {
-        background: background(SURFACE),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
-        ..container::Style::default()
-    }
+    container::Style { background: background(RAISED), ..container::Style::default() }
 }
 
-/// Il cursore che scivola, con la molla, sotto la scheda scelta.
+/// Il cursore sotto la scheda scelta.
 pub fn segment_thumb(_: &Theme) -> container::Style {
-    container::Style {
-        background: background(RAISED),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
-        ..container::Style::default()
-    }
+    container::Style { background: background(SELECTED), ..container::Style::default() }
 }
 
-/// Binario di una scelta a segmenti dentro una card: più scuro della card, così anche le opzioni
-/// spente si leggono come parte di un controllo.
+/// Binario di una scelta a segmenti dentro una card: più scuro della card.
 pub fn segment_well(_: &Theme) -> container::Style {
-    container::Style {
-        background: background(PANEL),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
-        ..container::Style::default()
-    }
+    container::Style { background: background(WELL), ..container::Style::default() }
 }
 
 /// Un'opzione di una scelta a segmenti: piena se scelta, trasparente (grigia) altrimenti.
@@ -532,116 +396,65 @@ pub fn segment(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Sty
     move |_, status| {
         let fill = match status {
             _ if selected => Some(TEXT),
-            button::Status::Hovered | button::Status::Pressed => Some(RAISED),
+            button::Status::Hovered | button::Status::Pressed => Some(SELECTED),
             _ => None,
         };
         button::Style {
             background: fill.and_then(background),
             text_color: if selected { ON_PRIMARY } else { MUTED },
-            border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+            border: border(0.0, Color::TRANSPARENT),
             shadow: Shadow::default(),
         }
     }
 }
 
-/// Il mini-player del telefono: la tinta della copertina, scurita, su un riquadro arrotondato.
-pub fn mini_player(tint: Color) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: background(super::motion::mix(SURFACE, tint, 0.45)),
-        // Appoggiata sulla barra delle schede: niente angoli arrotondati.
-        border: border(0.0, Color::TRANSPARENT, 0.0),
-        ..container::Style::default()
-    }
+/// Il mini-player del telefono: sul chrome, come la barra delle schede su cui poggia.
+pub fn mini_player(_: &Theme) -> container::Style {
+    container::Style { background: background(CHROME), ..container::Style::default() }
 }
 
-/// La pagina del telefono: il nero della finestra con, in alto, la tinta di ciò che si guarda che
-/// si scioglie nel nero prima di metà schermo. Niente pannello: la pagina va da bordo a bordo.
-pub fn phone_wash(tint: Color) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: Some(Background::Gradient(Gradient::Linear(
-            Linear::new(PI)
-                .add_stop(0.0, super::motion::mix(GROUND, tint, 0.5))
-                .add_stop(0.42, GROUND)
-                .add_stop(1.0, GROUND),
-        ))),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
-}
-
-/// La barra di navigazione del telefono: il nero della finestra, senza linee.
+/// La barra di navigazione del telefono: il chrome, con il filo in alto fatto dal contenitore.
 pub fn phone_nav(_: &Theme) -> container::Style {
-    container::Style {
-        background: background(GROUND),
-        border: border(0.0, Color::TRANSPARENT, 0.0),
-        ..container::Style::default()
-    }
+    container::Style { background: background(CHROME), ..container::Style::default() }
 }
 
-/// Lo splash d'ingresso: il nero della finestra, che sfuma quando l'app compare.
+/// Lo splash d'ingresso: la tela nera, che sparisce in un taglio quando l'app compare.
 pub fn splash(alpha: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: background(Color { a: alpha.clamp(0.0, 1.0), ..GROUND }),
+        background: background(Color { a: alpha.clamp(0.0, 1.0), ..CANVAS }),
         ..container::Style::default()
     }
 }
 
+/// L'etichetta sull'angolo di una copertina («Nuovo»): bianco caldo pieno, testo nero.
 pub fn badge(_: &Theme) -> container::Style {
     container::Style {
-        background: background(ACCENT),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+        background: background(TEXT),
         text_color: Some(ON_PRIMARY),
         ..container::Style::default()
     }
 }
 
-fn floating_shadow(alpha: f32) -> Shadow {
-    Shadow {
-        color: Color { a: 0.55 * alpha.clamp(0.0, 1.0), ..GROUND },
-        offset: Vector::new(0.0, 8.0),
-        blur_radius: 28.0,
-    }
+/// Il campo di una copertina mancante: grigio, con lo sprite del disco al centro.
+pub fn cover_field(_: &Theme) -> container::Style {
+    container::Style { background: background(RAISED), text_color: Some(TEXT), ..container::Style::default() }
 }
 
-/// Copertina disegnata: colore piatto con l'angolo arrotondato di `radius` (proporzionale al lato).
-pub fn cover(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: background(color),
-        border: border(0.0, Color::TRANSPARENT, radius),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
-}
-
-/// Copertina disegnata con una sfumatura (playlist, "Brani che ti piacciono").
-pub fn cover_gradient(from: Color, to: Color) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: Some(Background::Gradient(Gradient::Linear(
-            Linear::new(FRAC_PI_2 * 0.55).add_stop(0.0, from).add_stop(1.0, to),
-        ))),
-        border: border(0.0, Color::TRANSPARENT, 7.0),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
-}
-
-/// Il banner dell'aggiornamento: una fascia sul livello delle card con un filo lime, perché si veda
-/// senza gridare (niente fondo colorato).
+/// Il banner dell'aggiornamento: una fascia sul livello delle card con il bordo dei controlli.
 pub fn update_banner(_: &Theme) -> container::Style {
     container::Style {
-        background: background(SURFACE),
-        border: border(1.0, ACCENT, RADIUS_PILL),
+        background: background(RAISED),
+        border: border(AP, CONTROL),
         text_color: Some(TEXT),
         ..container::Style::default()
     }
 }
 
-/// Riquadro di uno stato vuoto o d'errore: linea tratteggiata non disponibile in Iced, quindi
-/// un bordo pieno di 1px al livello dei controlli.
+/// Riquadro di uno stato vuoto o d'errore: un bordo pieno al livello dei controlli.
 pub fn notice_box(_: &Theme) -> container::Style {
     container::Style {
         background: None,
-        border: border(1.0, RAISED, 10.0),
+        border: border(AP, SELECTED),
         text_color: Some(MUTED),
         ..container::Style::default()
     }
@@ -649,96 +462,82 @@ pub fn notice_box(_: &Theme) -> container::Style {
 
 /// Stato vuoto curato: una card con titolo, una frase e l'azione che riempie la lista.
 pub fn empty_card(_: &Theme) -> container::Style {
-    container::Style {
-        background: background(SURFACE),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_CARD),
-        text_color: Some(TEXT),
-        ..container::Style::default()
-    }
+    card(&theme())
 }
 
-/// Una barra piatta con gli angoli tondi (visualizzatore, indicatore).
-pub fn bar(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: background(color),
-        border: border(0.0, Color::TRANSPARENT, radius),
-        ..container::Style::default()
-    }
+/// Una barra piatta (visualizzatore, indicatore).
+pub fn bar(color: Color) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style { background: background(color), ..container::Style::default() }
 }
 
 // ---------- Pulsanti ----------
 
-/// Pulsante primario: pillola bianca con testo nero (primario per inversione).
+/// Pulsante primario: bianco caldo con testo nero (primario per inversione).
 pub fn primary(_: &Theme, status: button::Status) -> button::Style {
     let fill = match status {
-        button::Status::Hovered => hex(0xf0f0f0),
-        button::Status::Pressed => hex(0xcfcfcf),
-        button::Status::Disabled => RAISED,
+        button::Status::Hovered => PRIMARY_HOVER,
+        button::Status::Pressed => MUTED,
+        button::Status::Disabled => SELECTED,
         button::Status::Active => TEXT,
     };
     button::Style {
         background: background(fill),
-        text_color: if status == button::Status::Disabled { FAINT } else { ON_PRIMARY },
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+        text_color: if status == button::Status::Disabled { DISABLED } else { ON_PRIMARY },
+        border: border(0.0, Color::TRANSPARENT),
         shadow: Shadow::default(),
     }
 }
 
-/// Il pulsante di riproduzione in evidenza: tondo e lime, come il marchio.
-pub fn play_fab(_: &Theme, status: button::Status) -> button::Style {
-    let fill = match status {
-        button::Status::Hovered => ACCENT_HOVER,
-        button::Status::Pressed => hex(0xa9d63a),
-        button::Status::Disabled => RAISED,
-        button::Status::Active => ACCENT,
-    };
-    button::Style {
-        background: background(fill),
-        text_color: ON_PRIMARY,
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
-        shadow: Shadow::default(),
-    }
+/// Il pulsante di riproduzione in evidenza: come il primario. Il lime non è del Play, è dello stato.
+pub fn play_fab(theme_: &Theme, status: button::Status) -> button::Style {
+    primary(theme_, status)
 }
 
-/// Azione secondaria: contorno di 1px, più chiaro dei bordi strutturali.
+/// Azione secondaria: contorno di 1 AP.
 pub fn outlined(_: &Theme, status: button::Status) -> button::Style {
     button::Style {
         background: match status {
-            button::Status::Hovered | button::Status::Pressed => background(HOVER),
+            button::Status::Hovered | button::Status::Pressed => background(RAISED),
             _ => None,
         },
-        text_color: if status == button::Status::Disabled { FAINT } else { TEXT },
-        border: border(1.0, CONTROL, RADIUS_PILL),
+        text_color: if status == button::Status::Disabled { DISABLED } else { TEXT },
+        border: border(
+            AP,
+            if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+                CONTROL_HOVER
+            } else {
+                CONTROL
+            },
+        ),
         shadow: Shadow::default(),
     }
 }
 
-/// Azione pericolosa (elimina): contorno rosso.
+/// Azione pericolosa (elimina): contorno e testo di errore.
 pub fn danger(_: &Theme, status: button::Status) -> button::Style {
     button::Style {
         background: match status {
-            button::Status::Hovered | button::Status::Pressed => background(Color { a: 0.14, ..NEGATIVE }),
+            button::Status::Hovered | button::Status::Pressed => background(RAISED),
             _ => None,
         },
-        text_color: NEGATIVE,
-        border: border(1.0, Color { a: 0.6, ..NEGATIVE }, RADIUS_PILL),
+        text_color: ERROR,
+        border: border(AP, ERROR),
         shadow: Shadow::default(),
     }
 }
 
-/// Filtro a pillola: un gradino sopra il pannello a riposo, invertito (bianco, testo nero) quando è
-/// scelto.
+/// Filtro a segmento: un gradino sopra la tela a riposo, invertito (bianco, testo nero) quando è scelto.
 pub fn pill(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let fill = match status {
             _ if selected => TEXT,
-            button::Status::Hovered | button::Status::Pressed => RAISED,
-            _ => SURFACE,
+            button::Status::Hovered | button::Status::Pressed => SELECTED,
+            _ => RAISED,
         };
         button::Style {
             background: background(fill),
             text_color: if selected { ON_PRIMARY } else { TEXT },
-            border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+            border: border(0.0, Color::TRANSPARENT),
             shadow: Shadow::default(),
         }
     }
@@ -750,7 +549,7 @@ pub fn text_action(_: &Theme, status: button::Status) -> button::Style {
         background: None,
         text_color: match status {
             button::Status::Hovered | button::Status::Pressed => TEXT,
-            button::Status::Disabled => FAINT,
+            button::Status::Disabled => DISABLED,
             button::Status::Active => MUTED,
         },
         border: Border::default(),
@@ -758,137 +557,122 @@ pub fn text_action(_: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-/// Icona cliccabile: grigia a riposo, bianca al passaggio; `on` la tiene bianca.
-pub fn icon_button(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+/// Icona cliccabile: fondo al passaggio; l'icona la colora chi la disegna.
+pub fn icon_button(_on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| button::Style {
         background: match status {
-            button::Status::Hovered | button::Status::Pressed => background(HOVER),
+            button::Status::Hovered => background(RAISED),
+            button::Status::Pressed => background(SELECTED),
             _ => None,
         },
-        text_color: if on || matches!(status, button::Status::Hovered) { TEXT } else { MUTED },
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+        text_color: TEXT,
+        border: border(0.0, Color::TRANSPARENT),
         shadow: Shadow::default(),
     }
 }
 
-/// Pulsante tondo della barra superiore (Home, account): grigio, più chiaro al passaggio.
+/// Pulsante quadrato della barra superiore (Home, account).
 pub fn round_button(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: background(if on || hovered { RAISED } else { SURFACE }),
+            background: background(if on || hovered { SELECTED } else { RAISED }),
             text_color: TEXT,
-            border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+            border: border(0.0, Color::TRANSPARENT),
             shadow: Shadow::default(),
         }
     }
 }
 
-/// La pillola della ricerca: grigia, con un contorno chiaro mentre la ricerca è aperta.
+/// Il campo della ricerca: pozzetto nero con il bordo dei controlli, bianco mentre è aperta.
 pub fn search_field(active: bool) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: background(SURFACE),
-        border: border(
-            if active { 1.5 } else { 0.0 },
-            if active { TEXT } else { Color::TRANSPARENT },
-            RADIUS_PILL,
-        ),
+        background: background(WELL),
+        border: border(AP, if active { FOCUS } else { CONTROL }),
         text_color: Some(TEXT),
         ..container::Style::default()
     }
 }
 
 /// Icona senza fondo al passaggio (la barra del player, dove il fondo disturba).
-pub fn icon_plain(_: &Theme, status: button::Status) -> button::Style {
-    button::Style {
-        background: None,
-        text_color: if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-            TEXT
-        } else {
-            MUTED
-        },
-        border: Border::default(),
-        shadow: Shadow::default(),
-    }
+pub fn icon_plain(_: &Theme, _status: button::Status) -> button::Style {
+    button::Style { background: None, text_color: TEXT, border: Border::default(), shadow: Shadow::default() }
 }
 
-/// Controlli della finestra: il tasto di chiusura diventa rosso al passaggio.
-pub fn window_control(close: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+/// Controlli della finestra.
+pub fn window_control(_close: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: match (hovered, close) {
-                (true, true) => background(hex(0xc42b3b)),
-                (true, false) => background(HOVER),
-                _ => None,
-            },
+            background: if hovered { background(SELECTED) } else { None },
             text_color: if hovered { TEXT } else { MUTED },
-            border: border(0.0, Color::TRANSPARENT, RADIUS_ROW),
+            border: border(0.0, Color::TRANSPARENT),
             shadow: Shadow::default(),
         }
     }
 }
 
-/// Voce di navigazione: attiva con un fondo e l'etichetta bianca, le altre sfumano al passaggio.
+/// Voce di navigazione: scelta con il fondo del selezionato (il segnalino lime lo disegna la barra
+/// laterale), le altre si schiariscono al passaggio.
 pub fn nav_item(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
             background: if active {
-                background(SURFACE)
+                background(SELECTED)
             } else if hovered {
-                background(Color { a: 0.55, ..SURFACE })
+                background(RAISED)
             } else {
                 None
             },
             text_color: if active || hovered { TEXT } else { NAV_IDLE },
-            border: border(0.0, Color::TRANSPARENT, RADIUS_TILE),
+            border: border(0.0, Color::TRANSPARENT),
             shadow: Shadow::default(),
         }
     }
 }
 
-/// Riga o tessera cliccabile: un gradino di luminosità al passaggio.
+/// Riga o tessera cliccabile: un gradino di grigio al passaggio.
 pub fn row(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| button::Style {
         background: match status {
-            button::Status::Hovered | button::Status::Pressed => background(HOVER),
-            _ if selected => background(SURFACE),
+            button::Status::Hovered | button::Status::Pressed => background(RAISED),
+            _ if selected => background(SELECTED),
             _ => None,
         },
         text_color: TEXT,
-        border: border(0.0, Color::TRANSPARENT, RADIUS_ROW),
+        border: border(0.0, Color::TRANSPARENT),
         shadow: Shadow::default(),
     }
 }
 
-/// Voce di un menu: evidenziata al passaggio; `danger` la tinge di rosso.
+/// Voce di un menu: evidenziata al passaggio; `danger` la tinge di errore.
 pub fn menu_item(danger: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: if hovered { background(hex(0x3a3a3a)) } else { None },
+            background: if hovered { background(SELECTED) } else { None },
             text_color: match (status, danger) {
-                (button::Status::Disabled, _) => FAINT,
-                (_, true) => NEGATIVE,
+                (button::Status::Disabled, _) => DISABLED,
+                (_, true) => ERROR,
                 _ => TEXT,
             },
-            border: border(0.0, Color::TRANSPARENT, 6.0),
+            border: border(0.0, Color::TRANSPARENT),
             shadow: Shadow::default(),
         }
     }
 }
 
-/// Scorciatoia della Home: una barra grigia con la copertina a filo sul bordo sinistro.
+/// Scorciatoia della Home: una barra con la copertina a filo sul bordo sinistro.
 pub fn shortcut(_: &Theme, status: button::Status) -> button::Style {
     button::Style {
         background: background(if matches!(status, button::Status::Hovered | button::Status::Pressed) {
-            RAISED
+            SELECTED
         } else {
-            SURFACE
+            RAISED
         }),
         text_color: TEXT,
-        border: border(0.0, Color::TRANSPARENT, RADIUS_ROW),
+        border: border(0.0, Color::TRANSPARENT),
         shadow: Shadow::default(),
     }
 }
@@ -896,11 +680,25 @@ pub fn shortcut(_: &Theme, status: button::Status) -> button::Style {
 pub fn tile(_: &Theme, status: button::Status) -> button::Style {
     button::Style {
         background: match status {
-            button::Status::Hovered | button::Status::Pressed => background(SURFACE),
+            button::Status::Hovered | button::Status::Pressed => background(RAISED),
             _ => None,
         },
         text_color: TEXT,
-        border: border(0.0, Color::TRANSPARENT, RADIUS_TILE),
+        border: border(0.0, Color::TRANSPARENT),
+        shadow: Shadow::default(),
+    }
+}
+
+/// Una voce dell'indice dei generi («Sfoglia tutto»): testo su una card, nessun colore.
+pub fn browse_card(_: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: background(if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+            SELECTED
+        } else {
+            RAISED
+        }),
+        text_color: TEXT,
+        border: border(0.0, Color::TRANSPARENT),
         shadow: Shadow::default(),
     }
 }
@@ -914,43 +712,31 @@ pub fn bare(_: &Theme, _: button::Status) -> button::Style {
 
 pub fn search_input(_: &Theme, status: text_input::Status) -> text_input::Style {
     let edge = match status {
-        text_input::Status::Focused => TEXT,
-        text_input::Status::Hovered => hex(0x6a6a6a),
+        text_input::Status::Focused => FOCUS,
+        text_input::Status::Hovered => CONTROL_HOVER,
         _ => CONTROL,
     };
     text_input::Style {
-        background: Background::Color(SURFACE),
-        border: border(1.0, edge, RADIUS_PILL),
+        background: Background::Color(WELL),
+        border: border(AP, edge),
         icon: MUTED,
         placeholder: FAINT,
         value: TEXT,
-        selection: Color { a: 0.35, ..ACCENT },
+        selection: Color { a: 0.35, ..FOCUS },
     }
 }
 
-/// Campo di testo dentro una finestra di dialogo: rettangolare, con il bordo lime quando è attivo.
-pub fn dialog_input(_: &Theme, status: text_input::Status) -> text_input::Style {
-    let edge = match status {
-        text_input::Status::Focused => ACCENT,
-        text_input::Status::Hovered => hex(0x6a6a6a),
-        _ => CONTROL,
-    };
-    text_input::Style {
-        background: Background::Color(hex(0x141414)),
-        border: border(1.0, edge, RADIUS_TILE),
-        icon: MUTED,
-        placeholder: FAINT,
-        value: TEXT,
-        selection: Color { a: 0.35, ..ACCENT },
-    }
+/// Campo di testo dentro una finestra di dialogo: stesso pozzetto, anello bianco quando è attivo.
+pub fn dialog_input(theme_: &Theme, status: text_input::Status) -> text_input::Style {
+    search_input(theme_, status)
 }
 
-/// Barra di avanzamento: la parte ascoltata è il dato, quindi è nel colore accento.
+/// Barra di avanzamento: la parte ascoltata è bianco caldo (il lime è per gli stati accesi).
 pub fn progress_slider(theme_: &Theme, status: slider::Status) -> slider::Style {
-    level_slider(ACCENT, 6.0)(theme_, status)
+    level_slider(TEXT, 6.0)(theme_, status)
 }
 
-/// Volume: è un controllo, non un dato, quindi resta neutro.
+/// Volume: è un controllo, non un dato, e resta neutro come la barra.
 pub fn volume_slider(theme_: &Theme, status: slider::Status) -> slider::Style {
     level_slider(TEXT, 5.0)(theme_, status)
 }
@@ -958,20 +744,23 @@ pub fn volume_slider(theme_: &Theme, status: slider::Status) -> slider::Style {
 fn level_slider(fill: Color, grown: f32) -> impl Fn(&Theme, slider::Status) -> slider::Style {
     move |_, status| {
         // La maniglia compare solo quando serve: sopra una barra ferma resta un filo pulito.
-        let handle_radius = match status {
+        let handle = match status {
             slider::Status::Hovered | slider::Status::Dragged => grown,
             slider::Status::Active => 0.0,
         };
-        let fill = if matches!(status, slider::Status::Active) { fill } else { lift(fill) };
+        let fill = if matches!(status, slider::Status::Active) { fill } else { FOCUS };
         slider::Style {
             rail: slider::Rail {
-                backgrounds: (Background::Color(fill), Background::Color(CONTROL)),
-                width: 4.0,
-                border: border(0.0, Color::TRANSPARENT, 2.0),
+                backgrounds: (Background::Color(fill), Background::Color(SELECTED)),
+                width: sz::SEEK_TRACK_H,
+                border: border(0.0, Color::TRANSPARENT),
             },
             handle: slider::Handle {
-                shape: slider::HandleShape::Circle { radius: handle_radius },
-                background: Background::Color(TEXT),
+                shape: slider::HandleShape::Rectangle {
+                    width: (2.0 * handle).round() as u16,
+                    border_radius: Radius::from(0.0),
+                },
+                background: Background::Color(FOCUS),
                 border_width: 0.0,
                 border_color: Color::TRANSPARENT,
             },
@@ -979,23 +768,26 @@ fn level_slider(fill: Color, grown: f32) -> impl Fn(&Theme, slider::Status) -> s
     }
 }
 
-/// Il volume dei player a schermo intero. `open` (0 a riposo, 1 toccato) allarga la barra, la
-/// accende di lime e fa comparire la maniglia: a riposo è un filo sottile e spento.
+/// Il volume dei player a schermo intero. `open` (0 a riposo, 1 toccato) allarga la barra e fa
+/// comparire la maniglia: a riposo è un filo sottile e spento.
 pub fn side_volume(open: f32) -> impl Fn(&Theme, slider::Status) -> slider::Style {
     move |_, _| {
-        let width = 4.0 + 6.0 * open;
+        let width = sz::SEEK_TRACK_H + 6.0 * open;
         slider::Style {
             rail: slider::Rail {
                 backgrounds: (
-                    Background::Color(super::motion::mix(super::motion::fade(TEXT, 0.55), ACCENT, open)),
-                    Background::Color(super::motion::mix(super::motion::fade(TEXT, 0.18), CONTROL, open)),
+                    Background::Color(super::motion::mix(super::motion::fade(TEXT, 0.55), TEXT, open)),
+                    Background::Color(super::motion::mix(super::motion::fade(TEXT, 0.18), SELECTED, open)),
                 ),
                 width,
-                border: border(0.0, Color::TRANSPARENT, width / 2.0),
+                border: border(0.0, Color::TRANSPARENT),
             },
             handle: slider::Handle {
-                shape: slider::HandleShape::Circle { radius: 1.0 + 8.0 * open },
-                background: Background::Color(TEXT),
+                shape: slider::HandleShape::Rectangle {
+                    width: (2.0 + 14.0 * open).round() as u16,
+                    border_radius: Radius::from(0.0),
+                },
+                background: Background::Color(FOCUS),
                 border_width: 0.0,
                 border_color: Color::TRANSPARENT,
             },
@@ -1006,27 +798,21 @@ pub fn side_volume(open: f32) -> impl Fn(&Theme, slider::Status) -> slider::Styl
 /// La pastiglia dietro il volume: invisibile a riposo, un fondo pieno quando è toccato.
 pub fn volume_pill(open: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: background(super::motion::fade(SURFACE, 0.94 * open)),
-        border: border(0.0, Color::TRANSPARENT, RADIUS_PILL),
+        background: background(super::motion::fade(RAISED, 0.94 * open)),
         ..container::Style::default()
     }
 }
 
-/// Un velo più chiaro: il colore dei controlli che si accendono al passaggio.
-fn lift(color: Color) -> Color {
-    super::motion::mix(color, Color::WHITE, 0.18)
-}
-
-/// Interruttore: lime quando è acceso.
+/// Interruttore: lime quando è acceso (lo stato è anche nella posizione del pomello).
 pub fn switch(_: &Theme, status: toggler::Status) -> toggler::Style {
     let (on, hovered) = match status {
         toggler::Status::Active { is_toggled } => (is_toggled, false),
         toggler::Status::Hovered { is_toggled } => (is_toggled, true),
         toggler::Status::Disabled => (false, false),
     };
-    let off = if hovered { hex(0x5a5a5a) } else { CONTROL };
+    let off = if hovered { CONTROL_HOVER } else { CONTROL };
     toggler::Style {
-        background: if on { if hovered { ACCENT_HOVER } else { ACCENT } } else { off },
+        background: if on { LIME } else { off },
         background_border_width: 0.0,
         background_border_color: Color::TRANSPARENT,
         foreground: if on { ON_PRIMARY } else { TEXT },
@@ -1043,12 +829,12 @@ pub fn scroll(_: &Theme, status: scrollable::Status) -> scrollable::Style {
     } else if active {
         CONTROL
     } else {
-        RAISED
+        SELECTED
     };
     let rail = scrollable::Rail {
         background: None,
         border: Border::default(),
-        scroller: scrollable::Scroller { color, border: border(0.0, Color::TRANSPARENT, RADIUS_PILL) },
+        scroller: scrollable::Scroller { color, border: border(0.0, Color::TRANSPARENT) },
     };
     scrollable::Style {
         container: container::Style::default(),
@@ -1058,62 +844,50 @@ pub fn scroll(_: &Theme, status: scrollable::Status) -> scrollable::Style {
     }
 }
 
-pub fn icon_tint(color: Color) -> impl Fn(&Theme, svg::Status) -> svg::Style {
-    move |_, _| svg::Style { color: Some(color) }
-}
-
 #[cfg(test)]
 mod tests {
+    use psytify_design::contrast::{AA_TEXT, contrast_ratio};
+
     use super::*;
 
-    /// Rapporto di contrasto WCAG 2.x tra due colori opachi.
-    fn contrast(a: Color, b: Color) -> f32 {
-        fn channel(c: f32) -> f32 {
-            if c <= 0.039_28 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    // I rapporti di contrasto dei token (testo su ogni superficie, bordi dei controlli, testo scuro
+    // sui fondi chiari) li verifica `psytify-design::contrast`. Qui si controlla solo che i nomi del
+    // client puntino ai token giusti e che la conversione in `Color` non perda un byte.
+
+    #[test]
+    fn the_conversion_to_iced_colours_is_lossless() {
+        for (_, token) in ds::PALETTE {
+            assert_eq!(rgba_of(color(token)), Rgba::rgb(token.r(), token.g(), token.b()));
         }
-        fn luminance(c: Color) -> f32 {
-            0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
-        }
-        let (la, lb) = (luminance(a), luminance(b));
-        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+        assert!((SCRIM.a - 184.0 / 255.0).abs() < 1e-6);
     }
 
     #[test]
-    fn every_text_tier_passes_wcag_aa_on_every_surface() {
-        for text in [TEXT, MUTED, FAINT, NAV_IDLE] {
-            for surface in [GROUND, PANEL, SURFACE, HOVER, RAISED] {
-                assert!(contrast(text, surface) >= 4.5, "{text:?} on {surface:?}");
+    fn the_client_names_are_the_design_aliases() {
+        assert_eq!(rgba_of(TEXT), ds::TEXT_PRIMARY);
+        assert_eq!(rgba_of(MUTED), ds::TEXT_SECONDARY);
+        assert_eq!(rgba_of(FAINT), ds::TEXT_TERTIARY);
+        assert_eq!(rgba_of(DISABLED), ds::TEXT_DISABLED);
+        assert_eq!(rgba_of(LIME), ds::LIME);
+        assert_eq!(rgba_of(ERROR), ds::ERROR);
+        assert_eq!(rgba_of(CANVAS), ds::DEEP_BLACK);
+        assert_eq!(rgba_of(CHROME), ds::NEAR_BLACK);
+        assert_eq!(rgba_of(RAISED), ds::GRAPHITE);
+        assert_eq!(rgba_of(SELECTED), ds::CHARCOAL);
+    }
+
+    #[test]
+    fn every_text_colour_of_the_client_passes_wcag_aa_on_the_four_surfaces() {
+        for text in [TEXT, MUTED, FAINT, NAV_IDLE, ERROR] {
+            for surface in ds::SURFACES {
+                assert!(contrast_ratio(rgba_of(text), surface) >= AA_TEXT, "{text:?} on {surface:?}");
             }
         }
     }
 
     #[test]
-    fn primary_label_passes_wcag_aa() {
-        assert!(contrast(ON_PRIMARY, TEXT) >= 4.5);
-    }
-
-    #[test]
-    fn the_play_button_label_passes_wcag_aa_on_the_accent() {
-        assert!(contrast(ON_PRIMARY, ACCENT) >= 4.5 && contrast(ON_PRIMARY, ACCENT_HOVER) >= 4.5);
-    }
-
-    #[test]
-    fn accent_text_passes_wcag_aa_on_the_panel() {
-        assert!(contrast(ACCENT, PANEL) >= 4.5 && contrast(ACCENT, SURFACE) >= 4.5);
-    }
-
-    #[test]
-    fn a_count_on_the_selected_pill_passes_wcag_aa() {
-        assert!(contrast(CONTROL, TEXT) >= 4.5);
-    }
-
-    #[test]
-    fn negative_text_passes_wcag_aa_on_the_panel_and_surface() {
-        assert!(contrast(NEGATIVE, PANEL) >= 4.5 && contrast(NEGATIVE, SURFACE) >= 4.5);
-    }
-
-    #[test]
-    fn white_text_on_the_close_button_hover_passes_wcag_aa() {
-        assert!(contrast(TEXT, hex(0xc42b3b)) >= 4.5);
+    fn the_primary_label_passes_wcag_aa_on_its_fill() {
+        assert!(contrast_ratio(rgba_of(ON_PRIMARY), rgba_of(TEXT)) >= AA_TEXT);
+        assert!(contrast_ratio(rgba_of(ON_PRIMARY), rgba_of(LIME)) >= AA_TEXT);
     }
 }

@@ -12,20 +12,20 @@ use super::theme;
 use crate::app::{App, Message, Notice};
 
 /// Spazio di icona, distanze e padding attorno al testo dell'avviso.
-const CHROME: f32 = 14.0 + 12.0 * 2.0 + 16.0 * 2.0 + ICON_BUTTON;
+const CHROME: f32 = 24.0 + 12.0 * 2.0 + 16.0 * 2.0 + ICON_BUTTON;
 
 /// Il livello dell'avviso, a tutta area; `None` se non ce n'è.
 pub fn view(app: &App) -> Option<Element<'_, Message>> {
     let toast = app.toast.as_ref()?;
     let shown = toast.motion.value();
     let (glyph, color, message) = match &toast.notice {
-        Notice::Info(message) => (Icon::Download, theme::ACCENT, message),
-        Notice::Error(message) => (Icon::Close, theme::NEGATIVE, message),
+        Notice::Info(message) => (Icon::Check, theme::TEXT, message),
+        Notice::Error(message) => (Icon::Close, theme::ERROR, message),
     };
     let label = Line { color: Some(fade(theme::TEXT, shown)), ..BODY_LINE };
     let body = container(
         row![
-            icon(glyph, 14.0, fade(color, shown)),
+            icon(glyph, 0.0, fade(color, shown)),
             line(message, theme::TOAST_WIDTH - CHROME, label),
             icon_button(Icon::Close, "Chiudi avviso", false, Some(Message::DismissNotice)),
         ]

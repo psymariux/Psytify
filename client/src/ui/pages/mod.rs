@@ -2,6 +2,7 @@
 
 pub mod album;
 pub mod artist;
+pub mod downloads;
 pub mod friends;
 pub mod home;
 pub mod jam;

@@ -1,0 +1,14 @@
+# icon_repeat_one: icon_repeat with a 3x5 numeral 1 in the loop (a 2x2 corner dot badge was tried and read as a notification dot at 1x)
+@frame
+........#...
+.#########..
+#.......#..#
+#..........#
+#.....#....#
+#....##....#
+#.....#....#
+#.....#....#
+#....###...#
+#..#.......#
+..#########.
+...#........

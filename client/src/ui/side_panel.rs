@@ -1,11 +1,9 @@
 //! Pannello destro, apribile e chiudibile, con tre schede: «In riproduzione» (copertina o mini
-//! videoclip, titolo, qualità, crediti, brano successivo), «Coda» e «Testo». Quello in riproduzione
-//! prende la tinta della copertina.
+//! videoclip, titolo, qualità, crediti, brano successivo), «Coda» e «Testo». Sul chrome, piatto: la
+//! copertina è l'unico colore.
 //!
-//! Le schede sono un selettore a pillola: il cursore scivola con la molla sotto la scheda scelta e
-//! il contenuto nuovo entra salendo di qualche pixel.
-
-use std::time::Duration;
+//! Le schede sono un selettore a segmenti: il cursore scorre sotto la scheda scelta (ease-out) e il
+//! contenuto nuovo entra senza salire.
 
 use iced::widget::{Space, button, column, container, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length, Padding, alignment};
@@ -13,7 +11,7 @@ use iced::{Alignment, Element, Length, Padding, alignment};
 use super::components::{
     H1_LINE, ICON_BUTTON, PLAYING_LINE, SUB_LINE, TITLE_LINE, art_of, centered, count_label, duration_label,
     empty_block, h2, heart, hoverable, icon_button, line, muted, outlined_button, playing_bars, small,
-    text_button, toggle_button, total_label,
+    text_button, total_label,
 };
 use super::cover::{Art, cover, cover_round};
 use super::icons::Icon;
@@ -32,8 +30,8 @@ const TAB_WIDTHS: [f32; 3] = [128.0, 62.0, 68.0];
 const TAB_HEIGHT: f32 = 32.0;
 /// Spazio fra il binario e il cursore.
 const TRACK_INSET: f32 = 2.0;
-/// Il contenuto di una scheda appena scelta sale di tanto.
-const TAB_RISE: f32 = 10.0;
+/// Il contenuto di una scheda appena scelta non sale più: entra con un taglio.
+const TAB_RISE: f32 = 0.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let header = row![
@@ -56,15 +54,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .width(theme::SIDE_PANEL_WIDTH)
         .height(Length::Fill)
         .padding(16);
-    match (app.side_tab, app.queue.current()) {
-        (SideTab::NowPlaying, Some(track)) => {
-            let tint = app.covers.tint_of(art_of(track));
-            // Mentre suona la sfumatura respira; in pausa sta ferma.
-            let drift = if app.playback.is_playing() { motion::drift(Duration::from_secs(14)) } else { 0.0 };
-            content.style(theme::aurora(tint, drift)).into()
-        }
-        _ => content.style(theme::panel_box).into(),
-    }
+    content.style(theme::panel_box).into()
 }
 
 /// Dove sta il cursore quando il selettore è a `value` (in schede, anche fra due o un po' oltre
@@ -86,13 +76,14 @@ fn tabs(app: &App) -> Element<'_, Message> {
     const LABELS: [&str; 3] = ["In riproduzione", "Coda", "Testo"];
     let value = app.side_tab_motion.value();
     let (x, width) = thumb_at(value);
-    let thumb = container(container(Space::new(14, 3)).style(theme::bar(theme::ACCENT, 1.5)))
-        .width(width)
-        .height(TAB_HEIGHT - 2.0 * TRACK_INSET)
-        .align_x(alignment::Horizontal::Center)
-        .align_y(alignment::Vertical::Bottom)
-        .padding(Padding { bottom: 3.0, ..Padding::ZERO })
-        .style(theme::segment_thumb);
+    let thumb =
+        container(container(Space::new(2.0 * theme::AP * 3.0, theme::AP)).style(theme::bar(theme::TEXT)))
+            .width(width)
+            .height(TAB_HEIGHT - 2.0 * TRACK_INSET)
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Bottom)
+            .padding(Padding { bottom: 3.0, ..Padding::ZERO })
+            .style(theme::segment_thumb);
     let slider = row![Space::with_width(x), thumb];
 
     let labels = SideTab::ALL.iter().zip(LABELS).zip(TAB_WIDTHS).map(|((&tab, label), width)| {
@@ -237,7 +228,7 @@ fn media<'a>(app: &'a App, track: &'a Track) -> Element<'a, Message> {
             .spacing(6)
             .align_y(Alignment::Center);
     if app.panel_video {
-        bar = bar.push(toggle_button(
+        bar = bar.push(icon_button(
             Icon::Lyrics,
             if app.video_lyrics { "Nascondi il testo sul video" } else { "Mostra il testo sul video" },
             app.video_lyrics,
@@ -381,18 +372,15 @@ pub(super) fn queue_body(app: &App) -> Element<'_, Message> {
 
 /// Testo di una voce: pannello 340 meno padding 16 + 8 per lato, copertina 40, durata circa 36,
 /// pulsante di rimozione e tre spazi da 10.
-const ENTRY_TEXT: f32 = theme::SIDE_PANEL_WIDTH - 48.0 - 40.0 - 36.0 - ICON_BUTTON - 30.0;
+const ENTRY_TEXT: f32 = theme::SIDE_PANEL_WIDTH - 48.0 - theme::ROW_COVER - 36.0 - ICON_BUTTON - 30.0;
 
 fn entry<'a>(app: &App, position: usize, track: &'a Track, current: bool) -> Element<'a, Message> {
-    let lead: Element<'a, Message> = if current {
-        container(playing_bars(theme::ACCENT, app.playback.is_playing())).width(18).into()
-    } else {
-        Space::with_width(0).into()
-    };
+    let lead: Element<'a, Message> =
+        if current { playing_bars(app.playback.is_playing()) } else { Space::with_width(0).into() };
     let item = button(centered(
         row![
             lead,
-            cover(&app.covers, art_of(track), 40.0),
+            cover(&app.covers, art_of(track), theme::ROW_COVER),
             column![
                 line(&track.title, ENTRY_TEXT, if current { PLAYING_LINE } else { TITLE_LINE }),
                 line(&track.artist.name, ENTRY_TEXT, SUB_LINE),
@@ -405,7 +393,7 @@ fn entry<'a>(app: &App, position: usize, track: &'a Track, current: bool) -> Ele
         .spacing(10)
         .align_y(Alignment::Center),
     ))
-    .height(56)
+    .height(theme::ROW_PLAIN)
     .width(Length::Fill)
     .padding([0, 8])
     .style(theme::row(current))

@@ -4,8 +4,8 @@
 # Usage: [QUICK=1] scripts/android-apk.sh [BACKEND_URL]
 #   QUICK=1          x86_64 only, no LTO, for the emulator (android/target-quick)
 #   BACKEND_URL      backend of a fresh configuration, for example http://192.168.1.20:8080
-#                    (your computer on the LAN). Without it: PSYTIFY_DEFAULT_API_URL from `.env.build` (see
-#                    `.env.build.example`) and, if missing, http://10.0.2.2:8080, the computer seen from the emulator.
+#                    (your computer on the LAN). Without it: the public backend, unless PSYTIFY_DEFAULT_API_URL is set
+#                    in `.env.build` (see `.env.build.example`). With QUICK=1: http://10.0.2.2:8080.
 #
 # Requires: Android SDK in $ANDROID_HOME (default ~/Android/Sdk) with NDK 27, the Rust targets
 # aarch64-linux-android and x86_64-linux-android, cargo-apk, a JDK (keytool). See docs/ANDROID.md.
@@ -16,20 +16,9 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
-NDK_VERSION=${NDK_VERSION:-27.2.12479018}
-export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION
-export ANDROID_NDK_HOME=$ANDROID_NDK_ROOT
-TOOLS=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
-export PATH=$TOOLS:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/35.0.0:$PATH
-# The NDK's C compiler for dependencies with C/C++ code (oboe for audio).
-for arch in aarch64 x86_64; do
-  upper=$(echo "$arch" | tr '[:lower:]' '[:upper:]')
-  export "CC_${arch}_linux_android=$TOOLS/${arch}-linux-android26-clang"
-  export "CXX_${arch}_linux_android=$TOOLS/${arch}-linux-android26-clang++"
-  export "AR_${arch}_linux_android=$TOOLS/llvm-ar"
-  export "CARGO_TARGET_${upper}_LINUX_ANDROID_LINKER=$TOOLS/${arch}-linux-android26-clang"
-done
+# NDK, PATH and C compiler for the Android targets: shared with `android-check.sh`.
+# shellcheck source=scripts/android-env.sh
+. "$ROOT/scripts/android-env.sh"
 
 # The distribution backend lives in `.env.build`, outside the repository.
 if [ -f "$ROOT/.env.build" ]; then
@@ -40,6 +29,9 @@ if [ -f "$ROOT/.env.build" ]; then
 fi
 if [ "${1:-}" != "" ]; then
   export PSYTIFY_DEFAULT_API_URL=$1
+elif [ "${QUICK:-}" = 1 ]; then
+  # Emulator: the computer seen from the emulator, even if `.env.build` names the public backend.
+  export PSYTIFY_DEFAULT_API_URL=http://10.0.2.2:8080
 fi
 
 KEYSTORE=$HOME/.android/psytify-release.keystore
@@ -67,8 +59,8 @@ else
 fi
 APK=${CARGO_TARGET_DIR:-$ROOT/android/target}/release/apk/psytify.apk
 
-# Il codice Java (la sessione multimediale, `android/java/`) diventa un classes.dex: cargo-apk compila
-# solo Rust. javac e d8 vengono dal JDK e dall'SDK; `--release 11` è ciò che d8 legge.
+# The Java code (the media session, `android/java/`) becomes a classes.dex: cargo-apk compiles
+# only Rust. javac and d8 come from the JDK and the SDK; `--release 11` is what d8 reads.
 JAVA_OUT=$(mktemp -d)
 trap 'rm -rf "$JAVA_OUT"' EXIT
 mapfile -t JAVA_SOURCES < <(find "$ROOT/android/java" -name '*.java')

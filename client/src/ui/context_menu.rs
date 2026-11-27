@@ -315,10 +315,11 @@ fn track_entries<'a>(
             "Copia titolo e artista",
             Message::CopyText(format!("{} — {}", track.title, track.artist.name)),
         );
-    if track.downloadable && !app.downloading.contains(&track.id) {
+    // Un brano già sul dispositivo (con il file a posto) non si scarica di nuovo: si può togliere.
+    if track.downloadable && !app.downloads.is_busy(track.id) && !app.downloads.is_offline_ready(track.id) {
         builder = builder.item(
             Icon::Download,
-            &format!("Scarica · {}", app.download_quality.label()),
+            &format!("Scarica · {}", app.downloads.quality.label()),
             Message::Download(track.clone()),
         );
         // Questa voce non chiude il menu: apre l'elenco delle qualità accanto.
@@ -332,6 +333,9 @@ fn track_entries<'a>(
             Some(Icon::ChevronRight),
         ));
         builder.rows += 1;
+    }
+    if app.downloads.is_saved(track.id) {
+        builder = builder.item(Icon::Trash, "Rimuovi dai download", Message::DownloadRemove(track.id));
     }
     builder.finish()
 }
@@ -434,7 +438,7 @@ fn downloads_list<'a>(app: &'a App, track: &Track, m: Metrics) -> Element<'a, Me
             &format!("{} · {}", quality.label(), quality.detail()),
             Some(Message::Chosen(Box::new(Message::DownloadAs(track.clone(), quality)))),
             false,
-            (quality == app.download_quality).then_some(Icon::Check),
+            (quality == app.downloads.quality).then_some(Icon::Check),
         )
     });
     column(rows).max_width(m.width).into()
@@ -449,7 +453,7 @@ fn item<'a>(
     danger: bool,
     trailing: Option<Icon>,
 ) -> Element<'a, Message> {
-    let tint = if danger { theme::NEGATIVE } else { theme::MUTED };
+    let tint = if danger { theme::ERROR } else { theme::MUTED };
     let mut content = row![
         icon(glyph, m.icon, tint),
         text(super::components::fit(label, m.label_width(), m.text)).size(m.text).font(theme::FONT_MEDIUM),
@@ -498,7 +502,7 @@ fn sheet<'a>(app: &'a App, menu: &'a ContextMenu) -> Element<'a, Message> {
     let panel = container(
         container(
             column![
-                container(Space::new(36.0, 4.0)).style(theme::bar(theme::FAINT, 2.0)),
+                container(Space::new(36.0, 4.0)).style(theme::bar(theme::FAINT)),
                 header(app, menu, m),
                 scrollable(body).height(Length::Shrink).style(theme::scroll),
             ]

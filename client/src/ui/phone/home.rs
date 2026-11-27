@@ -129,7 +129,7 @@ fn header(app: &App) -> Element<'_, Message> {
             .spacing(6)
             .align_y(Alignment::Center);
         if dot {
-            face = face.push(container(Space::new(6.0, 6.0)).style(theme::bar(theme::ACCENT, 3.0)));
+            face = face.push(container(Space::new(6.0, 6.0)).style(theme::bar(theme::TEXT)));
         }
         button(face).padding([8, 16]).style(theme::pill(false)).on_press(message).into()
     };
@@ -180,13 +180,12 @@ fn shelf_section<'a>(
     .into()
 }
 
-/// L'uscita in evidenza, sulla tinta della sua copertina: copertina e titolo, sotto il Play, Salva
+/// L'uscita in evidenza, su una card piatta: copertina e titolo, sotto il Play, Salva
 /// e Segui e i puntini del carosello.
 fn featured(app: &App, width: f32) -> Option<Element<'_, Message>> {
     let releases = &app.home.feed.hero;
     let release = releases.get(app.home.hero.index)?;
     let shown = app.home.hero.since.map_or(1.0, |since| motion::appear(since, theme::MOTION_PANEL));
-    let tint = app.covers.tint_of(release_art(release));
     let pad = 18.0;
     let text_width = width - 2.0 * pad - FEATURED_COVER - 16.0;
 
@@ -198,7 +197,7 @@ fn featured(app: &App, width: f32) -> Option<Element<'_, Message>> {
         if release.is_album { Message::Navigate(Screen::Album(release.id)) } else { release_play(release) };
     let top = button(
         row![
-            container(cover(&app.covers, release_art(release), FEATURED_COVER)).style(theme::lifted),
+            cover(&app.covers, release_art(release), FEATURED_COVER),
             column![
                 wrapped(&release.title, text_width, faded(FEATURED_TITLE, shown), 2),
                 line(&meta.join(" · "), text_width, faded(MUTED_LINE, shown)),
@@ -213,7 +212,7 @@ fn featured(app: &App, width: f32) -> Option<Element<'_, Message>> {
     .style(theme::bare)
     .on_press(open);
 
-    let play = button(container(icon(Icon::Play, 22.0, theme::ON_PRIMARY)).center(Length::Fill))
+    let play = button(container(icon(Icon::Play, 0.0, theme::ON_PRIMARY)).center(Length::Fill))
         .width(FEATURED_PLAY)
         .height(FEATURED_PLAY)
         .padding(0)
@@ -251,7 +250,7 @@ fn featured(app: &App, width: f32) -> Option<Element<'_, Message>> {
         container(column![top, actions].spacing(16))
             .padding(pad)
             .width(Length::Fill)
-            .style(theme::hero_card(tint))
+            .style(theme::card)
             .into(),
     )
 }
@@ -261,7 +260,7 @@ fn dots<'a>(count: usize, active: usize) -> Element<'a, Message> {
     let items = (0..count).map(|n| {
         let on = n == active;
         let (width, color) = if on { (20.0, theme::TEXT) } else { (6.0, theme::FAINT) };
-        button(container(Space::new(Length::Fixed(width), Length::Fixed(6.0))).style(theme::bar(color, 3.0)))
+        button(container(Space::new(Length::Fixed(width), Length::Fixed(6.0))).style(theme::bar(color)))
             .padding([14, 3])
             .style(theme::bare)
             .on_press(Message::HeroGo(n))

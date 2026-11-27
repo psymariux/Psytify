@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use iced::widget::{Space, column, container, row, text};
 use iced::{Alignment, Element, Length, alignment};
+use psytify_core::catalog::portrait_url;
 use uuid::Uuid;
 
 use crate::api::{ArtistPage, SourcePlaylist, Track};
@@ -38,15 +39,6 @@ pub fn view(app: &App, id: Uuid, width: f32) -> Element<'_, Message> {
         Some((current, Load::Failed(err))) if *current == id => error_block("l'artista", err),
         _ => skeleton_rows(8, theme::ROW_PLAIN, TableKind::Mixed),
     }
-}
-
-/// L'immagine dell'artista è la sua foto ufficiale; senza, la copertina del suo primo album con
-/// un'immagine, o di un suo brano.
-pub fn portrait_url(page: &ArtistPage) -> Option<&str> {
-    page.image_url
-        .as_deref()
-        .or_else(|| page.albums.iter().find_map(|a| a.cover_url.as_deref()))
-        .or_else(|| page.tracks.iter().find_map(|t| t.cover_url.as_deref()))
 }
 
 fn loaded<'a>(app: &'a App, page: &'a ArtistPage, width: f32) -> Element<'a, Message> {
@@ -220,7 +212,6 @@ fn banner<'a>(
 ) -> Element<'a, Message> {
     let url = portrait_url(page).or_else(|| extras.and_then(|e| e.artist.image_url.as_deref()));
     let art = Art { id: page.id, title: &page.name, url };
-    let tint = app.covers.tint_of(art);
     let pad = 24.0;
     let side = if width >= 620.0 { PORTRAIT } else { 120.0 };
     let text_width = (width - 2.0 * pad - side - 28.0).max(160.0);
@@ -299,11 +290,11 @@ fn banner<'a>(
     container(row![cover_round(&app.covers, art, side), body].spacing(28).align_y(Alignment::Center))
         .padding(pad)
         .width(Length::Fill)
-        .style(theme::hero_card(tint))
+        .style(theme::card)
         .into()
 }
 
-/// La testa sul telefono: niente scheda, la foto tonda al centro sulla tinta della pagina, il nome
+/// La testa sul telefono: niente scheda, la foto tonda al centro sulla tela, il nome
 /// grande, e sotto Segui e Radio a sinistra e il Play tondo a destra, sotto il pollice.
 fn phone_banner<'a>(
     app: &'a App,

@@ -4,20 +4,12 @@
 //! Il catalogo arriva solo dal backend descritto in docs/BACKEND.md; l'audio si scarica dagli URL
 //! firmati che il backend restituisce.
 
-mod api;
 mod app;
-mod auth;
-mod config;
-#[cfg(not(target_os = "android"))]
-mod discord;
-mod error;
-mod feed;
-mod jam;
-#[cfg(target_os = "linux")]
-mod launch;
-mod player;
-mod system_media;
 mod ui;
+
+// I moduli già spostati nel core (docs/transformation/04-core-architecture.md, passo 2): li si
+// rilegge da lì con lo stesso nome, così ogni percorso `crate::api::…` resta valido.
+use psytify_core::{api, auth, config, error, feed, jam, player};
 
 use std::sync::OnceLock;
 
@@ -37,10 +29,11 @@ pub enum Platform {
 pub use config::{set_data_dir, set_default_api_url};
 /// Android: la sessione multimediale del sistema (schermata di blocco, notifica, cuffie).
 #[cfg(target_os = "android")]
-pub use system_media::{
+pub use psytify_core::media::{
     NowPlaying, phone_command, phone_install, phone_notify_update, set_phone_installer, set_phone_media,
     set_phone_update_notifier,
 };
+pub use psytify_core::platform::set_url_opener;
 
 /// Chi mostra e nasconde la tastiera del sistema. Iced 0.13 non lo chiede mai alla finestra: su
 /// Android lo fa il guscio (`android/`), sul desktop non serve.
@@ -55,24 +48,6 @@ pub fn set_soft_keyboard(toggle: impl Fn(bool) + Send + Sync + 'static) {
 pub(crate) fn soft_keyboard(show: bool) {
     if let Some(toggle) = SOFT_KEYBOARD.get() {
         toggle(show);
-    }
-}
-
-/// Chi apre un indirizzo nel browser del sistema, dove il crate `open` non arriva (su Android il
-/// guscio, con un Intent). Restituisce `false` se non ci riesce.
-type UrlOpener = Box<dyn Fn(&str) -> bool + Send + Sync>;
-static URL_OPENER: OnceLock<UrlOpener> = OnceLock::new();
-
-/// Registra chi apre un indirizzo nel browser del sistema. Vale la prima chiamata.
-pub fn set_url_opener(open: impl Fn(&str) -> bool + Send + Sync + 'static) {
-    let _ = URL_OPENER.set(Box::new(open));
-}
-
-/// Apre `url` nel browser: con l'aggancio del guscio se c'è, altrimenti col crate `open`.
-pub(crate) fn open_url(url: &str) -> bool {
-    match URL_OPENER.get() {
-        Some(open) => open(url),
-        None => open::that_detached(url).is_ok(),
     }
 }
 
@@ -101,10 +76,10 @@ pub(crate) fn system_insets() -> Option<Insets> {
 }
 
 /// Prepara l'ambiente del processo. Va chiamata prima di qualunque thread: glibc e il loader Vulkan
-/// leggono l'ambiente solo all'avvio (vedi `launch.rs`).
+/// leggono l'ambiente solo all'avvio (vedi `psytify_core::launch`).
 pub fn prepare_process() {
     #[cfg(target_os = "linux")]
-    launch::relaunch_with_lean_env();
+    psytify_core::launch::relaunch_with_lean_env();
 }
 
 /// Avvia l'app e torna quando la finestra si chiude.
@@ -122,11 +97,12 @@ pub fn run(platform: Platform) -> iced::Result {
             decorations: false,
             // La chiusura passa da App::update per salvare coda, volume e schermata.
             exit_on_close_request: false,
-            // L'`app_id` di Wayland (e la classe di X11) deve coincidere con `psytify.desktop`:
-            // così il menu e la barra delle applicazioni associano icona e finestra.
+            // L'`app_id` di Wayland (e la classe di X11): `psytify` è del desktop GPUI e di
+            // `psytify.desktop`, questo binario di sviluppo ha il suo, così la barra delle
+            // applicazioni non scambia le due finestre.
             #[cfg(target_os = "linux")]
             platform_specific: window::settings::PlatformSpecific {
-                application_id: "psytify".into(),
+                application_id: "psytify-iced".into(),
                 ..window::settings::PlatformSpecific::default()
             },
             ..window::Settings::default()

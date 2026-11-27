@@ -24,7 +24,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libxkbcommon-dev \
-            libwayland-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+            libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev libxcb1-dev \
+            libx11-xcb-dev libzstd-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - run: rustup show
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build

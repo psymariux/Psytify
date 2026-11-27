@@ -25,6 +25,10 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "winit"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # The desktop is on gstreamer 0.25; the Iced client stays on 0.22 because iced_video_player depends on it.
+      # Move the desktop by hand.
+      - dependency-name: "gstreamer*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   # The Android shell is a separate workspace, with its own Cargo.lock.
   - package-ecosystem: cargo
@@ -47,6 +51,9 @@ updates:
       - dependency-name: "iced_*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "winit"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # jni 0.22 rewrites the JNIEnv API: migrate the shell by hand.
+      - dependency-name: "jni"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   # Actions are pinned to a SHA: Dependabot updates the SHA and the version comment.

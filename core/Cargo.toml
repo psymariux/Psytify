@@ -1,0 +1,83 @@
+[package]
+name = "psytify-core"
+# Same version as the client: `CARGO_PKG_VERSION` ends up in the user agent of requests to the
+# backend and to Clerk (`psytify/<version>`), which must not change by moving the code here.
+version = "0.1.0"
+description = "The Psytify core without UI: API, playback, configuration and state shared by the frontends"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# Internet Archive covers: `image` 0.25 with only the codecs of the item images (JPEG, PNG,
+# GIF, WebP). The frontends only receive ready-made RGBA pixels (`artwork`).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+# Cover pixels reach the frontends without a copy: Iced (`image::Handle::from_rgba`) takes
+# `Bytes` itself. It is already in the graph (reqwest, iced).
+bytes = "1"
+# Audio: output device and Player. The decoding is ours (symphonia below), so rodio needs only playback.
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
+# Direct decoding of every format: rodio 0.20's decoder does not tell Symphonia the stream
+# length, so seeking in FLAC failed and M4A files did not open (see `player::decoder`).
+# It is already in the graph as a rodio dependency. To the symphonia-all formats we add the
+# `ogg` container (symphonia-format-ogg), without which the `.ogg` files served by the backend did not open.
+symphonia = { version = "0.6", default-features = false, features = ["aac", "flac", "isomp4", "mp3", "vorbis", "ogg", "wav", "pcm", "adpcm"] }
+# HTTP to the backend and storage: TLS with rustls, no dependency on the system OpenSSL.
+# `AppError` translates its errors without keeping their text (it may contain a signed URL).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Asynchronous writing of configuration and downloads, stream buffer. `net`: the Clerk sign-in
+# receives the OAuth code on a loopback port (127.0.0.1). `rt`, `sync` and `macros`: the jam runs
+# on its own runtime, with a command channel and `select!` on the socket; the core host uses the
+# same for commands, snapshots (`watch`) and timers. `rt-multi-thread`: the core's own runtime
+# for frontends without tokio (`RuntimeChoice::Own`); Iced already builds it.
+tokio = { version = "1", features = ["time", "fs", "io-util", "net", "rt", "rt-multi-thread", "sync", "macros"] }
+# Jam: the WebSocket client towards the backend. Same tungstenite version that axum uses on the
+# backend; TLS with rustls and the Mozilla roots (`wss://` in production), like reqwest.
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+# `SinkExt` and `StreamExt` to read and write on the jam socket; `Stream` and the combinators for the
+# neutral stream of media controls (`media::events`).
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# `rc`: the queue lives in `config.json` as `Arc<Queue>`, the same `Arc` as the playback domain's
+# view (no copy on every save). It adds no crate: it is a serde feature.
+serde = { version = "1", features = ["derive", "rc"] }
+# Backend responses, `config.json`, jam messages and Discord (IPC) messages are JSON.
+serde_json = "1"
+thiserror = "2"
+# The user's configuration and download directories on Windows and Linux.
+dirs = "7"
+# Catalog identifiers: an invalid id never ends up in a URL path.
+uuid = { version = "1", features = ["v4", "serde"] }
+# Clerk sign-in (OAuth 2.0 + PKCE): SHA-256 for the code challenge, system random bytes for
+# verifier and state, opening the login page in the default browser (xdg-open, ShellExecute).
+# `sha2` also serves downloads (step 4.6): the SHA-256 of each downloaded track is computed while the file
+# is written (`api/client.rs`, `fetch_into`) and re-read for the deep check (`offline.rs`). No new
+# dependency: the crate was already in Cargo.lock; `open` also opens the downloads folder.
+sha2 = "0.11"
+getrandom = "0.4"
+open = "5"
+
+# D-Bus in pure Rust (no libdbus to install), Linux only: the system media controls
+# (MPRIS in `media`: media keys, desktop widgets, headphones) and the reduced motion asked by the
+# system (`system_motion`: the settings portal and power-profiles-daemon). The MPRIS service is
+# ours since QA 1: souvlaki 0.8, which did it before with this same zbus, polled its channel
+# every 10 ms and woke the process 100 times a second even when idle (docs/PERFORMANCE.md, "QA 1").
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "3"
+
+[dev-dependencies]
+# `test-util`: the host tests pause tokio's clock (`start_paused`) and let fake seconds pass
+# in an instant. Same crate and version as the dependencies.
+tokio = { version = "1", features = ["macros", "rt", "test-util"] }
+
+[features]
+default = []
+# The API side of video clips (`ApiClient::video_url`, `AppError::Video`). The GStreamer pipeline stays
+# in the frontend: the client's `video` feature switches it on.
+video = []
+# Helpers for frontend tests (the synchronous `LocalCore` core, detached audio output, test
+# tracks): only the client's `dev-dependencies` switch it on, never a real build.
+test-support = []
+
+[lints]
+workspace = true

@@ -1,4 +1,4 @@
-//! Barra superiore (56px) sul nero: marchio, Home e ricerca al centro, account e i tre controlli
+//! Barra superiore (40 dp) sul chrome: marchio, Home e ricerca al centro, account e i tre controlli
 //! della finestra a destra. Il resto della barra trascina la finestra (doppio clic: ingrandisce).
 
 use iced::widget::{Space, button, container, mouse_area, row, text, text_input};
@@ -10,7 +10,8 @@ use super::theme;
 use crate::app::{Account, App, Message, SEARCH_INPUT, Screen};
 
 const SEARCH_WIDTH: f32 = 440.0;
-const ROUND: f32 = 40.0;
+/// Lato dei pulsanti quadrati della barra: l'altezza dei controlli.
+const ROUND: f32 = theme::CONTROL_HEIGHT;
 
 /// Il campo di ricerca: sul desktop sta nella barra, sul telefono in cima alla pagina Cerca.
 /// `hint`: a campo vuoto ricorda la scorciatoia Ctrl F (solo dove c'è una tastiera).
@@ -22,7 +23,7 @@ pub fn search_field(app: &App, width: impl Into<Length>, hint: bool) -> Element<
         .padding([8, 0])
         .style(bare_input);
     let clear: Element<'_, Message> = if !app.search.query.is_empty() {
-        button(icon(Icon::Close, 14.0, theme::MUTED))
+        button(icon(Icon::Close, 0.0, theme::MUTED))
             .padding(4)
             .style(theme::icon_plain)
             .on_press(Message::SearchInput(String::new()))
@@ -34,7 +35,7 @@ pub fn search_field(app: &App, width: impl Into<Length>, hint: bool) -> Element<
     };
     let searching = app.screen == Screen::Search;
     container(
-        row![icon(if searching { Icon::SearchFill } else { Icon::Search }, 18.0, theme::MUTED), input, clear]
+        row![icon(if searching { Icon::SearchFill } else { Icon::Search }, 0.0, theme::MUTED), input, clear]
             .spacing(12)
             .align_y(Alignment::Center),
     )
@@ -48,16 +49,19 @@ pub fn search_field(app: &App, width: impl Into<Length>, hint: bool) -> Element<
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let brand = container(
-        row![mark(24.0), text("Psytify").size(theme::FS_SECTION).font(theme::FONT_SEMIBOLD)]
-            .spacing(10)
-            .align_y(Alignment::Center),
+        row![
+            mark(app.playback.is_playing()),
+            text("Psytify").size(theme::FS_PAGE).font(theme::FONT_SEMIBOLD)
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center),
     )
     .width(theme::SIDEBAR_WIDTH + theme::OUTER_GAP)
     .padding([0, 16]);
 
     let on_home = app.screen == Screen::Home;
     let home = button(
-        container(icon(if on_home { Icon::HomeFill } else { Icon::Home }, 20.0, theme::TEXT))
+        container(icon(if on_home { Icon::HomeFill } else { Icon::Home }, 0.0, theme::TEXT))
             .center(Length::Fill),
     )
     .width(ROUND)
@@ -95,6 +99,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     ]
     .height(theme::TOP_BAR_HEIGHT)
     .align_y(Alignment::Center);
+    let bar = container(bar).style(theme::panel_box);
     // Ciò che non è un pulsante trascina la finestra.
     mouse_area(bar).on_press(Message::TitleBarPressed).into()
 }
@@ -118,9 +123,9 @@ pub(super) fn window_controls(app: &App) -> Element<'_, Message> {
 }
 
 fn control(glyph: Icon, message: Message, close: bool) -> Element<'static, Message> {
-    button(container(icon(glyph, 14.0, theme::TEXT)).center(Length::Fill))
+    button(container(icon(glyph, 0.0, theme::TEXT)).center(Length::Fill))
         .width(40)
-        .height(32)
+        .height(ROUND)
         .padding(0)
         .style(theme::window_control(close))
         .on_press(message)
@@ -130,7 +135,7 @@ fn control(glyph: Icon, message: Message, close: bool) -> Element<'static, Messa
 /// L'account: accedere se si è ospiti, altrimenti il proprio avatar, che apre il profilo (o le
 /// impostazioni, finché non c'è un nome utente). Senza login configurato non si mostra nulla.
 fn account(app: &App) -> Element<'_, Message> {
-    match &app.account {
+    match &app.social.view.account {
         Account::Unavailable => Space::with_width(0.0).into(),
         Account::SignedOut => primary_button("Accedi", None, Message::SignIn),
         Account::Working => muted("Accesso in corso…").into(),
@@ -148,7 +153,7 @@ fn account(app: &App) -> Element<'_, Message> {
                     ),
                     Message::OpenProfile(profile.handle.clone()),
                 ),
-                None => (icon(Icon::Account, 18.0, theme::TEXT).into(), Message::Navigate(Screen::Settings)),
+                None => (icon(Icon::Account, 0.0, theme::TEXT), Message::Navigate(Screen::Settings)),
             };
             button(container(face).center(Length::Fill))
                 .width(ROUND)
@@ -161,7 +166,7 @@ fn account(app: &App) -> Element<'_, Message> {
     }
 }
 
-/// Il campo vive dentro la pillola: niente fondo né bordo propri.
+/// Il campo vive dentro il riquadro della ricerca: niente fondo né bordo propri.
 fn bare_input(theme_: &Theme, status: text_input::Status) -> text_input::Style {
     text_input::Style {
         background: iced::Background::Color(iced::Color::TRANSPARENT),

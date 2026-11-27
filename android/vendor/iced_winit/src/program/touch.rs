@@ -18,7 +18,29 @@ use crate::core::{Event, Point, Vector};
 /// Quanto può muoversi il dito prima che il tocco diventi un trascinamento (in px logici).
 const SLOP: f32 = 8.0;
 /// Dopo quanto un dito fermo diventa una pressione lunga.
-const LONG_PRESS: Duration = Duration::from_millis(480);
+///
+/// 500 ms: più dei 450 ms del riconoscitore del client (`client/src/ui/gesture`), così la pressione
+/// lunga di una maniglia di riordino scatta prima e il clic destro di qui viene mangiato.
+const LONG_PRESS: Duration = Duration::from_millis(500);
+/// Quanto lo spostamento orizzontale deve superare il verticale perché l'asse sia orizzontale: una
+/// diagonale scorre la pagina. Va tenuto uguale a `HORIZONTAL_BIAS` in
+/// `client/src/ui/gesture/recognizer.rs`, che decide lo stesso gesto per le righe trascinabili.
+const HORIZONTAL_BIAS: f32 = 1.25;
+
+/// I segnali del dito per i widget del client (`client/src/ui/gesture/tracker.rs`): pulsanti del
+/// mouse con un codice che nessun mouse ha, ignorati dai widget di Iced.
+pub const TOUCH_DOWN: u16 = 0xF7D0;
+pub const TOUCH_UP: u16 = 0xF7D1;
+pub const TOUCH_CANCEL: u16 = 0xF7D2;
+
+fn marker(pressed: bool, code: u16) -> Event {
+    let button = mouse::Button::Other(code);
+    Event::Mouse(if pressed {
+        mouse::Event::ButtonPressed(button)
+    } else {
+        mouse::Event::ButtonReleased(button)
+    })
+}
 /// Sotto questa velocità (px/s) il rilascio non lancia la lista.
 const MIN_FLING: f32 = 120.0;
 /// Il lancio più veloce (px/s).
@@ -75,6 +97,31 @@ impl Gestures {
     ) -> Vec<Event> {
         use winit::event::TouchPhase;
 
+        let tracked = self.finger.as_ref().is_some_and(|f| f.id == id);
+        let any = self.finger.is_some();
+        let mut events = self.translate(phase, id, position);
+        // Il segnale della fine va dopo il clic sintetico: i widget del client lo usano per chiudere il
+        // gesto e ignorano il clic nel mezzo.
+        match phase {
+            TouchPhase::Ended if tracked => {
+                events.push(marker(false, TOUCH_UP));
+            }
+            TouchPhase::Cancelled if any => {
+                events.push(marker(false, TOUCH_CANCEL));
+            }
+            _ => {}
+        }
+        events
+    }
+
+    fn translate(
+        &mut self,
+        phase: winit::event::TouchPhase,
+        id: u64,
+        position: Point,
+    ) -> Vec<Event> {
+        use winit::event::TouchPhase;
+
         let now = Instant::now();
         match phase {
             TouchPhase::Started => {
@@ -95,7 +142,10 @@ impl Gestures {
                     long_pressed: false,
                     stopped_fling,
                 });
-                vec![Event::Mouse(mouse::Event::CursorMoved { position })]
+                vec![
+                    Event::Mouse(mouse::Event::CursorMoved { position }),
+                    marker(true, TOUCH_DOWN),
+                ]
             }
             TouchPhase::Moved => {
                 let Some(finger) = self.finger.as_mut().filter(|f| f.id == id)
@@ -117,9 +167,15 @@ impl Gestures {
                         if finger.long_pressed
                             || moved.x.hypot(moved.y) < SLOP
                         {
-                            return Vec::new();
+                            // Il cursore segue comunque il dito: i widget del client leggono il
+                            // gesto dai suoi passi, anche sotto la soglia o dopo la pressione lunga.
+                            return vec![Event::Mouse(
+                                mouse::Event::CursorMoved { position },
+                            )];
                         }
-                        let axis = if moved.x.abs() > moved.y.abs() {
+                        let axis = if moved.x.abs()
+                            > moved.y.abs() * HORIZONTAL_BIAS
+                        {
                             Axis::Horizontal
                         } else {
                             Axis::Vertical
@@ -266,6 +322,69 @@ mod tests {
         let events = g.touch(TouchPhase::Moved, 1, p(13.0, 60.0));
         assert!(events.contains(&wheel(Vector::new(0.0, -40.0))));
         std::thread::sleep(Duration::from_millis(100));
-        assert!(g.touch(TouchPhase::Ended, 1, p(13.0, 60.0)).is_empty());
+        let ended = g.touch(TouchPhase::Ended, 1, p(13.0, 60.0));
+        assert!(!ended.contains(&Event::Mouse(mouse::Event::ButtonReleased(
+            mouse::Button::Left
+        ))));
+    }
+
+    fn is_marker(event: &Event, code: u16) -> bool {
+        matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Other(c)))
+                | Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Other(c)))
+                if *c == code
+        )
+    }
+
+    #[test]
+    fn a_touch_is_announced_with_down_and_up_markers_after_the_click() {
+        let mut g = Gestures::default();
+        let started = g.touch(TouchPhase::Started, 1, p(10.0, 10.0));
+        assert!(is_marker(started.last().unwrap(), TOUCH_DOWN));
+        let ended = g.touch(TouchPhase::Ended, 1, p(10.0, 10.0));
+        assert!(is_marker(ended.last().unwrap(), TOUCH_UP));
+        assert!(ended.contains(&Event::Mouse(mouse::Event::ButtonReleased(
+            mouse::Button::Left
+        ))));
+    }
+
+    #[test]
+    fn a_cancelled_touch_sends_the_cancel_marker_only_if_one_was_down() {
+        let mut g = Gestures::default();
+        assert!(g.touch(TouchPhase::Cancelled, 1, p(0.0, 0.0)).is_empty());
+        let _ = g.touch(TouchPhase::Started, 1, p(10.0, 10.0));
+        let events = g.touch(TouchPhase::Cancelled, 1, p(10.0, 10.0));
+        assert!(is_marker(events.last().unwrap(), TOUCH_CANCEL));
+    }
+
+    #[test]
+    fn small_moves_still_move_the_cursor_for_the_client_gestures() {
+        let mut g = Gestures::default();
+        let _ = g.touch(TouchPhase::Started, 1, p(10.0, 10.0));
+        let events = g.touch(TouchPhase::Moved, 1, p(12.0, 11.0));
+        assert_eq!(
+            events,
+            vec![Event::Mouse(mouse::Event::CursorMoved {
+                position: p(12.0, 11.0)
+            })]
+        );
+    }
+
+    #[test]
+    fn a_diagonal_drag_scrolls_vertically() {
+        let mut g = Gestures::default();
+        let _ = g.touch(TouchPhase::Started, 1, p(10.0, 100.0));
+        // 12 contro 10: non supera 1,25 volte, quindi verticale.
+        let events = g.touch(TouchPhase::Moved, 1, p(22.0, 90.0));
+        assert!(events.contains(&wheel(Vector::new(0.0, -10.0))));
+    }
+
+    #[test]
+    fn a_second_finger_sends_nothing() {
+        let mut g = Gestures::default();
+        let _ = g.touch(TouchPhase::Started, 1, p(10.0, 10.0));
+        assert!(g.touch(TouchPhase::Started, 2, p(50.0, 50.0)).is_empty());
+        assert!(g.touch(TouchPhase::Ended, 2, p(50.0, 50.0)).is_empty());
     }
 }

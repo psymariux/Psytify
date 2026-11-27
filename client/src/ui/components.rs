@@ -1,7 +1,6 @@
 //! Componenti condivisi: testi, pulsanti, righe di brani, tessere, scheletri e stati vuoti.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, stack, text, tooltip};
 use iced::{Alignment, Color, Element, Font, Length, Padding, alignment};
@@ -15,6 +14,7 @@ use crate::api::{AlbumSummary, ArtistSummary, Track};
 use crate::app::{App, Hovered, Load, MenuTarget, Message, Screen, TrackSource};
 use crate::error::AppError;
 use crate::player::seek::format_time;
+use psytify_core::snapshot::ItemState;
 
 // ---------- Testi ----------
 
@@ -76,8 +76,10 @@ pub struct Line {
 
 pub const TITLE_LINE: Line =
     Line { size: theme::FS_BODY, font: theme::FONT_MEDIUM, color: Some(theme::TEXT) };
+/// Il titolo del brano in corso: bianco come gli altri, in semigrasseto. Il lime è dell'equalizzatore
+/// accanto, mai del testo.
 pub const PLAYING_LINE: Line =
-    Line { size: theme::FS_BODY, font: theme::FONT_MEDIUM, color: Some(theme::ACCENT) };
+    Line { size: theme::FS_BODY, font: theme::FONT_SEMIBOLD, color: Some(theme::TEXT) };
 pub const BODY_LINE: Line = Line { size: theme::FS_BODY, font: theme::FONT, color: Some(theme::TEXT) };
 pub const MUTED_LINE: Line = Line { size: theme::FS_BODY, font: theme::FONT, color: Some(theme::MUTED) };
 pub const SUB_LINE: Line = Line { size: theme::FS_SMALL, font: theme::FONT, color: Some(theme::MUTED) };
@@ -222,26 +224,45 @@ pub fn icon_button<'a>(
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     let tint = if on { theme::TEXT } else { theme::MUTED };
-    let control =
-        button(icon(glyph, 18.0, tint)).padding(8).style(theme::icon_button(on)).on_press_maybe(on_press);
+    let face: Element<'a, Message> = if crate::app::is_phone() {
+        container(icon(glyph, 0.0, tint)).center(Length::Fill).into()
+    } else {
+        icon(glyph, 0.0, tint)
+    };
+    let control = touch_sized(button(face)).padding(4).style(theme::icon_button(on)).on_press_maybe(on_press);
     tooltip(control, tip(label), tooltip::Position::Top).gap(4).into()
 }
 
-/// Come `icon_button`, ma acceso col verde del marchio: casuale e ripeti quando sono attivi.
+/// Sul telefono un pulsante a icona è un bersaglio di tocco pieno (`theme::TOUCH_TARGET`), non i 32
+/// dp del mouse; l'icona resta quella e sta al centro.
+fn touch_sized<'a>(control: iced::widget::Button<'a, Message>) -> iced::widget::Button<'a, Message> {
+    if crate::app::is_phone() {
+        control.width(theme::TOUCH_TARGET).height(theme::TOUCH_TARGET)
+    } else {
+        control
+    }
+}
+
+/// Larghezza di un pulsante a icona: sul telefono il bersaglio di tocco.
+pub fn icon_button_side() -> f32 {
+    if crate::app::is_phone() { theme::TOUCH_TARGET } else { ICON_BUTTON }
+}
+
+/// Come `icon_button`, ma acceso col lime di stato: casuale e ripeti quando sono attivi.
 pub fn toggle_button<'a>(
     glyph: Icon,
     label: &'a str,
     on: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    let tint = if on { theme::ACCENT } else { theme::MUTED };
+    let tint = if on { theme::LIME } else { theme::MUTED };
     let control =
-        button(icon(glyph, 18.0, tint)).padding(8).style(theme::icon_button(on)).on_press_maybe(on_press);
+        button(icon(glyph, 0.0, tint)).padding(4).style(theme::icon_button(on)).on_press_maybe(on_press);
     tooltip(control, tip(label), tooltip::Position::Top).gap(4).into()
 }
 
-/// Larghezza occupata da `icon_button`: icona 18 + padding 8 per lato.
-pub const ICON_BUTTON: f32 = 34.0;
+/// Larghezza occupata da `icon_button`: icona di 12 AP e padding 4 per lato.
+pub const ICON_BUTTON: f32 = 32.0;
 
 /// Riga del titolo di una pagina: il nome (h1), sotto una riga sui dati, a destra le azioni.
 pub fn page_header<'a>(
@@ -257,8 +278,8 @@ pub fn page_header<'a>(
     header.into()
 }
 
-/// Lato del grande Play tondo di una pagina.
-const PLAY_FAB: f32 = 56.0;
+/// Lato del grande Play di una pagina (pulsante primario quadrato).
+const PLAY_FAB: f32 = crate::ui::theme::FIELD_HEIGHT;
 /// Lato della copertina nella testa di una pagina.
 pub const HERO_COVER: f32 = 188.0;
 /// Spazio minimo per il titolo accanto alla copertina della testa; sotto, la testa si impila.
@@ -266,9 +287,9 @@ const HERO_TEXT_MIN: f32 = 280.0;
 pub const HERO_LINE: Line =
     Line { size: theme::FS_HERO, font: theme::FONT_SEMIBOLD, color: Some(theme::TEXT) };
 
-/// Il grande Play verde di una pagina: avvia `play`.
+/// Il grande Play di una pagina: avvia `play`.
 fn play_fab<'a>(play: Message) -> Element<'a, Message> {
-    let fab = button(container(icon(Icon::Play, 22.0, theme::ON_PRIMARY)).center(Length::Fill))
+    let fab = button(container(icon(Icon::Play, 0.0, theme::ON_PRIMARY)).center(Length::Fill))
         .width(PLAY_FAB)
         .height(PLAY_FAB)
         .padding(0)
@@ -277,7 +298,7 @@ fn play_fab<'a>(play: Message) -> Element<'a, Message> {
     tooltip(fab, tip("Riproduci"), tooltip::Position::Top).gap(4).into()
 }
 
-/// Riproduci (tondo, verde) e Casuale: il lavoro più frequente della pagina, a un clic.
+/// Riproduci (primario) e Casuale: il lavoro più frequente della pagina, a un clic.
 pub fn play_controls<'a>(play: Message, shuffle: Message) -> Element<'a, Message> {
     row![play_fab(play), icon_button(Icon::Shuffle, "Riproduci in ordine casuale", false, Some(shuffle))]
         .spacing(8)
@@ -313,13 +334,13 @@ pub fn play_bar<'a>(
         if downloadable > 0 || phone {
             let label =
                 if downloadable == tracks.len() { "Scarica tutto" } else { "Scarica i brani disponibili" };
-            bar = bar.push(match app.download_progress() {
+            bar = bar.push(match app.downloads.batch_progress() {
                 // Mentre il lotto scarica, al posto dell'icona c'è il conteggio.
                 Some((done, total)) => container(
                     text(format!("{done}/{total}"))
                         .size(theme::FS_SMALL)
                         .font(theme::FONT_MEDIUM)
-                        .color(theme::ACCENT),
+                        .color(theme::TEXT),
                 )
                 .height(ICON_BUTTON)
                 .padding([0, 6])
@@ -340,7 +361,7 @@ pub fn play_bar<'a>(
     bar.into()
 }
 
-/// La testa di una pagina: copertina grande con l'ombra, genere, titolo enorme e riga dei dati.
+/// La testa di una pagina: copertina grande, piatta, genere, titolo enorme e riga dei dati.
 pub fn hero<'a>(
     art: Element<'a, Message>,
     kicker: &'a str,
@@ -359,7 +380,7 @@ pub fn hero<'a>(
         }
         let size = if crate::app::is_phone() { theme::FS_PHONE_TITLE } else { theme::FS_PAGE };
         return column![
-            container(container(art).style(theme::lifted)).center_x(Length::Fill),
+            container(art).center_x(Length::Fill),
             heading
                 .push(text(title.to_owned()).size(size).font(theme::FONT_SEMIBOLD).color(theme::TEXT))
                 .push(line(meta, width, SUB_LINE)),
@@ -369,7 +390,7 @@ pub fn hero<'a>(
     }
     let text_width = (width - HERO_COVER - 24.0).max(200.0);
     row![
-        container(art).style(theme::lifted),
+        art,
         column![
             text(kicker).size(theme::FS_SMALL).font(theme::FONT_SEMIBOLD).color(theme::TEXT),
             line(title, text_width, HERO_LINE),
@@ -389,7 +410,7 @@ pub(super) fn tip<'a>(label: &'a str) -> Element<'a, Message> {
 
 /// Filtro a pillola con il suo conteggio: "Album 12".
 pub fn pill<'a>(label: &'a str, count: String, selected: bool, on_press: Message) -> Element<'a, Message> {
-    let count_color = if selected { theme::CONTROL } else { theme::FAINT };
+    let count_color = if selected { theme::ON_PRIMARY } else { theme::FAINT };
     button(centered(
         row![
             text(label).size(theme::FS_BODY).font(theme::FONT_MEDIUM),
@@ -407,7 +428,7 @@ pub fn pill<'a>(label: &'a str, count: String, selected: bool, on_press: Message
 
 /// Linea sottile tra gruppi di voci di un menu, con un po' d'aria sopra e sotto.
 pub fn divider_line<'a>() -> Element<'a, Message> {
-    container(container(Space::new(Length::Fill, Length::Fixed(1.0))).style(theme::bar(theme::HOVER, 0.0)))
+    container(container(Space::new(Length::Fill, Length::Fixed(theme::AP))).style(theme::bar(theme::LINE)))
         .padding([4, 6])
         .into()
 }
@@ -463,7 +484,7 @@ pub fn skeleton_tiles<'a>(count: usize) -> Element<'a, Message> {
 pub fn error_block<'a>(what: &'a str, err: &AppError) -> Element<'a, Message> {
     container(
         row![
-            container(icon(Icon::Close, 14.0, theme::NEGATIVE)).padding(4),
+            container(icon(Icon::Close, 0.0, theme::ERROR)).padding(4),
             column![body(format!("Impossibile caricare {what}.")), small(err.to_string())]
                 .spacing(2)
                 .width(Length::Fill),
@@ -538,6 +559,18 @@ pub fn total_label(ms: u64) -> String {
     }
 }
 
+/// Un peso in parole: «126,4 MB» (multipli di mille, una cifra decimale).
+pub fn size_label(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "kB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1000.0 && unit + 1 < UNITS.len() {
+        value /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 { format!("{bytes} B") } else { format!("{value:.1} {}", UNITS[unit]).replace('.', ",") }
+}
+
 pub fn count_label(n: usize) -> String {
     if n == 1 { "1 brano".into() } else { format!("{n} brani") }
 }
@@ -565,16 +598,19 @@ const NUMBER_WIDTH: f32 = 28.0;
 const DURATION_WIDTH: f32 = 56.0;
 const ROW_PADDING: f32 = 12.0;
 const CELL_GAP: f32 = 16.0;
-pub const TILE_COVER: f32 = 148.0;
+pub const TILE_COVER: f32 = psytify_design::tokens::size::cover::COVER_M;
 /// Sotto questa larghezza per titolo e album, la colonna Album entra nella seconda riga: un album
 /// tagliato a otto lettere non dice niente.
 const ALBUM_COLUMN_MIN: f32 = 520.0;
 /// Sotto questa larghezza la tabella diventa una lista da telefono: niente intestazione né
 /// durata, solo cuore e «altro» a destra, così al titolo resta lo spazio.
 const COMPACT_TABLE_BELOW: f32 = 480.0;
-const COMPACT_ACTIONS_WIDTH: f32 = 2.0 * ICON_BUTTON + 2.0;
+/// Larghezza delle azioni di una riga stretta: cuore e altro, bersagli da dito sul telefono.
+fn compact_actions_width() -> f32 {
+    2.0 * icon_button_side() + 2.0
+}
 /// Lato del tasto Play che spunta sulla copertina.
-pub(super) const FAB: f32 = 44.0;
+pub(super) const FAB: f32 = psytify_design::tokens::size::CONTROL_H_LARGE;
 
 /// Da dove viene una lista di brani: cambia le voci del menu contestuale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -628,58 +664,43 @@ pub fn hoverable<'a>(
     }
 }
 
-/// Il cuore di "mi piace": pieno e verde se piace, vuoto se no. Appena premuto fa un rimbalzo.
-/// Se non piace compare solo con `visible` (il mouse è sulla riga).
+/// Il cuore di "mi piace": pieno e bianco se piace (come ovunque: il lime non è del cuore), vuoto e
+/// grigio se no. Se non piace compare solo con `visible` (il mouse è sulla riga).
 pub fn heart<'a>(app: &App, track: &Track, visible: bool) -> Element<'a, Message> {
     let liked = app.is_liked(track.id);
     if !liked && !visible {
-        return Space::with_width(Length::Fixed(ICON_BUTTON)).into();
+        return Space::with_width(Length::Fixed(icon_button_side())).into();
     }
-    let pop = match app.like_pop {
-        Some((id, since)) if id == track.id => motion::pop(since, theme::MOTION_PANEL),
-        _ => 0.0,
-    };
     let (glyph, tint, label) = if liked {
-        (Icon::HeartFill, theme::ACCENT, "Non mi piace più")
+        (Icon::HeartFill, theme::ICON_ACTIVE, "Non mi piace più")
     } else {
         (Icon::Heart, theme::MUTED, "Mi piace")
     };
-    let face = container(icon(glyph, 18.0 * (1.0 + 0.45 * pop), tint)).center(Length::Fill);
+    let face = container(icon(glyph, 0.0, tint)).center(Length::Fill);
     let control = button(face)
-        .width(ICON_BUTTON)
-        .height(ICON_BUTTON)
+        .width(icon_button_side())
+        .height(icon_button_side())
         .padding(0)
         .style(theme::icon_button(liked))
         .on_press(Message::ToggleLike(track.clone()));
     tooltip(control, tip(label), tooltip::Position::Top).gap(4).into()
 }
 
-/// Barre dell'equalizzatore: salgono e scendono mentre il brano suona, ferme in pausa.
-pub fn playing_bars<'a>(color: Color, moving: bool) -> Element<'a, Message> {
-    const MAX: f32 = 14.0;
-    let bars = (0..3).map(|lane| {
-        let level = if moving { motion::wave(lane, Duration::from_millis(820)) } else { 0.25 };
-        container(Space::new(Length::Fixed(3.0), Length::Fixed(3.0 + (MAX - 3.0) * level)))
-            .style(theme::bar(color, 1.5))
-            .into()
-    });
-    container(row(bars).spacing(2).align_y(Alignment::End))
-        .height(MAX)
-        .align_y(alignment::Vertical::Bottom)
-        .into()
+/// L'equalizzatore (sprite `eq`): lime e in movimento mentre il brano suona, `eq_rest` grigio in
+/// pausa. Il frame lo sceglie l'orologio a ogni disegno: avanza al ritmo del Tick, senza timer suoi.
+pub fn playing_bars<'a>(moving: bool) -> Element<'a, Message> {
+    if moving {
+        let frame = super::icons::frame_now(psytify_design::sprite::EQ);
+        super::icons::sprite_image(psytify_design::sprite::EQ, frame, Some(theme::LIME), 1)
+    } else {
+        super::icons::sprite_image(psytify_design::sprite::EQ_REST, 0, Some(theme::DISABLED), 1)
+    }
 }
 
 /// Azioni a destra di una riga: mi piace, scarica (solo se il brano lo consente) e altro. A
 /// riposo restano solo il cuore di chi piace e lo stato di un download in corso.
 fn row_actions<'a>(app: &App, track: &Track, source: TrackSource, hot: bool) -> Element<'a, Message> {
-    let download: Element<'a, Message> = if app.downloading.contains(&track.id) {
-        container(small("…")).width(ICON_BUTTON).align_x(alignment::Horizontal::Center).into()
-    } else if track.downloadable && hot {
-        icon_button(Icon::Download, "Scarica", false, Some(Message::Download(track.clone())))
-    } else {
-        // Nascosto, non disabilitato: lo spazio resta per allineare le colonne.
-        Space::with_width(Length::Fixed(ICON_BUTTON)).into()
-    };
+    let download = download_slot(app, track, hot);
     let more: Element<'a, Message> = if hot {
         let target = MenuTarget::track(track, source);
         icon_button(Icon::More, "Altre azioni", false, Some(Message::OpenMenu(target)))
@@ -687,6 +708,97 @@ fn row_actions<'a>(app: &App, track: &Track, source: TrackSource, hot: bool) -> 
         Space::with_width(Length::Fixed(ICON_BUTTON)).into()
     };
     row![heart(app, track, hot), download, more].spacing(2).width(Length::Fixed(ACTIONS_WIDTH)).into()
+}
+
+/// Un tasto a icona con la tinta di uno stato (il marcatore dei download: errore, attivo, in coda),
+/// col suo nome nel suggerimento. Senza `on_press` è solo un segno.
+pub fn status_icon<'a>(
+    glyph: Icon,
+    tint: iced::Color,
+    label: &'a str,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    let face: Element<'a, Message> = if crate::app::is_phone() {
+        container(icon(glyph, 0.0, tint)).center(Length::Fill).into()
+    } else {
+        icon(glyph, 0.0, tint)
+    };
+    let control =
+        touch_sized(button(face)).padding(4).style(theme::icon_button(false)).on_press_maybe(on_press);
+    tooltip(control, tip(label), tooltip::Position::Top).gap(4).into()
+}
+
+/// Lo stato di un brano nei download, nella cella di una riga larga (componenti, §19): scaricabile =
+/// il tasto, solo al passaggio del mouse; in coda, in corso (la percentuale), scaricato (sempre
+/// visibile, mai lime), da rifare (tinta d'errore). Un brano che non si può scaricare non disegna
+/// niente ma tiene lo spazio.
+fn download_slot<'a>(app: &App, track: &Track, hot: bool) -> Element<'a, Message> {
+    let downloads = &app.downloads;
+    if let Some(item) = downloads.item(track.id) {
+        return match &item.state {
+            ItemState::Failed(_) => {
+                status_icon(Icon::Download, theme::ERROR, "Riprova", Some(Message::DownloadRetry(track.id)))
+            }
+            ItemState::Queued => status_icon(Icon::Download, theme::DISABLED, "In coda", None),
+            ItemState::Preparing => status_icon(Icon::Download, theme::ICON_ACTIVE, "In preparazione", None),
+            ItemState::Downloading { .. } => {
+                let label = item.percent().map_or_else(|| "…".to_owned(), |percent| format!("{percent}%"));
+                container(small(label)).width(ICON_BUTTON).align_x(alignment::Horizontal::Center).into()
+            }
+        };
+    }
+    if downloads.is_saved(track.id) {
+        return if downloads.lost_reason(track.id).is_some() {
+            status_icon(
+                Icon::Download,
+                theme::ERROR,
+                "File mancante: scarica di nuovo",
+                Some(Message::Download(track.clone())),
+            )
+        } else {
+            status_icon(Icon::Downloaded, theme::ICON_ACTIVE, "Scaricato", None)
+        };
+    }
+    if track.downloadable && hot {
+        icon_button(Icon::Download, "Scarica", false, Some(Message::Download(track.clone())))
+    } else {
+        // Nascosto, non disabilitato: lo spazio resta per allineare le colonne.
+        Space::with_width(Length::Fixed(ICON_BUTTON)).into()
+    }
+}
+
+/// Il segno «sul dispositivo» di una riga stretta (telefono): l'icona senza tasto, solo per i brani
+/// dell'indice; `None` per gli altri, che non perdono spazio.
+fn compact_mark<'a>(app: &App, track: &Track) -> Option<Element<'a, Message>> {
+    let downloads = &app.downloads;
+    downloads.is_saved(track.id).then(|| {
+        let lost = downloads.lost_reason(track.id).is_some();
+        let (glyph, tint) =
+            if lost { (Icon::Download, theme::ERROR) } else { (Icon::Downloaded, theme::ICON_ACTIVE) };
+        container(icon(glyph, 0.0, tint)).width(theme::MARK_SLOT).into()
+    })
+}
+
+/// Lo spazio che il segno toglie al testo di una riga stretta.
+fn mark_loss(app: &App, track: &Track) -> f32 {
+    if app.downloads.is_saved(track.id) { theme::MARK_SLOT + CELL_GAP } else { 0.0 }
+}
+
+/// Quanti dei dieci scatti sono raggiunti: uno ogni dieci punti, mai più di dieci.
+fn steps_reached(percent: Option<u8>) -> usize {
+    percent.map_or(0, |percent| usize::from(percent.min(100)) / 10)
+}
+
+/// La barra di avanzamento a dieci scatti: quelli raggiunti in bianco di stato (mai lime), gli altri nel
+/// campo scuro. Senza percentuale (in coda, in preparazione) è tutta spenta.
+pub fn step_bar<'a>(percent: Option<u8>) -> Element<'a, Message> {
+    let reached = steps_reached(percent);
+    row((0..10).map(|step| {
+        let tint = if step < reached { theme::ICON_ACTIVE } else { theme::SELECTED };
+        container(Space::new(theme::STEP_W, theme::STEP_H)).style(theme::bar(tint)).into()
+    }))
+    .spacing(theme::STEP_GAP)
+    .into()
 }
 
 /// Azioni di una riga stretta: cuore e altro. Sul telefono non c'è il passaggio del mouse, quindi
@@ -699,7 +811,7 @@ fn compact_actions<'a>(app: &App, track: &Track, source: TrackSource, hot: bool)
     } else {
         Space::with_width(Length::Fixed(ICON_BUTTON)).into()
     };
-    row![heart(app, track, visible), more].spacing(2).width(Length::Fixed(COMPACT_ACTIONS_WIDTH)).into()
+    row![heart(app, track, visible), more].spacing(2).width(Length::Fixed(compact_actions_width())).into()
 }
 
 /// La cella del numero: il numero, e al passaggio del mouse Play; sul brano in corso le barre.
@@ -713,9 +825,9 @@ fn number_cell<'a>(
     let content: Element<'a, Message> = match (playing, hot) {
         (_, true) => {
             let glyph = if playing && app.playback.is_playing() { Icon::Pause } else { Icon::Play };
-            icon(glyph, 14.0, theme::TEXT).into()
+            icon(glyph, 0.0, theme::TEXT)
         }
-        (true, false) => playing_bars(theme::ACCENT, app.playback.is_playing()),
+        (true, false) => playing_bars(app.playback.is_playing()),
         (false, false) => text(number).size(theme::FS_SMALL).color(fade(theme::FAINT, progress)).into(),
     };
     container(content).width(NUMBER_WIDTH).align_x(alignment::Horizontal::Right).into()
@@ -771,7 +883,7 @@ pub fn track_table<'a>(
             - 2.0 * ROW_PADDING
             - if numbered { NUMBER_WIDTH + CELL_GAP } else { 0.0 }
             - cover_width
-            - COMPACT_ACTIONS_WIDTH
+            - compact_actions_width()
             - CELL_GAP
     } else {
         width
@@ -814,6 +926,9 @@ pub fn track_table<'a>(
             cells = cells.push(cover(&app.covers, art_of(track), theme::ROW_COVER));
         }
         let title_style = if playing { PLAYING_LINE } else { TITLE_LINE };
+        // Nelle righe strette il segno «sul dispositivo» toglie il suo spazio al testo.
+        let mark = if compact { compact_mark(app, track) } else { None };
+        let title_width = title_width - if compact { mark_loss(app, track) } else { 0.0 };
         cells = cells.push(
             column![
                 line(&track.title, title_width, faded(title_style, progress)),
@@ -838,7 +953,7 @@ pub fn track_table<'a>(
         }
         let source = origin.source(index);
         if compact {
-            cells = cells.push(compact_actions(app, track, source, hot));
+            cells = cells.extend(mark).push(compact_actions(app, track, source, hot));
         } else {
             cells = cells
                 .push(
@@ -858,7 +973,12 @@ pub fn track_table<'a>(
             .padding([0.0, ROW_PADDING])
             .style(theme::row(playing))
             .on_press(row_press(tracks, index, playing));
-        hoverable(track.id, true, Some(MenuTarget::track(track, source)), item.into())
+        super::phone::swipe_track(
+            app,
+            tracks,
+            index,
+            hoverable(track.id, true, Some(MenuTarget::track(track, source)), item.into()),
+        )
     });
     if compact {
         return column(rows).into();
@@ -871,7 +991,7 @@ pub fn track_table<'a>(
 pub fn track_rows<'a>(app: &App, tracks: &Arc<[Track]>, width: f32) -> Element<'a, Message> {
     let compact = width < COMPACT_TABLE_BELOW;
     let text_width = if compact {
-        width - 2.0 * ROW_PADDING - 50.0 - COMPACT_ACTIONS_WIDTH - CELL_GAP * 2.0
+        width - 2.0 * ROW_PADDING - 50.0 - compact_actions_width() - CELL_GAP * 2.0
     } else {
         width - 2.0 * ROW_PADDING - 50.0 - DURATION_WIDTH - ACTIONS_WIDTH - CELL_GAP * 3.0
     };
@@ -885,6 +1005,9 @@ pub fn track_rows<'a>(app: &App, tracks: &Arc<[Track]>, width: f32) -> Element<'
             None => format!("{} · Singolo", track.artist.name),
         };
         let source = TrackSource::Catalogue;
+        // Nelle righe strette il segno «sul dispositivo» toglie il suo spazio al testo.
+        let mark = if compact { compact_mark(app, track) } else { None };
+        let text_width = text_width - if compact { mark_loss(app, track) } else { 0.0 };
         let mut cells = row![
             cover(&app.covers, art_of(track), 50.0),
             column![
@@ -901,7 +1024,7 @@ pub fn track_rows<'a>(app: &App, tracks: &Arc<[Track]>, width: f32) -> Element<'
         .spacing(CELL_GAP)
         .align_y(Alignment::Center);
         cells = if compact {
-            cells.push(compact_actions(app, track, source, hot))
+            cells.extend(mark).push(compact_actions(app, track, source, hot))
         } else {
             cells
                 .push(
@@ -917,7 +1040,12 @@ pub fn track_rows<'a>(app: &App, tracks: &Arc<[Track]>, width: f32) -> Element<'
             .padding(Padding::from([0.0, ROW_PADDING]))
             .style(theme::row(playing))
             .on_press(row_press(tracks, index, playing));
-        hoverable(track.id, true, Some(MenuTarget::track(track, source)), item.into())
+        super::phone::swipe_track(
+            app,
+            tracks,
+            index,
+            hoverable(track.id, true, Some(MenuTarget::track(track, source)), item.into()),
+        )
     }))
     .into()
 }
@@ -987,7 +1115,7 @@ impl<'a> Tile<'a> {
     }
 }
 
-/// La copertina con, al passaggio del mouse, il tasto Play tondo che sale dal basso.
+/// La copertina con, al passaggio del mouse, il tasto Play che compare in dissolvenza.
 fn tile_cover<'a>(app: &App, spec: &Tile<'_>, side: f32) -> Element<'a, Message> {
     let base: Element<'a, Message> = if spec.round {
         cover_round(&app.covers, spec.art, side)
@@ -1012,7 +1140,7 @@ fn tile_cover<'a>(app: &App, spec: &Tile<'_>, side: f32) -> Element<'a, Message>
         );
     }
     if spec.play_badge && progress > 0.0 {
-        let face = container(icon(Icon::Play, 18.0, fade(theme::ON_PRIMARY, progress))).center(FAB);
+        let face = container(icon(Icon::Play, 0.0, fade(theme::ON_PRIMARY, progress))).center(FAB);
         let play: Element<'a, Message> = match &spec.play {
             Some(message) => button(face)
                 .width(FAB)
@@ -1029,7 +1157,7 @@ fn tile_cover<'a>(app: &App, spec: &Tile<'_>, side: f32) -> Element<'a, Message>
                 .height(Length::Fill)
                 .align_x(alignment::Horizontal::Right)
                 .align_y(alignment::Vertical::Bottom)
-                .padding(Padding { right: 8.0, bottom: 8.0 - 6.0 * (1.0 - progress), ..Padding::ZERO }),
+                .padding(Padding { right: 8.0, bottom: 8.0, ..Padding::ZERO }),
         );
     }
     layers.into()
@@ -1058,7 +1186,7 @@ pub(super) fn sized_tile<'a>(app: &App, spec: Tile<'_>, side: f32) -> Element<'a
     hoverable(spec.id, spec.play_badge, spec.menu, item.into())
 }
 
-/// Scorciatoia della Home: copertina a filo, titolo e, al passaggio del mouse, il Play verde.
+/// Scorciatoia della Home: copertina a filo, titolo e, al passaggio del mouse, il Play.
 pub fn shortcut<'a>(
     app: &App,
     id: Uuid,
@@ -1082,7 +1210,7 @@ pub fn shortcut<'a>(
     let mut cells = row![art, label].spacing(16).align_y(Alignment::Center);
     if progress > 0.0 {
         cells = cells.push(
-            container(icon(Icon::Play, 18.0, fade(theme::ON_PRIMARY, progress)))
+            container(icon(Icon::Play, 0.0, fade(theme::ON_PRIMARY, progress)))
                 .center(FAB)
                 .style(theme::fab(progress)),
         );
@@ -1217,6 +1345,24 @@ pub fn skeleton_grid<'a>(width: f32, rows: usize) -> Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sizes_read_in_thousands_with_one_decimal_and_a_comma() {
+        assert_eq!(size_label(0), "0 B");
+        assert_eq!(size_label(999), "999 B");
+        assert_eq!(size_label(1_500), "1,5 kB");
+        assert_eq!(size_label(31_457_280), "31,5 MB");
+        assert_eq!(size_label(2_345_000_000), "2,3 GB");
+        assert_eq!(size_label(u64::MAX), "18446744073,7 GB");
+    }
+
+    #[test]
+    fn the_step_bar_lights_one_step_per_ten_points_and_never_more_than_ten() {
+        assert_eq!(steps_reached(None), 0);
+        let reached = |percent: u8| steps_reached(Some(percent));
+        assert_eq!((reached(0), reached(9), reached(10), reached(99), reached(100)), (0, 0, 1, 9, 10));
+        assert_eq!(reached(250), 10, "un valore fuori scala non esce dalla barra");
+    }
 
     #[test]
     fn the_album_grid_closes_on_both_edges() {

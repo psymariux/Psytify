@@ -1,7 +1,7 @@
 //! Impaginazione da telefono: un'app pensata per il pollice, non il desktop ristretto. Le quattro
 //! schede (Home, Cerca, Libreria, Novità) hanno un titolo grande in cima alla pagina e nessuna
 //! barra sopra; le pagine aperte da un'altra (album, artista, impostazioni) hanno solo «Indietro».
-//! La pagina va da bordo a bordo sul nero, con la tinta di ciò che si guarda che sfuma dall'alto.
+//! La pagina va da bordo a bordo sulla tela nera, piatta.
 //! In basso il mini-player (un tocco apre il player) e la barra delle schede.
 //!
 //! Su Android la barra di stato e quella dei gesti stanno sopra l'app: si lascia il loro spazio.
@@ -12,19 +12,28 @@ pub mod drawer;
 pub mod home;
 pub mod library;
 mod player;
+pub mod queue;
 
-use iced::widget::{Space, button, column, container, row, scrollable, text};
+use std::sync::Arc;
+
+use iced::widget::{Space, button, column, container, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length, Padding, Size};
 
 use super::components::{Line, art_of, heart, line};
 use super::cover::{Art, cover, cover_round};
+use super::gesture::area::area;
+use super::gesture::memory;
+use super::gesture::recognizer::{Axis, Output};
+use super::gesture::sheet::sheet;
+use super::gesture::swipe::{Reveal, swipe_row};
 use super::icons::{Icon, icon};
-use super::{motion, theme};
-use crate::app::{Account, App, Message, Screen, phone_tab_of};
+use super::theme;
+use crate::api::Track;
+use crate::app::{Account, App, Message, PhoneMsg, Screen, SideTab, phone_tab_of};
 use crate::player::seek::progress as progress_of;
 
 /// Lato della copertina nel mini-player.
-const MINI_COVER: f32 = 44.0;
+const MINI_COVER: f32 = psytify_design::tokens::size::cover::COVER_S;
 /// Titolo e artista nel mini-player: due righe della stessa scala, come la barra alta quanto una scheda.
 const MINI_TITLE: Line = Line { size: theme::FS_SMALL, font: theme::FONT_MEDIUM, color: Some(theme::TEXT) };
 const MINI_SUB: Line = Line { size: theme::FS_SMALL, font: theme::FONT, color: Some(theme::MUTED) };
@@ -43,10 +52,102 @@ fn insets(app: &App) -> Padding {
     }
 }
 
+/// Il foglio del player: sopra la pagina (che si disegna solo mentre il foglio non è del tutto
+/// aperto), con l'ingresso a molla e il trascinamento che lo chiude.
+fn player_sheet(app: &App, window: Size) -> Element<'_, Message> {
+    let edges = insets(app);
+    let under: Element<'_, Message> =
+        if app.phone.underlay { page(app, window) } else { Space::new(Length::Fill, Length::Fill).into() };
+    // Dove il dito può afferrare il foglio: sulla copertina tutta la parte alta (a parte il bordo del
+    // volume), sul testo e sulla coda solo l'intestazione, perché sotto scorrono le liste.
+    let (grab, except_right) = match app.side_tab {
+        SideTab::NowPlaying => (window.height * 0.55, 64.0),
+        _ => (edges.top + 150.0, 0.0),
+    };
+    let foglio = sheet(
+        player::view(app, window, edges),
+        Message::Phone(PhoneMsg::SheetDragging),
+        Message::Phone(PhoneMsg::SheetSettled),
+        Message::Phone(PhoneMsg::SheetClosed),
+    )
+    .enter(app.phone.underlay)
+    .dismiss(app.phone.dismiss)
+    .grab(grab)
+    .except_right(except_right);
+    stack![under, foglio].width(Length::Fill).height(Length::Fill).into()
+}
+
 pub fn view(app: &App, window: Size) -> Element<'_, Message> {
     if app.focus && app.queue.current().is_some() {
-        return player::view(app, window, insets(app));
+        return player_sheet(app, window);
     }
+    page(app, window)
+}
+
+/// Una chiave per la memoria dello scorrimento di una schermata.
+pub fn page_key(screen: Screen) -> u64 {
+    let (label, id) = match screen {
+        Screen::Album(id) => ("album", Some(id.as_u128())),
+        Screen::Playlist(id) => ("playlist", Some(id.as_u128())),
+        Screen::Artist(id) => ("artist", Some(id.as_u128())),
+        Screen::Home => ("home", None),
+        Screen::Search => ("search", None),
+        Screen::Library => ("library", None),
+        Screen::Settings => ("settings", None),
+        Screen::Jam => ("jam", None),
+        Screen::Liked => ("liked", None),
+        Screen::Downloads => ("downloads", None),
+        Screen::News => ("news", None),
+        Screen::SourcePlaylist => ("source", None),
+        Screen::Collection => ("collection", None),
+        Screen::SignIn => ("signin", None),
+        Screen::Friends => ("friends", None),
+        Screen::Profile => ("profile", None),
+        Screen::FriendPlaylist => ("friendplaylist", None),
+    };
+    memory::key_of(label, id)
+}
+
+/// Una riga di brani con le azioni a scorrimento: a destra «aggiungi alla coda», a sinistra «mi
+/// piace» (cuore bianco). Fuori dal telefono la riga resta com'è.
+pub fn swipe_track<'a>(
+    app: &App,
+    tracks: &Arc<[Track]>,
+    index: usize,
+    content: Element<'a, Message>,
+) -> Element<'a, Message> {
+    if !crate::app::is_phone() {
+        return content;
+    }
+    let Some(track) = tracks.get(index) else {
+        return content;
+    };
+    let liked = app.is_liked(track.id);
+    let zone = |glyph: Icon, color| -> Element<'a, Message> {
+        container(icon(glyph, 0.0, color)).center(Length::Fill).into()
+    };
+    // Chi sta per piacere mostra il cuore pieno; chi sta per non piacere più, il contorno.
+    let heart = if liked { Icon::Heart } else { Icon::HeartFill };
+    swipe_row(content)
+        .on_right(Reveal {
+            idle: zone(Icon::Queue, theme::TEXT),
+            armed: zone(Icon::Queue, theme::ON_PRIMARY),
+            message: Message::Phone(PhoneMsg::EnqueueAt(tracks.clone(), index)),
+            background: theme::SELECTED,
+            armed_background: theme::TEXT,
+        })
+        .on_left(Reveal {
+            idle: zone(heart, theme::TEXT),
+            armed: zone(heart, theme::ON_PRIMARY),
+            message: Message::Phone(PhoneMsg::LikeAt(tracks.clone(), index)),
+            background: theme::SELECTED,
+            armed_background: theme::TEXT,
+        })
+        .into()
+}
+
+/// La pagina del telefono: scheda o pagina aperta, mini-player e barra delle schede.
+fn page(app: &App, window: Size) -> Element<'_, Message> {
     let edges = insets(app);
     let full = (window.width - edges.left - edges.right).max(280.0);
     let inner = full - 2.0 * theme::PHONE_GUTTER;
@@ -58,7 +159,7 @@ pub fn view(app: &App, window: Size) -> Element<'_, Message> {
         Screen::Home => (home::view(app, full), 0.0),
         _ => (super::page(app, inner), theme::PHONE_GUTTER),
     };
-    // Una pagina nuova sale di qualche pixel mentre entra, come sul desktop.
+    // Una pagina nuova entra con un taglio e una dissolvenza, come sul desktop.
     let rise = theme::PAGE_RISE * (1.0 - app.page_motion.value());
     let top = if root { 12.0 } else { 4.0 };
     let content = scrollable(container(body).width(Length::Fill).padding(Padding {
@@ -70,6 +171,8 @@ pub fn view(app: &App, window: Size) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .style(theme::scroll);
+    // Tornando a una scheda o a una pagina lo scorrimento riparte da dov'era.
+    let content = memory::remember(page_key(app.screen), true, content);
 
     let mut screen = column![].height(Length::Fill);
     if !root {
@@ -93,12 +196,9 @@ pub fn view(app: &App, window: Size) -> Element<'_, Message> {
         right: edges.right,
         bottom: 0.0,
     });
-    // La barra dei gesti resta sul nero della barra delle schede, non sulla tinta.
+    // La barra dei gesti resta sul chrome della barra delle schede.
     container(column![
-        container(page)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(theme::phone_wash(super::page_tint(app))),
+        container(page).width(Length::Fill).height(Length::Fill).style(theme::canvas),
         container(Space::new(Length::Fill, edges.bottom)).style(theme::phone_nav),
     ])
     .width(Length::Fill)
@@ -123,7 +223,7 @@ pub fn title_row<'a>(title: &'a str, actions: Vec<Element<'a, Message>>) -> Elem
 
 /// Un'icona da toccare, del lato minimo di un tocco.
 pub fn touch_icon<'a>(glyph: Icon, color: iced::Color, on_press: Message) -> Element<'a, Message> {
-    button(container(icon(glyph, 24.0, color)).center(Length::Fill))
+    button(container(icon(glyph, 0.0, color)).center(Length::Fill))
         .width(theme::TOUCH_TARGET)
         .height(theme::TOUCH_TARGET)
         .padding(0)
@@ -132,8 +232,7 @@ pub fn touch_icon<'a>(glyph: Icon, color: iced::Color, on_press: Message) -> Ele
         .into()
 }
 
-/// L'avatar di chi è collegato (la foto, o un colore con l'iniziale); senza accesso, un tondo con
-/// l'icona dell'account.
+/// L'avatar di chi è collegato (la foto, o il segnaposto tondo con l'icona dell'account).
 pub fn avatar<'a>(app: &App, size: f32) -> Element<'a, Message> {
     match app.signed_in_profile() {
         Some(profile) => cover_round(
@@ -145,15 +244,12 @@ pub fn avatar<'a>(app: &App, size: f32) -> Element<'a, Message> {
             },
             size,
         ),
-        None => container(icon(Icon::Account, size * 0.5, theme::MUTED))
-            .center_x(Length::Fixed(size))
-            .center_y(Length::Fixed(size))
-            .style(theme::bar(theme::RAISED, size / 2.0))
-            .into(),
+        // Senza accesso: il segnaposto tondo con l'icona dell'account.
+        None => cover_round(&app.covers, Art::drawn(uuid::Uuid::nil(), ""), size),
     }
 }
 
-/// Gli amici, dalla Home e dalla Libreria; un punto lime se c'è una richiesta da guardare.
+/// Gli amici, dalla Home e dalla Libreria; un punto bianco se c'è una richiesta da guardare.
 pub fn friends_icon(app: &App) -> Element<'_, Message> {
     let glyph = touch_icon(Icon::Account, theme::TEXT, Message::Navigate(Screen::Friends));
     if app.friend_requests() == 0 {
@@ -161,7 +257,7 @@ pub fn friends_icon(app: &App) -> Element<'_, Message> {
     }
     iced::widget::stack![
         glyph,
-        container(container(Space::new(7.0, 7.0)).style(theme::bar(theme::ACCENT, 3.5))).padding(Padding {
+        container(container(Space::new(7.0, 7.0)).style(theme::bar(theme::TEXT))).padding(Padding {
             top: 9.0,
             left: 29.0,
             ..Padding::ZERO
@@ -194,8 +290,8 @@ fn search_header(app: &App) -> Element<'_, Message> {
         .into()
 }
 
-/// Le cinque schede. Quella accesa ha l'icona piena e il testo bianco. Novità ha un punto lime
-/// quando ci sono uscite da ascoltare; Profilo quando ci sono richieste di amicizia.
+/// Le cinque schede. Quella accesa ha l'icona piena, il testo bianco e il segnalino lime in cima.
+/// Novità ha un punto bianco quando ci sono uscite da ascoltare; Profilo quando ci sono richieste.
 fn nav(app: &App) -> Element<'_, Message> {
     let tab = app.phone_tab();
     let unread = app.unread_news() > 0;
@@ -216,7 +312,7 @@ fn nav(app: &App) -> Element<'_, Message> {
     let buttons = items.into_iter().map(|(idle, filled, label, screen, press)| {
         let active = tab == screen;
         let color = if active { theme::TEXT } else { theme::FAINT };
-        let mut glyph = row![icon(if active { filled } else { idle }, 24.0, color)];
+        let mut glyph = row![icon(if active { filled } else { idle }, 0.0, color)];
         let dot = match screen {
             Screen::News => unread,
             Screen::Profile => requests,
@@ -225,18 +321,25 @@ fn nav(app: &App) -> Element<'_, Message> {
         if dot {
             glyph = glyph.push(
                 container(Space::new(7.0, 7.0))
-                    .style(theme::bar(theme::ACCENT, 3.5))
+                    .style(theme::bar(theme::TEXT))
                     .padding(Padding { bottom: 16.0, ..Padding::ZERO }),
             );
         }
-        button(
+        // Il segnalino lime sul bordo alto della scheda scelta (spazio uguale per le altre).
+        let marker = container(Space::new(Length::Fill, 2.0 * theme::AP)).style(theme::bar(if active {
+            theme::LIME
+        } else {
+            iced::Color::TRANSPARENT
+        }));
+        button(column![
+            marker,
             container(
                 column![glyph, text(label).size(11.0).font(theme::FONT_MEDIUM).color(color)]
                     .spacing(4)
                     .align_x(Alignment::Center),
             )
             .center(Length::Fill),
-        )
+        ])
         .width(Length::Fill)
         .height(theme::PHONE_NAV_HEIGHT)
         .padding(0)
@@ -249,7 +352,7 @@ fn nav(app: &App) -> Element<'_, Message> {
 
 /// Dove porta la scheda Profilo: il proprio profilo se c'è, altrimenti le impostazioni o l'accesso.
 pub(super) fn profile_target(app: &App) -> Message {
-    match &app.account {
+    match &app.social.view.account {
         Account::SignedIn(me) => match &me.profile {
             Some(profile) => Message::OpenProfile(profile.handle.clone()),
             None => Message::Navigate(Screen::Settings),
@@ -259,7 +362,7 @@ pub(super) fn profile_target(app: &App) -> Message {
     }
 }
 
-/// Il brano in corso sopra le schede, sulla tinta della sua copertina: un tocco apre il player.
+/// Il brano in corso sopra le schede, sul chrome: un tocco apre il player.
 /// Sul fondo, una linea sottile con l'avanzamento.
 fn mini_player(app: &App, window: f32) -> Option<Element<'_, Message>> {
     let track = app.queue.current()?;
@@ -268,7 +371,7 @@ fn mini_player(app: &App, window: f32) -> Option<Element<'_, Message>> {
     let inner = window - 2.0 * theme::PHONE_GUTTER;
     let text_width = inner - MINI_COVER - 3.0 * 10.0 - 2.0 * theme::TOUCH_TARGET;
     let glyph = if app.playback.is_playing() { Icon::Pause } else { Icon::Play };
-    let play = button(container(icon(glyph, 24.0, theme::TEXT)).center(Length::Fill))
+    let play = button(container(icon(glyph, 0.0, theme::TEXT)).center(Length::Fill))
         .width(theme::TOUCH_TARGET)
         .height(theme::TOUCH_TARGET)
         .padding(0)
@@ -290,21 +393,31 @@ fn mini_player(app: &App, window: f32) -> Option<Element<'_, Message>> {
             .height(Length::Fill)
             .width(Length::Fill)
             .style(theme::bare)
-            .on_press(Message::ToggleFocus);
+            .on_press(Message::Phone(PhoneMsg::OpenPlayer));
+    // Uno scorrimento in su apre il player come un tocco: oltre 40 dp, o un lancio.
+    let open = area(open, |gesture| match gesture {
+        Output::PanEnd { axis: Axis::Vertical, total } if total.y < -40.0 => {
+            Some(Message::Phone(PhoneMsg::OpenPlayer))
+        }
+        Output::Fling { axis: Axis::Vertical, velocity, .. } if velocity.y < 0.0 => {
+            Some(Message::Phone(PhoneMsg::OpenPlayer))
+        }
+        _ => None,
+    })
+    .axis(Axis::Vertical);
 
     let fraction = progress_of(app.shown_position(), track.duration()).clamp(0.0, 1.0);
     let progress = container(
-        container(Space::new(Length::Fixed(window * fraction), 2.0)).style(theme::bar(theme::TEXT, 1.0)),
+        container(Space::new(Length::Fixed(window * fraction), theme::AP)).style(theme::bar(theme::TEXT)),
     )
     .width(window)
-    .style(theme::bar(motion::fade(theme::TEXT, 0.2), 1.0));
+    .style(theme::bar(theme::SELECTED));
 
-    let tint = app.covers.tint_of(art_of(track));
     Some(
         container(column![open, progress])
             .height(theme::PHONE_MINI_HEIGHT)
             .width(Length::Fill)
-            .style(theme::mini_player(tint))
+            .style(theme::mini_player)
             .into(),
     )
 }

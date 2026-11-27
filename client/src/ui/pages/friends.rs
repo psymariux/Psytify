@@ -66,7 +66,7 @@ pub fn listening_line(friend: &Friend) -> Option<String> {
 
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     let title = h1("Amici");
-    let Account::SignedIn(me) = &app.account else {
+    let Account::SignedIn(me) = &app.social.view.account else {
         return column![
             title,
             empty_state(
@@ -90,8 +90,8 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
         .spacing(24)
         .into();
     }
-    let pending = |handle: &str| app.social.pending.iter().any(|h| h == handle);
-    let loaded = app.social.friends.ready();
+    let pending = |handle: &str| app.social.view.pending.iter().any(|h| h == handle);
+    let loaded = app.social.view.friends.ready();
 
     let search = row![
         text_input("Cerca per nome utente", &app.social.query)
@@ -106,7 +106,7 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     .align_y(Alignment::Center);
     let mut page = column![title, search].spacing(24).width(Length::Fill);
 
-    match &app.social.found {
+    match &app.social.view.found {
         Load::Idle => {}
         Load::Loading => page = page.push(skeleton_rows(3, theme::ROW_MEDIA, TableKind::Mixed)),
         Load::Failed(err) => page = page.push(error_block("la ricerca", err)),
@@ -142,7 +142,7 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
         }
     }
 
-    let friends = match &app.social.friends {
+    let friends = match &app.social.view.friends {
         Load::Idle | Load::Loading => {
             return page.push(skeleton_rows(4, theme::ROW_MEDIA, TableKind::Mixed)).into();
         }

@@ -1,25 +1,21 @@
 //! Le due viste a tutto schermo di «In riproduzione». Si aprono da tasti diversi e si chiudono con
 //! Esc o con la X.
 //!
-//! - **Testo** (tasto F): come Lyrics Plus di Spicetify o il testo di Apple Music. Dietro, la
-//!   copertina sfocata che si muove piano; davanti un blocco centrato: la copertina (che respira con
-//!   il Play) con l'avanzamento, il titolo e i controlli, e accanto il testo sincronizzato di
-//!   `ui/lyrics.rs`, che scivola fino alla riga in corso e la accende parola per parola.
+//! - **Testo** (tasto F): solo la tela nera (niente sfondo sfocato, niente tinte): un blocco centrato
+//!   con la copertina, l'avanzamento, il titolo e i controlli, e accanto il testo sincronizzato di
+//!   `ui/lyrics.rs`, che scivola fino alla riga in corso.
 //! - **Videoclip** (tasto V): il video riempie la finestra, il testo sincronizzato sta sopra come
 //!   sottotitolo (si nasconde con il pulsante) e sotto ci sono i controlli.
-
-use std::time::Duration;
 
 use iced::widget::{Space, column, container, mouse_area, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length, alignment};
 
 use super::components::{
     ICON_BUTTON, Line, MUTED_LINE, SUB_LINE, art_of, heart, icon_button, line, line_aligned, small,
-    toggle_button,
 };
-use super::cover::{backdrop, cover};
+use super::cover::cover;
 use super::icons::Icon;
-use super::motion::{self, fade};
+use super::motion::fade;
 use super::pages::video;
 use super::{lyrics as ui_lyrics, now_playing, theme, top_bar, volume_side};
 use crate::api::Track;
@@ -63,7 +59,7 @@ pub fn view(app: &App) -> Option<Element<'_, Message>> {
 fn top_bar<'a>(app: &'a App, lead: Element<'a, Message>) -> Element<'a, Message> {
     let mut actions = row![].spacing(4).align_y(Alignment::Center);
     if app.video_available() {
-        actions = actions.push(toggle_button(
+        actions = actions.push(icon_button(
             Icon::Video,
             if app.focus_video { "Torna al testo" } else { "Videoclip a tutto schermo (V)" },
             app.focus_video,
@@ -71,13 +67,13 @@ fn top_bar<'a>(app: &'a App, lead: Element<'a, Message>) -> Element<'a, Message>
         ));
     }
     if app.focus_video {
-        actions = actions.push(toggle_button(
+        actions = actions.push(icon_button(
             Icon::Lyrics,
             if app.video_lyrics { "Nascondi il testo" } else { "Mostra il testo" },
             app.video_lyrics,
             Some(Message::ToggleVideoLyrics),
         ));
-        actions = actions.push(toggle_button(
+        actions = actions.push(icon_button(
             Icon::Note,
             "Solo testo a tutto schermo",
             false,
@@ -156,36 +152,14 @@ fn lyrics_stage<'a>(app: &'a App, track: &'a Track) -> Element<'a, Message> {
         .width(Length::Fill)
         .height(Length::Fill);
 
-    // Dietro, la copertina sfocata che cambia piano colore; finché non arriva, la sua tinta.
-    let phase = 0.5 + 0.5 * motion::drift(Duration::from_secs(24));
-    match backdrop(&app.covers, art_of(track), phase) {
-        Some(ground) => {
-            stack![ground, container(Space::new(Length::Fill, Length::Fill)).style(theme::veil), page]
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-        }
-        None => {
-            let tint = app.covers.tint_of(art_of(track));
-            let drift = if app.playback.is_playing() { motion::drift(Duration::from_secs(14)) } else { 0.0 };
-            container(page)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(theme::aurora_full(tint, drift))
-                .into()
-        }
-    }
+    container(page).width(Length::Fill).height(Length::Fill).style(theme::canvas).into()
 }
 
-/// La copertina grande: respira con il Play (in pausa scende un po', al Play torna con la molla).
-/// Il posto resta quello della copertina intera, così il resto della colonna non si muove.
+/// La copertina grande, com'è: piatta e ferma (niente ombra, niente respiro). Il posto resta quello
+/// della copertina intera, così il resto della colonna non si muove.
 pub fn breathing_cover<'a>(app: &'a App, track: &'a Track, side: f32) -> Element<'a, Message> {
     let shown = side * app.cover_motion.value();
-    container(container(cover(&app.covers, art_of(track), shown)).style(theme::lifted))
-        .width(side)
-        .height(side)
-        .center(side)
-        .into()
+    container(cover(&app.covers, art_of(track), shown)).width(side).height(side).center(side).into()
 }
 
 /// La colonna della copertina: copertina, avanzamento, titolo con il cuore, artista e album,
@@ -265,7 +239,7 @@ fn video_stage<'a>(app: &'a App, track: &'a Track) -> Element<'a, Message> {
         container(controls(app)).padding([12, 0]).width(Length::Fill).style(theme::scrim(0.8)),
     ];
     stack![
-        container(video::stage(app)).width(Length::Fill).height(Length::Fill).style(theme::ground),
+        container(video::stage(app)).width(Length::Fill).height(Length::Fill).style(theme::canvas),
         overlay
     ]
     .width(Length::Fill)

@@ -15,7 +15,7 @@ const API_URL: &str = match option_env!("PSYTIFY_DEFAULT_API_URL") {
     // Una variabile definita ma vuota vale come assente.
     Some(url) if !url.is_empty() => url,
     _ if cfg!(debug_assertions) => "http://10.0.2.2:8080",
-    _ => "https://music.psymariux.dev",
+    _ => "http://10.0.2.2:8080",
 };
 
 /// L'ingresso che la NativeActivity cerca per nome: deve restare senza «mangling», per questo

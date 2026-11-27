@@ -17,7 +17,7 @@ use crate::app::{App, Dialog, MenuTarget, Message, Screen, SidebarFilter};
 
 /// Spazio per il testo di una voce della libreria: pannello 252, padding 8 + 8 per lato, copertina 40
 /// e uno spazio da 12.
-const ENTRY_TEXT: f32 = theme::SIDEBAR_WIDTH - 32.0 - 40.0 - 12.0;
+const ENTRY_TEXT: f32 = theme::SIDEBAR_WIDTH - 32.0 - theme::ROW_COVER - 12.0;
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let nav = container(
@@ -46,6 +46,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 Screen::News,
                 matches!(app.screen, Screen::News),
                 app.unread_news(),
+            ),
+            nav_item(
+                Icon::Download,
+                Icon::Downloaded,
+                "Scaricati",
+                Screen::Downloads,
+                matches!(app.screen, Screen::Downloads),
+                app.downloads.busy_count(),
             ),
             nav_item(
                 Icon::People,
@@ -105,7 +113,7 @@ fn library(app: &App) -> Element<'_, Message> {
     let mut list = column![].spacing(2);
     if matches!(filter, SidebarFilter::All | SidebarFilter::Playlists) {
         list = list.push(entry(
-            liked_cover(40.0),
+            liked_cover(theme::ROW_COVER),
             "Brani che ti piacciono",
             format!("Playlist · {}", count_label(app.liked.len())),
             app.screen == Screen::Liked,
@@ -115,7 +123,7 @@ fn library(app: &App) -> Element<'_, Message> {
         for playlist in &app.playlists {
             let active = app.screen == Screen::Playlist(playlist.id);
             list = list.push(entry(
-                cover(&app.covers, Art::drawn(playlist.id, &playlist.name), 40.0),
+                cover(&app.covers, Art::drawn(playlist.id, &playlist.name), theme::ROW_COVER),
                 &playlist.name,
                 format!("Playlist · {}", count_label(playlist.tracks.len())),
                 active,
@@ -133,7 +141,7 @@ fn library(app: &App) -> Element<'_, Message> {
                 cover(
                     &app.covers,
                     Art { id: album.id, title: &album.title, url: album.cover_url.as_deref() },
-                    40.0,
+                    theme::ROW_COVER,
                 ),
                 &album.title,
                 format!("Album · {}", album.artist.name),
@@ -152,7 +160,7 @@ fn library(app: &App) -> Element<'_, Message> {
                 cover_round(
                     &app.covers,
                     Art { id: artist.id, title: &artist.name, url: artist.cover_url.as_deref() },
-                    40.0,
+                    theme::ROW_COVER,
                 ),
                 &artist.name,
                 "Artista".to_string(),
@@ -190,7 +198,7 @@ fn library(app: &App) -> Element<'_, Message> {
 fn first_playlist(app: &App) -> Element<'_, Message> {
     container(
         column![
-            line("Crea una playlist", ENTRY_TEXT + 40.0, H2_LINE),
+            line("Crea una playlist", ENTRY_TEXT + theme::ROW_COVER, H2_LINE),
             small("Raccogli i brani che vuoi riascoltare. Si salvano su questo computer."),
             outlined_button(
                 "Nuova playlist",
@@ -209,12 +217,15 @@ fn first_playlist(app: &App) -> Element<'_, Message> {
     .into()
 }
 
-/// La copertina di «Brani che ti piacciono»: sfumatura rosa con il cuore.
-pub fn liked_cover<'a>(side: f32) -> Element<'a, Message> {
-    container(icon(Icon::HeartFill, side * 0.42, theme::TEXT))
-        .center(side)
-        .style(theme::cover_gradient(theme::LIKED_TINT, theme::NEGATIVE))
-        .into()
+/// La copertina di «Brani che ti piacciono»: il campo grigio con il cuore bianco (`liked_cover`, 24 AP,
+/// se ci sta; sotto, l'icona del cuore). Niente sfumatura rosa.
+pub fn liked_cover<'a, M: 'a>(side: f32) -> Element<'a, M> {
+    let heart: Element<'a, M> = if side >= super::icons::sprite_dp(24) {
+        super::icons::sprite_image(psytify_design::sprite::LIKED_COVER, 0, Some(theme::ICON_ACTIVE), 1)
+    } else {
+        icon(Icon::HeartFill, 0.0, theme::ICON_ACTIVE)
+    };
+    container(heart).center(side).style(theme::cover_field).into()
 }
 
 fn nav_item<'a>(
@@ -226,9 +237,12 @@ fn nav_item<'a>(
     badge: usize,
 ) -> Element<'a, Message> {
     let tint = if active { theme::TEXT } else { theme::NAV_IDLE };
-    // Il segno verde a sinistra: acceso sulla voce attiva, invisibile sulle altre (stesso spazio).
-    let mark = container(Space::new(3.0, 16.0))
-        .style(theme::bar(if active { theme::ACCENT } else { iced::Color::TRANSPARENT }, 1.5));
+    // Il segnalino lime a sinistra (2 AP): acceso sulla voce attiva, invisibile sulle altre (stesso spazio).
+    let mark = container(Space::new(2.0 * theme::AP, 16.0)).style(theme::bar(if active {
+        theme::LIME
+    } else {
+        iced::Color::TRANSPARENT
+    }));
     let mut content =
         row![mark, icon(if active { filled } else { glyph }, 20.0, tint), line(label, 150.0, NAV_LINE)]
             .spacing(12)
@@ -272,7 +286,7 @@ fn entry<'a>(
         .spacing(12)
         .align_y(Alignment::Center),
     ))
-    .height(56)
+    .height(theme::ROW_PLAIN)
     .width(Length::Fill)
     .padding([0, 8])
     .style(theme::row(active))

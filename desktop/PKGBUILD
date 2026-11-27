@@ -1,0 +1,47 @@
+# Maintainer: Psytify
+# Arch Linux package of the desktop (GPUI, `desktop/`), built from the local source.
+#
+# Do not run `makepkg` here by hand: by default it uses `desktop/src` (the code!) as its working folder.
+# Use `scripts/arch-package.sh`, which moves BUILDDIR and also creates the repository database.
+pkgname=psytify
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Desktop music player for Psytify catalogs"
+arch=('x86_64')
+url="https://github.com/psymariux/Psytify"
+license=('AGPL-3.0-only' 'OFL-1.1')
+# Audio (ALSA), window (Wayland or X11 through xcb), keyboard (xkbcommon), rendering (Vulkan, with no software
+# fallback: a driver is needed), video clips (GStreamer: base for the pipeline, good for qtdemux and souphttpsrc,
+# libav for H.264 and AAC). The fonts are inside the binary: no fontconfig.
+depends=('alsa-lib' 'wayland' 'libxkbcommon' 'libxkbcommon-x11' 'libxcb' 'vulkan-icd-loader' 'gcc-libs'
+         'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-libav')
+optdepends=('vulkan-radeon: rendering on AMD GPUs'
+            'vulkan-intel: rendering on Intel GPUs'
+            'nvidia-utils: rendering on NVIDIA GPUs')
+conflicts=('psytify-git')
+makedepends=('cargo')
+# The binary is already stripped by Cargo; no -debug package. `!lto`: makepkg's `-flto` would
+# turn the C code of `ring` into bitcode that Rust's linker does not link (the real LTO is
+# Cargo's, in the release profile).
+options=('!debug' '!lto')
+source=()
+
+build() {
+  cd "$startdir/.."
+  cargo build -p psytify --release --locked
+}
+
+check() {
+  cd "$startdir/.."
+  cargo test -p psytify --locked
+}
+
+package() {
+  cd "$startdir/.."
+  install -Dm755 target/release/psytify "$pkgdir/usr/bin/psytify"
+  install -Dm644 client/psytify.desktop "$pkgdir/usr/share/applications/psytify.desktop"
+  install -Dm644 client/assets/psytify.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/psytify.svg"
+  install -Dm644 client/assets/fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL-Inter.txt"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 design/assets/fonts/DepartureMono-OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL-DepartureMono.txt"
+}

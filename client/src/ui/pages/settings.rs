@@ -19,7 +19,9 @@ use crate::app::{
 };
 use crate::config;
 use crate::player::eq::{self, PRESETS};
-use crate::ui::components::{h1, h2, muted, outlined_button, outlined_button_owned, primary_button, small};
+use crate::ui::components::{
+    h1, h2, muted, outlined_button, outlined_button_owned, primary_button, small, step_bar,
+};
 use crate::ui::icons::Icon;
 use crate::ui::pointer::pointer;
 use crate::ui::theme;
@@ -90,7 +92,7 @@ fn group<'a>(title: &'a str, rows: Vec<Element<'a, Message>>, fit: Fit) -> Eleme
     for (index, item) in rows.into_iter().enumerate() {
         list = list.push(item);
         if index != last {
-            list = list.push(container(Space::new(Length::Fill, 1.0)).style(theme::bar(theme::HOVER, 0.0)));
+            list = list.push(container(Space::new(Length::Fill, 1.0)).style(theme::bar(theme::RAISED)));
         }
     }
     column![h2(title), container(list).padding([6.0, fit.pad]).width(Length::Fill).style(theme::card)]
@@ -206,12 +208,12 @@ fn playback(app: &App, fit: Fit) -> Element<'_, Message> {
                     format!(
                         "{}. Dal menu di un brano ({}, «Scarica in…») si sceglie caso per caso. \
                          Un file con perdita non si migliora: se il brano non ha la qualità chiesta arriva quella più vicina.",
-                        app.download_quality.description(),
+                        app.downloads.quality.description(),
                         if is_phone() { "pressione lunga" } else { "tasto destro" },
                     ),
                     segments(
                         &DownloadQuality::ALL.map(|quality| (quality, quality.label())),
-                        app.download_quality,
+                        app.downloads.quality,
                         Message::SetDownloadQuality,
                         fit.compact,
                         theme::segment_well,
@@ -367,7 +369,7 @@ fn gain_label(gain: f32) -> String {
 
 fn account(app: &App, fit: Fit) -> Element<'_, Message> {
     let mut groups = column![].spacing(32);
-    let body: Vec<Element<'_, Message>> = match &app.account {
+    let body: Vec<Element<'_, Message>> = match &app.social.view.account {
         Account::Unavailable => {
             vec![note("Login non configurato", "Imposta clerk_issuer in config.json per attivarlo.")]
         }
@@ -397,7 +399,7 @@ fn account(app: &App, fit: Fit) -> Element<'_, Message> {
     };
     groups = groups.push(group("Account", body, fit));
 
-    if let Account::SignedIn(me) = &app.account {
+    if let Account::SignedIn(me) = &app.social.view.account {
         let edit = &app.social.edit;
         let field = |placeholder: &'static str, value: &str, on_input: fn(String) -> Message| {
             text_input(placeholder, value)
@@ -408,7 +410,8 @@ fn account(app: &App, fit: Fit) -> Element<'_, Message> {
                 .width(if fit.compact { Length::Fill } else { Length::Fixed(HOST_WIDTH) })
                 .style(theme::search_input)
         };
-        let save_label = if edit.saving { "Salvataggio…" } else { "Salva il profilo" };
+        let saving = app.social.view.profile_saving;
+        let save_label = if saving { "Salvataggio…" } else { "Salva il profilo" };
         let mut rows = vec![
             setting(
                 "Nome utente",
@@ -425,7 +428,7 @@ fn account(app: &App, fit: Fit) -> Element<'_, Message> {
             inline(
                 "",
                 "",
-                if edit.saving {
+                if saving {
                     outlined_button(save_label, None, None)
                 } else {
                     primary_button(save_label, None, Message::ProfileSave(None))
@@ -509,19 +512,25 @@ fn about(app: &App, fit: Fit) -> Element<'_, Message> {
 /// La riga dell'aggiornamento: l'ultimo controllo con «Controlla ora», l'offerta da scaricare, il
 /// download in corso o il file pronto. C'è sempre, anche in una compilazione locale.
 fn update_setting(app: &App, fit: Fit) -> Element<'_, Message> {
-    let (detail, control): (String, Element<'_, Message>) = match app.update.as_ref() {
+    let (detail, control): (String, Element<'_, Message>) = match app.downloads.update.state.as_ref() {
         Some(UpdateState::Offered(offer)) => (
             format!("Versione {} disponibile.", offer.tag),
             primary_button("Scarica", None, Message::UpdateRequested),
         ),
-        Some(UpdateState::Downloading(tag)) => {
-            (format!("Download di {tag} in corso"), muted("In corso").into())
-        }
-        Some(UpdateState::Downloaded(path)) => {
+        Some(state @ UpdateState::Downloading { tag, .. }) => match state.percent() {
+            Some(percent) => (format!("Download di {tag} in corso: {percent}%"), step_bar(Some(percent))),
+            None => (format!("Download di {tag} in corso"), muted("In corso").into()),
+        },
+        // Su Android l'installazione la chiede il sistema: nessuna cartella da aprire.
+        Some(UpdateState::Downloaded(path)) if cfg!(target_os = "android") => {
             (format!("Scaricato in {}", path.display()), muted("Pronto").into())
         }
+        Some(UpdateState::Downloaded(path)) => (
+            format!("Scaricato in {}", path.display()),
+            outlined_button("Apri cartella", None, Some(Message::UpdateReveal)),
+        ),
         None => {
-            let checking = app.update_status == UpdateStatus::Checking;
+            let checking = app.downloads.update.status == UpdateStatus::Checking;
             let press = (!checking).then_some(Message::UpdateCheck(UpdateCheck::Manual));
             (update_banner::status_line(app).to_owned(), outlined_button("Controlla ora", None, press))
         }

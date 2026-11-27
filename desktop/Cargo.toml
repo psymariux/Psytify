@@ -1,0 +1,86 @@
+[package]
+# Since step 7 this is the Psytify desktop: package and binary `psytify`, the one installed by the PKGBUILD
+# (`desktop/PKGBUILD`) and the releases. The Iced client stays `psytify-iced` (phone and development).
+name = "psytify"
+version = "0.1.0"
+description = "Desktop music player for Psytify catalogs (GPUI)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "psytify"
+path = "src/main.rs"
+
+[features]
+default = ["video"]
+# Video clips (`src/video/`): the core's API side (`VideoView`, `VideoCmd`, `Changed::video`) and the
+# desktop's GStreamer pipeline (BGRA frames in GPUI's atlas).
+# It needs GStreamer installed (libgstreamer1.0, plugins base/good/libav): Windows lacks it, as for the
+# Iced client (`--no-default-features` on Windows). On by default since step 7, as
+# it was in the Iced client the desktop replaces: at step 6.9 memory passes and CPU passes at 720p and
+# sits on the limit at 360p (docs/PERFORMANCE.md).
+video = ["psytify-core/video", "dep:gstreamer", "dep:gstreamer-app"]
+# GPUI's frame profile (`gpui::profiler`): the time of every draw per phase (layout,
+# prepaint, paint) and per view, and of the hand-off to the GPU. Only for measuring (`PSYTIFY_FRAME_STATS=SECONDS`,
+# see `src/frame_stats.rs`): it costs a crate (`hdrhistogram`, used by GPUI's profile) and some CPU
+# per frame, so release binaries do not switch it on.
+profile = ["gpui/profiler"]
+# Test data for the social screens (`src/fixtures.rs`, `--fixture NAME`): a fake social view
+# (half-done sign-in, friends, profiles) instead of the core's, for screenshots without a real sign-in; with
+# test data the social commands are not sent. No new dependency; off by default, never in
+# release binaries.
+fixtures = []
+
+[dependencies]
+# The UI-free logic: the desktop starts the core (`Core::start` with its own 2-thread runtime),
+# sends it commands and reads the snapshots; there is no second audio engine, API client or playback
+# state. Without default features: the API side of video clips is switched on by the `video` feature
+# above, together with the pipeline.
+psytify-core = { path = "../core", default-features = false }
+# Tokens, the art pixel scale, the sprite sheet and the cache of scaled sprites: the visual identity
+# shared with the phone (Iced). The desktop converts them to GPUI types once (`theme`).
+psytify-design = { path = "../design" }
+# Zed's UI framework. From git only (the crates.io release is 13 months old and uses the Blade
+# renderer); the rev is pinned on purpose and updated by hand.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "d31d1074a07b7bbaa43a52fef7847a00dd491baf" }
+# GPUI's platform backends. Without the `wayland` and `x11` features the app starts with no window and no
+# error (headless mode): always spell them out.
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "d31d1074a07b7bbaa43a52fef7847a00dd491baf", features = ["wayland", "x11"] }
+# The same semver line of `image` as GPUI (0.25), so the `Frame`s we pass to `RenderImage` are
+# of the same type; only the `Frame`/`RgbaImage` type is needed, no codec.
+image = { version = "0.25", default-features = false }
+# `RenderImage::new` takes a `SmallVec<[Frame; 1]>`.
+smallvec = "1"
+
+# `watch::Receiver::changed()` (the core's snapshots), `oneshot` (core shutdown, covers, opening
+# a video clip) and `Notify` (the video clip's frame wake-up):
+# channels that do not depend on the runtime, so GPUI's executor awaits them. Only `sync`, no
+# extra runtime: the core has its own. Already in the graph (core, client).
+tokio = { version = "1", default-features = false, features = ["sync"] }
+# Track ids in the interface caches (likes, downloads): the same type as the core's. `v4`
+# for the id of a new playlist (`LibraryCmd::CreatePlaylist` wants it from the creator): the core
+# already enables it, so no new crate.
+uuid = { version = "1", features = ["v4"] }
+# Frontend preferences (`SettingsView::ui`, `SettingsCmd::SaveUiPrefs`) are a JSON map of the
+# core: the desktop reads and writes “Reduce motion” there. Already in the graph (core, client), no new crate.
+serde_json = "1"
+
+# Video clips (only with the `video` feature): the pipeline (`uridecodebin`, `videoscale`, `appsink`) and the
+# frames. The same 0.22 versions that `iced_video_player` already brings into the Iced client's graph: no
+# new crate to build (`gstreamer-video` is not needed: size and format are read from the caps).
+gstreamer = { version = "0.25", optional = true }
+gstreamer-app = { version = "0.25", optional = true }
+
+# Grapheme boundaries in the search field (arrows and deletion per visible character). It is the
+# same crate GPUI uses: no new crate in the graph.
+unicode-segmentation = "1"
+
+[dev-dependencies]
+# The core's test tracks (`api::models::fixtures`, behind the `test-support` feature, which brings no
+# new crates): the same ones the Iced client uses in its tests. Tests only.
+psytify-core = { path = "../core", default-features = false, features = ["test-support"] }
+
+[lints]
+workspace = true

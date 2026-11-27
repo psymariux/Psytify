@@ -1,0 +1,293 @@
+{
+  "server": "https://backend.example.test",
+  "volume": 0.5,
+  "last_screen": {
+    "kind": "album",
+    "id": "00000000-0000-0000-0000-000000000007"
+  },
+  "queue": {
+    "tracks": [
+      {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "title": "Brano 1",
+        "track_no": 1,
+        "duration_ms": 180000,
+        "audio_format": "flac",
+        "downloadable": false,
+        "has_video": false,
+        "video_ready": false,
+        "artist": {
+          "id": "00000000-0000-0000-0000-0000000003e9",
+          "name": "Artista 1"
+        },
+        "album": null,
+        "licence": {
+          "kind": "cc-by",
+          "attribution": "Titolare"
+        },
+        "cover_url": null,
+        "created_at": "2026-10-01T09:30:00Z"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "title": "Brano 2",
+        "track_no": 2,
+        "duration_ms": 180000,
+        "audio_format": "flac",
+        "downloadable": false,
+        "has_video": false,
+        "video_ready": false,
+        "artist": {
+          "id": "00000000-0000-0000-0000-0000000003ea",
+          "name": "Artista 2"
+        },
+        "album": {
+          "id": "00000000-0000-0000-0000-0000000007d2",
+          "title": "Album 2"
+        },
+        "licence": {
+          "kind": "cc-by",
+          "attribution": "Titolare"
+        },
+        "cover_url": null,
+        "created_at": "2026-10-01T09:30:00Z"
+      },
+      {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "title": "Brano 3",
+        "track_no": 3,
+        "duration_ms": 180000,
+        "audio_format": "flac",
+        "downloadable": false,
+        "has_video": false,
+        "video_ready": false,
+        "artist": {
+          "id": "00000000-0000-0000-0000-0000000003e8",
+          "name": "Artista 0"
+        },
+        "album": null,
+        "licence": {
+          "kind": "cc-by",
+          "attribution": "Titolare"
+        },
+        "cover_url": null,
+        "created_at": "2026-10-01T09:30:00Z"
+      }
+    ],
+    "order": [
+      1,
+      2,
+      0
+    ],
+    "position": 0,
+    "shuffle": true,
+    "repeat": "All"
+  },
+  "playlists": [
+    {
+      "id": "00000000-0000-0000-0000-00000000000c",
+      "name": "Sera",
+      "tracks": [
+        {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "title": "Brano 3",
+          "track_no": 3,
+          "duration_ms": 180000,
+          "audio_format": "flac",
+          "downloadable": false,
+          "has_video": false,
+          "video_ready": false,
+          "artist": {
+            "id": "00000000-0000-0000-0000-0000000003e8",
+            "name": "Artista 0"
+          },
+          "album": null,
+          "licence": {
+            "kind": "cc-by",
+            "attribution": "Titolare"
+          },
+          "cover_url": null,
+          "created_at": "2026-10-01T09:30:00Z"
+        }
+      ],
+      "pending": [
+        {
+          "source": "youtube",
+          "id": "id-fittizio",
+          "title": "Da importare",
+          "artist": "Qualcuno",
+          "duration_ms": 1000,
+          "cover_url": null
+        }
+      ],
+      "public": true
+    }
+  ],
+  "panel_open": true,
+  "liked": [
+    {
+      "id": "00000000-0000-0000-0000-000000000004",
+      "title": "Brano 4",
+      "track_no": 4,
+      "duration_ms": 180000,
+      "audio_format": "flac",
+      "downloadable": false,
+      "has_video": false,
+      "video_ready": false,
+      "artist": {
+        "id": "00000000-0000-0000-0000-0000000003e9",
+        "name": "Artista 1"
+      },
+      "album": {
+        "id": "00000000-0000-0000-0000-0000000007d0",
+        "title": "Album 0"
+      },
+      "licence": {
+        "kind": "cc-by",
+        "attribution": "Titolare"
+      },
+      "cover_url": null,
+      "created_at": "2026-10-01T09:30:00Z"
+    }
+  ],
+  "recent": [
+    {
+      "id": "00000000-0000-0000-0000-000000000005",
+      "title": "Brano 5",
+      "track_no": 5,
+      "duration_ms": 180000,
+      "audio_format": "flac",
+      "downloadable": false,
+      "has_video": false,
+      "video_ready": false,
+      "artist": {
+        "id": "00000000-0000-0000-0000-0000000003ea",
+        "name": "Artista 2"
+      },
+      "album": null,
+      "licence": {
+        "kind": "cc-by",
+        "attribution": "Titolare"
+      },
+      "cover_url": null,
+      "created_at": "2026-10-01T09:30:00Z"
+    }
+  ],
+  "last_query": "daft punk",
+  "quality": "standard",
+  "download_quality": "high",
+  "downloaded": [
+    {
+      "track": {
+        "id": "00000000-0000-0000-0000-000000000006",
+        "title": "Brano 6",
+        "track_no": 6,
+        "duration_ms": 180000,
+        "audio_format": "flac",
+        "downloadable": true,
+        "has_video": false,
+        "video_ready": false,
+        "artist": {
+          "id": "00000000-0000-0000-0000-0000000003e8",
+          "name": "Artista 0"
+        },
+        "album": {
+          "id": "00000000-0000-0000-0000-0000000007d2",
+          "title": "Album 2"
+        },
+        "licence": {
+          "kind": "cc-by",
+          "attribution": "Titolare"
+        },
+        "cover_url": null,
+        "created_at": "2026-10-01T09:30:00Z"
+      },
+      "path": "/home/utente/Download/Artista 0 - Brano 6.flac",
+      "format": "flac",
+      "quality": "lossless",
+      "size": 31457280,
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    }
+  ],
+  "clerk_issuer": "https://clerk.example.test",
+  "clerk_client_id": "client-id-fittizio",
+  "oauth_port": 54000,
+  "discord_presence": false,
+  "discord_app_id": "123456789",
+  "equalizer": {
+    "enabled": true,
+    "gains": [
+      1.0,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      -1.0,
+      -2.0,
+      -3.0,
+      -4.0,
+      -5.0
+    ]
+  },
+  "followed": [
+    {
+      "id": "00000000-0000-0000-0000-00000000000a",
+      "name": "Artista Uno",
+      "cover_url": "https://cdn.example.test/a.jpg"
+    }
+  ],
+  "saved_albums": [
+    {
+      "id": "00000000-0000-0000-0000-00000000000b",
+      "title": "Album Uno",
+      "artist": {
+        "id": "00000000-0000-0000-0000-0000000003e9",
+        "name": "Artista 1"
+      },
+      "cover_url": null
+    }
+  ],
+  "stats": [
+    {
+      "track": {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "title": "Brano 2",
+        "track_no": 2,
+        "duration_ms": 180000,
+        "audio_format": "flac",
+        "downloadable": false,
+        "has_video": false,
+        "video_ready": false,
+        "artist": {
+          "id": "00000000-0000-0000-0000-0000000003ea",
+          "name": "Artista 2"
+        },
+        "album": {
+          "id": "00000000-0000-0000-0000-0000000007d2",
+          "title": "Album 2"
+        },
+        "licence": {
+          "kind": "cc-by",
+          "attribution": "Titolare"
+        },
+        "cover_url": null,
+        "created_at": "2026-10-01T09:30:00Z"
+      },
+      "plays": 3,
+      "last_played": 1700000000
+    }
+  ],
+  "listened_ms": 123456,
+  "news_seen": "2026-10-01T09:30:00Z",
+  "autoplay": false,
+  "panel_video": false,
+  "search_history": [
+    "daft punk",
+    "eminem"
+  ],
+  "dedicated_video": true,
+  "api_base_url": "http://legacy.example.test:8080",
+  "unknown_future_key": {
+    "a": 1
+  }
+}

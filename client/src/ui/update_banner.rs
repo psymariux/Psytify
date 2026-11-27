@@ -5,32 +5,39 @@
 use iced::widget::{button, container, row, text};
 use iced::{Alignment, Element, Length, Padding};
 
-use super::components::primary_button;
+use super::components::{outlined_button, primary_button, step_bar};
 use super::icons::{Icon, icon};
 use super::theme;
 use crate::app::{App, Message, UpdateState};
 
 /// Il banner, se c'è qualcosa da dire. `phone` lo fa più alto, con il bersaglio per il dito.
 pub fn view(app: &App, phone: bool) -> Option<Element<'_, Message>> {
-    let (label, action): (String, Option<Element<'_, Message>>) = match app.update_banner()? {
+    let (label, action): (String, Option<Element<'_, Message>>) = match app.downloads.update.banner()? {
         UpdateState::Offered(offer) => (
             format!("Nuova versione {} disponibile", offer.tag),
             Some(primary_button("Scarica", None, Message::UpdateRequested)),
         ),
-        UpdateState::Downloading(tag) => (format!("Scarico {tag}…"), None),
+        // La barra a dieci scatti dei download, con i punti che il core pubblica (BACKLOG 38).
+        state @ UpdateState::Downloading { tag, .. } => match state.percent() {
+            Some(percent) => (format!("Scarico {tag}… {percent}%"), Some(step_bar(Some(percent)))),
+            None => (format!("Scarico {tag}…"), None),
+        },
         UpdateState::Downloaded(_) if cfg!(target_os = "android") => {
             ("Scaricato: conferma l'installazione".to_owned(), None)
         }
-        UpdateState::Downloaded(path) => (format!("Scaricato in {}", path.display()), None),
+        UpdateState::Downloaded(path) => (
+            format!("Scaricato in {}", path.display()),
+            Some(outlined_button("Apri cartella", None, Some(Message::UpdateReveal))),
+        ),
     };
-    let close = button(container(icon(Icon::Close, 14.0, theme::MUTED)).center(Length::Fill))
+    let close = button(container(icon(Icon::Close, 0.0, theme::MUTED)).center(Length::Fill))
         .width(if phone { theme::TOUCH_TARGET } else { 32.0 })
         .height(if phone { theme::TOUCH_TARGET } else { 32.0 })
         .padding(0)
         .style(theme::icon_plain)
         .on_press(Message::UpdateDismiss);
     let mut bar = row![
-        icon(Icon::Download, 18.0, theme::ACCENT),
+        icon(Icon::Download, 0.0, theme::TEXT),
         container(text(label).size(theme::FS_BODY).font(theme::FONT_MEDIUM)).width(Length::Fill),
     ]
     .spacing(12)
@@ -56,7 +63,7 @@ pub fn view(app: &App, phone: bool) -> Option<Element<'_, Message>> {
 /// La riga di Impostazioni → Informazioni: com'è andato l'ultimo controllo.
 pub fn status_line(app: &App) -> &'static str {
     use crate::app::UpdateStatus;
-    match app.update_status {
+    match app.downloads.update.status {
         UpdateStatus::Checking => "Controllo in corso…",
         UpdateStatus::Current => "Hai l'ultima versione.",
         UpdateStatus::Failed => "Controllo non riuscito. Riprova più tardi.",

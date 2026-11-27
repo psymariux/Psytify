@@ -4,7 +4,7 @@
 use iced::widget::{column, container, row, text_input};
 use iced::{Alignment, Element, Length};
 
-use crate::app::{Account, App, JamSession, Message};
+use crate::app::{Account, App, Message};
 use crate::jam::{CODE_LEN, MAX_MEMBERS};
 use crate::ui::components::{
     BODY_LINE, h1, h2, line, muted, outlined_button, primary_button, section, small,
@@ -15,10 +15,7 @@ use crate::ui::theme;
 
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     let inner = width - 2.0 * theme::PAD;
-    let body = match &app.jam {
-        Some(session) => joined(app, session, inner),
-        None => start(app, inner),
-    };
+    let body = if app.jam.is_active() { joined(app, inner) } else { start(app, inner) };
     column![h1("Jam"), body].spacing(36).width(Length::Fill).into()
 }
 
@@ -59,7 +56,7 @@ fn start(app: &App, width: f32) -> Element<'_, Message> {
             .spacing(12),
         ),
     );
-    if app.social.jam_invites.is_empty() {
+    if app.social.view.jam_invites.is_empty() {
         return start;
     }
     column![invites(app, width), start].spacing(36).into()
@@ -67,7 +64,7 @@ fn start(app: &App, width: f32) -> Element<'_, Message> {
 
 /// Gli inviti degli amici: un tocco per entrare nella loro jam, oppure per rifiutare.
 fn invites(app: &App, width: f32) -> Element<'_, Message> {
-    let rows = app.social.jam_invites.iter().map(|invite| {
+    let rows = app.social.view.jam_invites.iter().map(|invite| {
         let join = primary_button("Entra", None, Message::JamInviteAccept(invite.code.clone()));
         let decline = outlined_button("Ignora", None, Some(Message::JamInviteDismiss(invite.code.clone())));
         let text_width = (width - 2.0 * theme::PAD - 2.0 * 120.0).max(80.0);
@@ -89,17 +86,15 @@ fn invites(app: &App, width: f32) -> Element<'_, Message> {
 }
 
 /// Con una jam aperta: il codice da condividere, chi c'è e l'uscita.
-fn joined<'a>(app: &'a App, session: &'a JamSession, width: f32) -> Element<'a, Message> {
-    let code = session.code.as_deref().unwrap_or("…");
-    let people = session.members.iter().map(|member| {
-        let label = if session.you == Some(member.id) {
-            format!("{} (tu)", member.name)
-        } else {
-            member.name.clone()
-        };
+fn joined(app: &App, width: f32) -> Element<'_, Message> {
+    let jam = &app.jam;
+    let code = jam.code.as_deref().unwrap_or("…");
+    let people = jam.members.iter().map(|member| {
+        let label =
+            if jam.you == Some(member.id) { format!("{} (tu)", member.name) } else { member.name.clone() };
         line(&label, width, BODY_LINE)
     });
-    let status = if session.code.is_some() { "Collegato alla stanza" } else { "Connessione in corso…" };
+    let status = if jam.code.is_some() { "Collegato alla stanza" } else { "Connessione in corso…" };
     column![
         section(
             "Codice",
@@ -114,7 +109,7 @@ fn joined<'a>(app: &'a App, session: &'a JamSession, width: f32) -> Element<'a, 
         ),
         section(
             "Persone",
-            Some(small(format!("{} di {MAX_MEMBERS}", session.members.len())).into()),
+            Some(small(format!("{} di {MAX_MEMBERS}", jam.members.len())).into()),
             card(column(people).spacing(8)),
         ),
         invite_friends(app, width),
@@ -134,7 +129,7 @@ fn joined<'a>(app: &'a App, session: &'a JamSession, width: f32) -> Element<'a, 
 /// Gli amici da invitare nella jam in corso: se ne scelgono quanti si vuole e si manda un invito
 /// a tutti insieme. Chi lo riceve lo vede nella propria schermata Jam.
 fn invite_friends(app: &App, width: f32) -> Element<'_, Message> {
-    let body: Element<'_, Message> = match (&app.account, app.social.friends.ready()) {
+    let body: Element<'_, Message> = match (&app.social.view.account, app.social.view.friends.ready()) {
         (Account::SignedIn(me), Some(friends)) if me.profile.is_some() => {
             if friends.friends.is_empty() {
                 small("Non hai ancora amici da invitare: trovali dalla pagina Amici.").into()
@@ -149,7 +144,7 @@ fn invite_friends(app: &App, width: f32) -> Element<'_, Message> {
                     };
                     person_row(app, &friend.profile, None, vec![toggle], width - 2.0 * theme::PAD)
                 });
-                let ready = !app.social.invitees.is_empty() && !app.social.inviting;
+                let ready = !app.social.invitees.is_empty() && !app.social.view.inviting;
                 let send = if ready {
                     primary_button("Invia l'invito", Some(Icon::UserPlus), Message::JamInviteSend)
                 } else {

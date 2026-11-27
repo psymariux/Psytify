@@ -17,8 +17,9 @@ use crate::ui::pages::search::{art_id, external_row, play_action, source_detail}
 use crate::ui::theme;
 
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
+    // La playlist arriva dal core un attimo dopo il clic: finché non c'è, scheletri (come l'album).
     let Some(open) = &app.external.open else {
-        return empty_block("Nessuna playlist aperta. Cercane una dalla ricerca.");
+        return skeleton_rows(8, theme::ROW_MEDIA, TableKind::Mixed);
     };
     let playlist = &open.playlist;
     let art = cover(

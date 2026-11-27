@@ -4,9 +4,8 @@
 //! sostituisce senza fermarsi. GStreamer apre il video su un thread a parte (può bloccare fino a
 //! 5 secondi): la UI non si ferma mai.
 
-use std::time::Duration;
 #[cfg(feature = "video")]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::Task;
 use uuid::Uuid;
@@ -15,67 +14,37 @@ use uuid::Uuid;
 use super::Notice;
 use super::{App, Message, SideTab};
 #[cfg(feature = "video")]
-use crate::api::ApiClient;
-#[cfg(feature = "video")]
 use crate::error::AppError;
+#[cfg(feature = "video")]
+use psytify_core::command::{Command, VideoCmd};
+#[cfg(feature = "video")]
+use psytify_core::player::Clock;
+#[cfg(feature = "video")]
+use psytify_core::snapshot::{Clip, ClipState, PlaybackView};
+#[cfg(feature = "video")]
+use psytify_core::video::{Adjust, Alignment, DRIFT, Measure, SETTLE};
 
-/// Brani della coda, dopo quello corrente, di cui il server prepara il videoclip.
-const VIDEO_AHEAD: usize = 2;
-/// Altezza della versione completa: sotto, si aspetta che il server la prepari.
+/// Il player del videoclip del brano in corso. Che videoclip serve, quando aprirlo, che cosa fare se
+/// non si apre e quando c'è una versione migliore lo decide il core (`VideoView`, passo 4.9); qui
+/// sta solo GStreamer: aprire l'indirizzo che il core pubblica su un thread a parte (può bloccare
+/// fino a 5 secondi: la UI non si ferma mai), tenerlo allineato all'audio con le regole del core
+/// (`Alignment`) e chiuderlo.
 #[cfg(feature = "video")]
-const FULL_HEIGHT: u32 = 720;
-/// Ogni quanto si chiede se la versione completa è pronta, e quante volte al massimo.
-#[cfg(feature = "video")]
-const UPGRADE_WAIT: Duration = Duration::from_secs(6);
-#[cfg(feature = "video")]
-const MAX_UPGRADES: u32 = 10;
-/// Scarto tollerato fra video e audio prima di riallineare il video.
-#[cfg(feature = "video")]
-const VIDEO_DRIFT: Duration = Duration::from_millis(200);
-/// Dopo un riallineamento si lascia al video il tempo di ripartire.
-#[cfg(feature = "video")]
-const RESYNC_PAUSE: Duration = Duration::from_secs(2);
-/// Massimo anticipo con cui si mira un riallineamento (vedi `VideoView::lead`).
-#[cfg(feature = "video")]
-const MAX_LEAD: Duration = Duration::from_millis(1500);
-/// Quanto si aspetta, sul thread che apre il video, che il seek iniziale arrivi a destinazione.
-#[cfg(feature = "video")]
-const SETTLE: Duration = Duration::from_millis(600);
-
-/// Videoclip aperto: il player GStreamer e il brano a cui appartiene.
-#[cfg(feature = "video")]
-pub struct VideoView {
+pub struct VideoStage {
     pub track_id: Uuid,
     pub player: Option<iced_video_player::Video>,
-    /// Altezza della versione aperta (`None`: completa, o non ancora aperta).
-    pub height: Option<u32>,
-    /// Un URL scaduto o uno stream caduto si riprovano una volta sola con un URL nuovo.
-    pub retried: bool,
-    /// Richieste della versione completa già fatte.
-    upgrades: u32,
-    /// Ultimo riallineamento all'audio: non lo si insegue a ogni Tick.
-    synced_at: Instant,
-    /// Il seek stesso costa tempo (il video si ferma a bufferizzare mentre l'audio va avanti): si
-    /// mira avanti di quanto il video è rimasto indietro le volte prima, o si insegue all'infinito.
-    lead: Duration,
+    /// Il `seq` del videoclip del core che `player` mostra (o che si sta aprendo).
+    pub(super) seq: u64,
+    /// Una versione migliore, di questo `seq`, si sta aprendo di fianco: la si sostituisce quando è
+    /// pronta, senza fermarsi.
+    upgrading: Option<u64>,
+    alignment: Alignment,
 }
 
 #[cfg(feature = "video")]
-impl VideoView {
-    fn new(track_id: Uuid, retried: bool) -> Self {
-        Self {
-            track_id,
-            player: None,
-            height: None,
-            retried,
-            upgrades: 0,
-            synced_at: Instant::now(),
-            lead: Duration::ZERO,
-        }
-    }
-
-    fn wants_upgrade(&self) -> bool {
-        self.player.is_some() && self.height.is_some_and(|h| h < FULL_HEIGHT) && self.upgrades < MAX_UPGRADES
+impl VideoStage {
+    fn new(track_id: Uuid, seq: u64) -> Self {
+        Self { track_id, player: None, seq, upgrading: None, alignment: Alignment::new(Instant::now()) }
     }
 }
 
@@ -85,13 +54,12 @@ impl VideoView {
 #[derive(Clone)]
 pub struct OpenedVideo {
     player: std::sync::Arc<std::sync::Mutex<Option<iced_video_player::Video>>>,
-    height: Option<u32>,
 }
 
 #[cfg(feature = "video")]
 impl std::fmt::Debug for OpenedVideo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenedVideo").field("height", &self.height).finish_non_exhaustive()
+        f.debug_struct("OpenedVideo").finish_non_exhaustive()
     }
 }
 
@@ -102,19 +70,25 @@ impl OpenedVideo {
     }
 }
 
-/// La posizione dell'audio in un istante: il thread che apre il video la proietta in avanti.
+/// Ciò che il player misura di sé, per le regole di allineamento del core.
 #[cfg(feature = "video")]
-#[derive(Debug, Clone, Copy)]
-struct Clock {
-    position: Duration,
-    at: Instant,
-    playing: bool,
+fn measure(player: &iced_video_player::Video) -> Measure {
+    Measure {
+        position: player.position(),
+        duration: player.duration(),
+        paused: player.paused(),
+        ended: player.eos(),
+    }
 }
 
+/// Fa al player ciò che le regole del core hanno deciso.
 #[cfg(feature = "video")]
-impl Clock {
-    fn now(self) -> Duration {
-        if self.playing { self.position + self.at.elapsed() } else { self.position }
+fn apply(player: &mut iced_video_player::Video, adjust: Adjust) {
+    if let Some(paused) = adjust.pause {
+        player.set_paused(paused);
+    }
+    if let Some(position) = adjust.seek {
+        let _ = player.seek(position);
     }
 }
 
@@ -189,38 +163,22 @@ fn discard(player: iced_video_player::Video) {
     let _ = std::thread::Builder::new().name("video-close".into()).spawn(move || drop(player));
 }
 
-/// Chiede l'URL del videoclip e lo apre già alla posizione dell'audio. Con `better_than`, se il
-/// server non ha ancora una versione più alta, `None` senza aprire nulla.
+/// Apre l'indirizzo che il core ha pubblicato già alla posizione dell'audio: `clock` è l'orologio
+/// della riproduzione, che il thread proietta in avanti mentre il video si prepara.
 #[cfg(feature = "video")]
-async fn open(
-    api: Result<ApiClient, AppError>,
-    track_id: Uuid,
-    clock: Clock,
-    better_than: Option<u32>,
-    dedicated: bool,
-) -> Result<Option<OpenedVideo>, AppError> {
+async fn open(url: String, clock: Clock, dedicated: bool) -> Result<OpenedVideo, AppError> {
     #[cfg(feature = "tour")]
     let asked = Instant::now();
-    let signed = api?.video_url(track_id).await?;
-    #[cfg(feature = "tour")]
-    eprintln!("tour: video-url {:?} height {:?}", asked.elapsed(), signed.height);
-    // Senza altezza è un videoclip salvato prima delle due versioni: è completo.
-    if let Some(current) = better_than
-        && signed.height.is_some_and(|height| height <= current)
-    {
-        return Ok(None);
-    }
-    let height = signed.height;
-    let url = url::Url::parse(&signed.url).map_err(|_| AppError::Video)?;
+    let url = url::Url::parse(&url).map_err(|_| AppError::Video)?;
     let player = tokio::task::spawn_blocking(move || {
         // L'errore di GStreamer può contenere l'URL firmato: non lo si conserva.
         choose_decoders(dedicated);
         let mut player = iced_video_player::Video::new(&url).map_err(|_| AppError::Video)?;
         player.set_paused(!clock.playing);
-        let target = clock.now();
+        let target = clock.at(Instant::now());
         if player.seek(target).is_ok() {
             let deadline = Instant::now() + SETTLE;
-            while Instant::now() < deadline && player.position().abs_diff(clock.now()) > VIDEO_DRIFT {
+            while Instant::now() < deadline && player.position().abs_diff(clock.at(Instant::now())) > DRIFT {
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
@@ -230,7 +188,7 @@ async fn open(
     })
     .await
     .map_err(|_| AppError::Video)??;
-    Ok(Some(OpenedVideo { player: std::sync::Arc::new(std::sync::Mutex::new(Some(player))), height }))
+    Ok(OpenedVideo { player: std::sync::Arc::new(std::sync::Mutex::new(Some(player))) })
 }
 
 impl App {
@@ -247,7 +205,7 @@ impl App {
 
     /// Il videoclip del brano corrente non si è aperto: si mostra la copertina con «Riprova».
     pub fn video_broken(&self) -> bool {
-        self.video_available() && self.queue.current().is_some_and(|t| self.video_blocked == Some(t.id))
+        self.video_available() && self.queue.current().is_some_and(|t| self.video_failed_for(t.id))
     }
 
     #[cfg(feature = "video")]
@@ -260,242 +218,321 @@ impl App {
         false
     }
 
-    /// Il brano di cui qualcuno vuole il videoclip: la vista a tutto schermo, oppure il pannello
-    /// «In riproduzione» aperto con il videoclip scelto al posto della copertina.
-    pub(super) fn wanted_video(&self) -> Option<Uuid> {
-        let track = self.queue.current().filter(|_| self.video_available())?;
-        if self.video_blocked == Some(track.id) {
-            return None;
-        }
-        let in_panel = self.panel_open && self.side_tab == SideTab::NowPlaying && self.panel_video;
-        let on_stage = self.focus && self.focus_video;
-        (in_panel || on_stage).then_some(track.id)
+    /// Il core ha fermato il videoclip di quel brano (non si apriva, nemmeno al secondo tentativo):
+    /// non lo riprova finché il brano non cambia o l'ascoltatore non preme «Riprova».
+    #[cfg(feature = "video")]
+    fn video_failed_for(&self, track: Uuid) -> bool {
+        let view = &self.core_snapshot.video;
+        view.track == Some(track) && matches!(view.state, ClipState::Failed(_))
     }
 
-    /// Porta il videoclip caricato a ciò che si vuole vedere: lo apre, o lo ferma e libera la memoria.
-    pub(super) fn refresh_video(&mut self) -> Task<Message> {
-        match self.wanted_video() {
-            Some(_) => self.load_video(false),
-            None => {
+    #[cfg(not(feature = "video"))]
+    fn video_failed_for(&self, _track: Uuid) -> bool {
+        false
+    }
+
+    /// Un posto dell'interfaccia mostra il videoclip: la vista a tutto schermo, oppure il pannello
+    /// «In riproduzione» aperto con il videoclip scelto al posto della copertina. Il core lo sa
+    /// (`VideoCmd::Show`) e chiede il videoclip al server solo allora.
+    pub(super) fn video_surface(&self) -> bool {
+        let in_panel = self.panel_open && self.side_tab == SideTab::NowPlaying && self.panel_video;
+        let on_stage = self.focus && self.focus_video;
+        cfg!(feature = "video") && (in_panel || on_stage)
+    }
+
+    /// Il brano di cui qualcuno vuole il videoclip, se può averlo.
+    pub(super) fn wanted_video(&self) -> Option<Uuid> {
+        let track = self.queue.current().filter(|_| self.video_available())?;
+        if self.video_failed_for(track.id) {
+            return None;
+        }
+        self.video_surface().then_some(track.id)
+    }
+
+    /// Il videoclip che il core pubblica è cambiato: si apre quello nuovo, si sostituisce con la
+    /// versione migliore, o si chiude il player se non c'è più niente da mostrare. Un videoclip che
+    /// si è fermato lo dice con un avviso, una volta.
+    #[cfg(feature = "video")]
+    pub(super) fn video_published(&mut self) -> Task<Message> {
+        let view = std::sync::Arc::clone(&self.core_snapshot.video);
+        if view.failures > self.video_failures {
+            self.video_failures = view.failures;
+            if let ClipState::Failed(error) = &view.state {
+                self.notice = Some(Notice::Error(error.to_string()));
+            }
+        }
+        match (view.track, &view.state) {
+            (Some(track), ClipState::Ready(clip)) => self.open_clip(track, clip),
+            // Fermo, in preparazione, o non riuscito: niente player.
+            _ => {
                 self.close_video();
                 Task::none()
             }
         }
     }
 
-    /// Il server prepara i videoclip del brano corrente e dei prossimi in coda: quando si guardano
-    /// sono già nello storage. Solo se il pannello mostra i videoclip; ogni brano una volta.
-    pub(super) fn prepare_videos(&mut self) -> Task<Message> {
-        if !cfg!(feature = "video") || !self.panel_video {
-            return Task::none();
+    /// Apre il videoclip che il core ha pubblicato, se non è già quello che c'è.
+    #[cfg(feature = "video")]
+    fn open_clip(&mut self, track: Uuid, clip: &Clip) -> Task<Message> {
+        let (url, seq) = (clip.url().to_owned(), clip.seq);
+        let (clock, dedicated) = (self.playback.clock, self.dedicated_video);
+        match self.video.as_mut() {
+            // Lo stesso videoclip già aperto (o in apertura) resta com'è.
+            Some(stage) if stage.track_id == track && (stage.seq == seq || stage.upgrading == Some(seq)) => {
+                Task::none()
+            }
+            // Un indirizzo nuovo per lo stesso brano, con il player già aperto: una versione
+            // migliore, che si apre di fianco e prende il posto di quella che suona.
+            Some(stage) if stage.track_id == track && stage.player.is_some() => {
+                stage.upgrading = Some(seq);
+                Task::perform(open(url, clock, dedicated), move |result| {
+                    Message::VideoUpgraded(track, seq, result)
+                })
+            }
+            _ => {
+                self.close_video();
+                self.video = Some(VideoStage::new(track, seq));
+                Task::perform(open(url, clock, dedicated), move |result| {
+                    Message::VideoOpened(track, seq, result)
+                })
+            }
         }
-        let ahead =
-            self.queue.current().into_iter().chain(self.queue.upcoming().take(VIDEO_AHEAD).map(|(_, t)| t));
-        let ids: Vec<Uuid> = ahead
-            .filter(|track| track.has_video && !track.video_ready)
-            .map(|track| track.id)
-            .filter(|id| self.videos_prepared.insert(*id))
-            .collect();
-        Task::batch(ids.into_iter().map(|id| {
-            let api = self.api();
-            Task::perform(async move { api?.prepare_video(id).await }, |_| ()).discard()
-        }))
     }
 
     #[cfg(feature = "video")]
     fn close_video(&mut self) {
-        if let Some(player) = self.video.take().and_then(|view| view.player) {
+        if let Some(player) = self.video.take().and_then(|stage| stage.player) {
             discard(player);
         }
     }
 
-    #[cfg(not(feature = "video"))]
-    fn close_video(&mut self) {}
-
-    #[cfg(feature = "video")]
-    fn clock(&self) -> Clock {
-        Clock { position: self.audio_position(), at: Instant::now(), playing: self.playback.is_playing() }
-    }
-
-    #[cfg(feature = "video")]
-    pub(super) fn load_video(&mut self, retried: bool) -> Task<Message> {
-        let Some(track_id) = self.queue.current().filter(|t| t.has_video).map(|t| t.id) else {
-            self.close_video();
-            return Task::none();
-        };
-        // Lo stesso videoclip già aperto (o in apertura) resta com'è.
-        if !retried && self.video.as_ref().is_some_and(|view| view.track_id == track_id) {
-            return Task::none();
-        }
-        self.close_video();
-        self.video = Some(VideoView::new(track_id, retried));
-        let (api, clock) = (self.api(), self.clock());
-        let dedicated = self.dedicated_video;
-        Task::perform(open(api, track_id, clock, None, dedicated), move |result| {
-            Message::VideoOpened(track_id, result)
-        })
-    }
-
-    #[cfg(not(feature = "video"))]
-    pub(super) fn load_video(&mut self, _retried: bool) -> Task<Message> {
-        Task::none()
-    }
-
+    /// Il videoclip si è aperto su un altro thread.
     #[cfg(feature = "video")]
     pub(super) fn video_opened(
         &mut self,
-        track_id: Uuid,
-        result: Result<Option<OpenedVideo>, AppError>,
+        track: Uuid,
+        seq: u64,
+        result: Result<OpenedVideo, AppError>,
     ) -> Task<Message> {
-        let opened = result.and_then(|opened| opened.ok_or(AppError::Video));
-        if self.video.as_ref().is_none_or(|view| view.track_id != track_id || view.player.is_some()) {
+        let player = result.ok().and_then(|opened| opened.take());
+        let waiting = self
+            .video
+            .as_ref()
+            .is_some_and(|stage| stage.track_id == track && stage.seq == seq && stage.player.is_none());
+        if !waiting {
             // Arrivato tardi: il brano è cambiato o il videoclip è stato chiuso.
-            if let Some(player) = opened.ok().and_then(|opened| opened.take()) {
+            if let Some(player) = player {
                 discard(player);
             }
             return Task::none();
         }
-        let player = opened.and_then(|opened| Ok((opened.take().ok_or(AppError::Video)?, opened.height)));
-        match player {
-            Ok((player, height)) => {
-                if let Some(view) = self.video.as_mut() {
-                    view.player = Some(player);
-                    view.height = height;
-                }
+        match (player, self.video.as_mut()) {
+            (Some(player), Some(stage)) => {
+                stage.player = Some(player);
+                stage.alignment = Alignment::new(Instant::now());
                 self.align_video(true);
-                self.schedule_upgrade(track_id)
-            }
-            Err(err) => {
-                self.close_video();
-                self.video_blocked = Some(track_id);
-                self.notice = Some(Notice::Error(err.to_string()));
                 Task::none()
             }
+            // Non si è aperto: il core ne chiede un altro indirizzo una volta, poi lo ferma.
+            _ => self.send_video(VideoCmd::Failed { seq }),
         }
     }
 
-    /// Fra un po' si chiede se la versione completa è pronta.
-    #[cfg(feature = "video")]
-    fn schedule_upgrade(&self, track_id: Uuid) -> Task<Message> {
-        if !self.video.as_ref().is_some_and(VideoView::wants_upgrade) {
-            return Task::none();
-        }
-        Task::perform(tokio::time::sleep(UPGRADE_WAIT), move |()| Message::VideoUpgrade(track_id))
-    }
-
-    #[cfg(feature = "video")]
-    pub(super) fn video_upgrade(&mut self, track_id: Uuid) -> Task<Message> {
-        let clock = self.clock();
-        let Some(view) = self.video.as_mut().filter(|view| view.track_id == track_id && view.wants_upgrade())
-        else {
-            return Task::none();
-        };
-        view.upgrades += 1;
-        let better_than = view.height;
-        let (api, dedicated) = (self.api(), self.dedicated_video);
-        Task::perform(open(api, track_id, clock, better_than, dedicated), move |result| {
-            Message::VideoUpgraded(track_id, result)
-        })
-    }
-
-    /// La versione completa, se è arrivata, prende il posto di quella aperta senza fermarsi.
+    /// La versione migliore si è aperta di fianco: prende il posto di quella che suonava, senza
+    /// fermarsi. Se non si apre il core lo sa e riprova più tardi, e intanto resta la vecchia.
     #[cfg(feature = "video")]
     pub(super) fn video_upgraded(
         &mut self,
-        track_id: Uuid,
-        result: Result<Option<OpenedVideo>, AppError>,
+        track: Uuid,
+        seq: u64,
+        result: Result<OpenedVideo, AppError>,
     ) -> Task<Message> {
-        let opened = result.ok().flatten();
-        let Some(view) =
-            self.video.as_mut().filter(|view| view.track_id == track_id && view.player.is_some())
-        else {
-            if let Some(player) = opened.and_then(|opened| opened.take()) {
+        let player = result.ok().and_then(|opened| opened.take());
+        let view = &self.core_snapshot.video;
+        let current =
+            view.track == Some(track) && matches!(&view.state, ClipState::Ready(clip) if clip.seq == seq);
+        let Some(stage) = self.video.as_mut().filter(|stage| {
+            stage.track_id == track && stage.player.is_some() && stage.upgrading == Some(seq)
+        }) else {
+            if let Some(player) = player {
                 discard(player);
             }
             return Task::none();
         };
-        if let Some((player, opened)) = opened.and_then(|opened| Some((opened.take()?, opened))) {
-            if let Some(old) = view.player.replace(player) {
-                discard(old);
-            }
-            view.height = opened.height;
-            self.align_video(true);
-        }
-        self.schedule_upgrade(track_id)
-    }
-
-    #[cfg(feature = "video")]
-    pub(super) fn video_failed(&mut self) -> Task<Message> {
-        match &self.video {
-            Some(view) if !view.retried => self.load_video(true),
-            other => {
-                self.video_blocked = other.as_ref().map(|view| view.track_id);
-                self.close_video();
-                self.notice = Some(Notice::Error(AppError::Video.to_string()));
+        stage.upgrading = None;
+        match player {
+            Some(player) if current => {
+                if let Some(old) = stage.player.replace(player) {
+                    discard(old);
+                }
+                stage.seq = seq;
+                self.align_video(true);
                 Task::none()
             }
+            Some(player) => {
+                // Un altro indirizzo ha già preso il suo posto: questo non serve più.
+                discard(player);
+                Task::none()
+            }
+            None => self.send_video(VideoCmd::Failed { seq }),
         }
     }
 
-    /// Riapre il videoclip in corso, per esempio con l'altro decoder.
-    pub(super) fn reopen_video(&mut self) -> Task<Message> {
-        self.close_video();
-        self.refresh_video()
+    /// Lo stream del videoclip è caduto: lo dice al core, che ne chiede un altro indirizzo una volta.
+    #[cfg(feature = "video")]
+    pub(super) fn video_failed(&mut self) -> Task<Message> {
+        match self.video.as_ref().filter(|stage| stage.player.is_some()).map(|stage| stage.seq) {
+            Some(seq) => self.send_video(VideoCmd::Failed { seq }),
+            None => Task::none(),
+        }
     }
 
-    /// Il videoclip segue il player: pausa, ripresa e posizione.
-    pub(super) fn sync_video(&mut self, seek_to: Option<Duration>) {
+    /// Il videoclip segue il player: se la riproduzione è cambiata da `previous` (un brano che parte,
+    /// un salto, pausa o ripresa) lo porta dove sta l'audio.
+    pub(super) fn follow_video(&mut self, previous: &psytify_core::snapshot::PlaybackView) {
         #[cfg(feature = "video")]
-        if let Some(view) = self.video.as_mut()
-            && let Some(player) = view.player.as_mut()
+        if let Some(stage) = self.video.as_mut()
+            && let Some(player) = stage.player.as_mut()
+            && let Some(adjust) = stage.alignment.follow(previous, &self.playback, Instant::now())
         {
-            player.set_paused(!self.playback.is_playing());
-            if let Some(position) = seek_to {
-                let _ = player.seek(position);
-                view.synced_at = Instant::now();
-            }
+            apply(player, adjust);
         }
         #[cfg(not(feature = "video"))]
-        let _ = seek_to;
+        let _ = previous;
     }
 
     /// Al Tick: se il video si è allontanato dall'audio (rete lenta, decoder in ritardo) lo si
-    /// riporta alla posizione dell'audio, al massimo ogni `RESYNC_PAUSE`.
+    /// riporta alla posizione dell'audio, secondo le regole del core.
     pub(super) fn resync_video(&mut self) {
         #[cfg(feature = "video")]
         self.align_video(false);
     }
 
-    /// Allinea il video all'audio: subito con `now`, altrimenti solo dopo `RESYNC_PAUSE` dall'ultima
-    /// volta. Pausa e ripresa seguono sempre il player.
+    /// Allinea il video all'audio: subito con `force` (appena aperto), altrimenti solo se è passato
+    /// abbastanza dall'ultima volta. Pausa e ripresa seguono sempre il player.
     #[cfg(feature = "video")]
-    fn align_video(&mut self, now: bool) {
-        let playing = self.playback.is_playing();
-        let audio = self.audio_position();
-        let Some(view) = self.video.as_mut() else { return };
-        if !now && (!playing || view.synced_at.elapsed() < RESYNC_PAUSE) {
-            return;
+    fn align_video(&mut self, force: bool) {
+        let playback: &PlaybackView = &self.playback;
+        let Some(stage) = self.video.as_mut() else { return };
+        let Some(player) = stage.player.as_mut() else { return };
+        let now = Instant::now();
+        let adjust = stage.alignment.align(playback, measure(player), force, now);
+        #[cfg(feature = "tour")]
+        if adjust.seek.is_some() {
+            eprintln!(
+                "tour: resync video {:?} audio {:?} lead {:?}",
+                player.position(),
+                playback.position(now),
+                stage.alignment.lead()
+            );
         }
-        let Some(player) = view.player.as_mut() else { return };
-        if player.paused() == playing {
-            player.set_paused(!playing);
-        }
-        let duration = player.duration();
-        // Un video più corto dell'audio resta sull'ultimo fotogramma.
-        if (!duration.is_zero() && audio >= duration) || player.eos() {
-            return;
-        }
-        let video = player.position();
-        if video.abs_diff(audio) > VIDEO_DRIFT {
-            #[cfg(feature = "tour")]
-            eprintln!("tour: resync video {video:?} audio {audio:?} lead {:?}", view.lead);
-            view.lead = if video < audio {
-                (view.lead + (audio - video)).min(MAX_LEAD)
-            } else {
-                view.lead.saturating_sub(video - audio)
-            };
-            let _ = player.seek(audio + view.lead);
-            view.synced_at = Instant::now();
+        apply(player, adjust);
+    }
+}
+
+/// I comandi al core per il videoclip: in una build con `video` il core ha il dominio.
+#[cfg(feature = "video")]
+impl App {
+    fn send_video(&mut self, command: VideoCmd) -> Task<Message> {
+        self.send_core(Command::Video(command))
+    }
+
+    /// Un posto dell'interfaccia mostra (o non mostra più) il videoclip.
+    pub(super) fn show_video(&mut self, on: bool) -> Task<Message> {
+        self.send_video(VideoCmd::Show(on))
+    }
+
+    /// Chi ascolta vuole (o non vuole più) i videoclip dei brani in arrivo preparati dal server.
+    fn prepare_videos(&mut self, on: bool) -> Task<Message> {
+        self.send_video(VideoCmd::PrepareAhead(on))
+    }
+
+    /// Toglie il blocco di un videoclip che non si apriva.
+    fn retry_video(&mut self) -> Task<Message> {
+        self.send_video(VideoCmd::Retry)
+    }
+
+    /// Riapre il videoclip in corso, per esempio con l'altro decoder.
+    fn reopen_video(&mut self) -> Task<Message> {
+        self.send_video(VideoCmd::Reopen)
+    }
+
+    /// Dice al core che cosa si vuole del video: all'avvio, con il pannello riaperto sul videoclip del
+    /// brano ripreso (altrimenti resta su «Preparo il videoclip…» finché qualcosa non cambia) e con la
+    /// scelta di averli in anticipo.
+    pub(super) fn video_wants(&mut self) -> Task<Message> {
+        let (show, ahead) = (self.video_surface(), self.panel_video);
+        Task::batch([self.prepare_videos(ahead), self.show_video(show)])
+    }
+}
+
+/// Senza `video` (Android, build senza GStreamer) il core non ha il dominio: niente da dire.
+#[cfg(not(feature = "video"))]
+impl App {
+    pub(super) fn show_video(&mut self, _on: bool) -> Task<Message> {
+        Task::none()
+    }
+
+    fn prepare_videos(&mut self, _on: bool) -> Task<Message> {
+        Task::none()
+    }
+
+    fn retry_video(&mut self) -> Task<Message> {
+        Task::none()
+    }
+
+    fn reopen_video(&mut self) -> Task<Message> {
+        Task::none()
+    }
+
+    pub(super) fn video_wants(&mut self) -> Task<Message> {
+        Task::none()
+    }
+}
+
+impl App {
+    /// I messaggi di questo dominio, smistati da `App::handle`.
+    pub(super) fn handle_video(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::SetDedicatedVideo(on) => {
+                self.dedicated_video = on;
+                // Il videoclip aperto riparte con il decoder scelto; il prossimo lo usa da sé.
+                Task::batch([self.persist(), self.reopen_video()])
+            }
+            Message::GpuDetected(gpu) => {
+                self.dedicated_gpu = gpu;
+                Task::none()
+            }
+            Message::SetPanelVideo(on) => {
+                self.panel_video = on;
+                Task::batch([self.retry_video(), self.prepare_videos(on), self.persist()])
+            }
+            Message::RetryVideo => self.retry_video(),
+            Message::ToggleVideoFocus => {
+                if self.focus && self.focus_video {
+                    self.focus = false;
+                    self.focus_video = false;
+                    return Task::none();
+                }
+                let Some(id) = self.queue.current().filter(|t| t.has_video).map(|t| t.id) else {
+                    return Task::none();
+                };
+                self.focus = true;
+                self.focus_video = true;
+                if self.video_failed_for(id) { self.retry_video() } else { Task::none() }
+            }
+            Message::ToggleVideoLyrics => {
+                self.video_lyrics = !self.video_lyrics;
+                Task::none()
+            }
+            #[cfg(feature = "video")]
+            Message::VideoOpened(track_id, seq, result) => self.video_opened(track_id, seq, result),
+            #[cfg(feature = "video")]
+            Message::VideoUpgraded(track_id, seq, result) => self.video_upgraded(track_id, seq, result),
+            #[cfg(feature = "video")]
+            Message::VideoFailed => self.video_failed(),
+            // `handle` manda qui solo i messaggi di questo dominio.
+            _ => Task::none(),
         }
     }
 }

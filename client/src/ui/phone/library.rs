@@ -10,7 +10,7 @@ use uuid::Uuid;
 use super::{settings_icon, title_row, touch_icon};
 use crate::app::{App, Dialog, MenuTarget, Message, Screen, SidebarFilter};
 use crate::ui::components::{
-    PLAYING_LINE, SUB_LINE, TITLE_LINE, centered, count_label, hoverable, line, small,
+    PLAYING_LINE, SUB_LINE, TITLE_LINE, centered, count_label, hoverable, line, size_label, small,
 };
 use crate::ui::cover::{Art, cover, cover_round};
 use crate::ui::icons::{Icon, icon};
@@ -40,9 +40,9 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
         ));
     }
     if filter == SidebarFilter::All {
-        let art = container(icon(Icon::LibraryFill, 26.0, theme::ACCENT))
+        let art = container(icon(Icon::LibraryFill, 0.0, theme::MUTED))
             .center(theme::PHONE_ROW_COVER)
-            .style(theme::cover(theme::RAISED, theme::RADIUS_ROW));
+            .style(theme::cover_field);
         list = list.push(entry(
             art.into(),
             "Il catalogo",
@@ -50,6 +50,23 @@ pub fn view(app: &App, width: f32) -> Element<'_, Message> {
             text_width,
             false,
             Message::Navigate(Screen::Library),
+            None,
+        ));
+        let saved = if app.downloads.saved.is_empty() {
+            "Si ascoltano anche senza rete".to_owned()
+        } else {
+            format!("{} · {}", count_label(app.downloads.saved.len()), size_label(app.downloads.used_bytes))
+        };
+        let art = container(icon(Icon::Downloaded, 0.0, theme::MUTED))
+            .center(theme::PHONE_ROW_COVER)
+            .style(theme::cover_field);
+        list = list.push(entry(
+            art.into(),
+            "Scaricati",
+            &saved,
+            text_width,
+            app.screen == Screen::Downloads,
+            Message::Navigate(Screen::Downloads),
             None,
         ));
     }

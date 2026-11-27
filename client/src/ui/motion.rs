@@ -140,29 +140,6 @@ pub fn stagger(elapsed: Duration, index: usize) -> f32 {
     ease_out(progress)
 }
 
-/// Un piccolo rimbalzo che parte da 0, sale a 1 e torna a 0 in `duration` (il cuore appena premuto).
-pub fn pop(since: Instant, duration: Duration) -> f32 {
-    let t = (since.elapsed().as_secs_f32() / duration.as_secs_f32().max(f32::EPSILON)).clamp(0.0, 1.0);
-    (std::f32::consts::PI * t).sin() * (1.0 - 0.35 * t)
-}
-
-/// Un'onda lenta tra 0 e 1, sfasata per `lane`: le barre del visualizzatore non salgono insieme.
-pub fn wave(lane: usize, period: Duration) -> f32 {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis());
-    let period_ms = period.as_millis().max(1);
-    // Ogni barra ha il suo ritmo: periodo leggermente diverso e fase propria.
-    let lane_f = lane as f32;
-    let phase = (now % period_ms) as f32 / period_ms as f32 * (1.0 + 0.37 * lane_f) + lane_f * 0.31;
-    0.5 - 0.5 * (TAU * phase).cos()
-}
-
-/// Un'oscillazione lenta tra -1 e 1 con il periodo dato: fa muovere le sfumature.
-pub fn drift(period: Duration) -> f32 {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis());
-    let period_ms = period.as_millis().max(1);
-    (TAU * (now % period_ms) as f32 / period_ms as f32).sin()
-}
-
 /// Pulsazione degli scheletri: da 0 a 1 e ritorno ogni `period`. Dipende solo dall'orologio,
 /// così tutti gli scheletri dello schermo pulsano insieme.
 pub fn pulse(period: Duration) -> f32 {
@@ -235,26 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn list_items_enter_one_after_the_other() {
+    fn list_items_enter_together_without_stagger() {
+        // Le righe non entrano più una dopo l'altra (`STAGGER` è zero): tutte alla stessa dissolvenza.
         let at = Duration::from_millis(100);
-        assert!(stagger(at, 0) > stagger(at, 3));
+        assert_eq!(stagger(at, 0), stagger(at, 3));
         assert_eq!(stagger(Duration::ZERO, 2), 0.0);
         assert_eq!(stagger(Duration::from_secs(5), 99), 1.0);
-    }
-
-    #[test]
-    fn the_pop_starts_and_ends_at_rest() {
-        let now = Instant::now();
-        assert!(pop(now, Duration::from_secs(60)).abs() < 0.01);
-        let long_ago = now.checked_sub(Duration::from_secs(5)).unwrap_or(now);
-        assert!(pop(long_ago, Duration::from_millis(200)).abs() < 0.01);
-    }
-
-    #[test]
-    fn the_wave_stays_between_zero_and_one() {
-        for lane in 0..4 {
-            assert!((0.0..=1.0).contains(&wave(lane, Duration::from_millis(900))));
-        }
     }
 
     #[test]

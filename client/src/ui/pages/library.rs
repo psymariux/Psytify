@@ -30,7 +30,7 @@ const TRACK_FILTERS: [(LibraryFilter, &str); 3] = [
 ];
 
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
-    let tracks = app.library.tracks.ready().map(Vec::as_slice);
+    let tracks = app.library.tracks.ready().map(|tracks| tracks.as_slice());
     let filter = app.library.filter;
     let visible: Option<Arc<[Track]>> =
         tracks.map(|all| all.iter().filter(|t| filter.matches(t)).cloned().collect());
@@ -83,7 +83,7 @@ fn subline(app: &App, tracks: Option<&[Track]>) -> String {
 /// Gli artisti del catalogo che si conoscono: quelli degli album e dei brani caricati.
 fn library_artists(app: &App) -> Vec<ArtistCard> {
     let albums = app.library.albums.ready().map_or(&[][..], |a| &a[..]);
-    let tracks = app.library.tracks.ready().map_or(&[][..], Vec::as_slice);
+    let tracks = app.library.tracks.ready().map_or(&[][..], |tracks| tracks.as_slice());
     let mut found = feed::artists_from(albums, tracks);
     for card in &app.home.feed.artists {
         if !found.iter().any(|a| a.artist.id == card.artist.id) {

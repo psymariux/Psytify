@@ -31,12 +31,6 @@ const TOP_TRACKS: usize = 5;
 const TOP_COVER: f32 = 104.0;
 const TOP_PADDING: f32 = 18.0;
 
-/// Chiave dell'importazione in corso per un video YouTube (gli item di Archive usano il loro
-/// identificatore, che non contiene `:`).
-pub fn source_key(source: SourceKind, id: &str) -> String {
-    format!("{}:{}", source.as_str(), id)
-}
-
 pub fn view(app: &App, width: f32) -> Element<'_, Message> {
     let query = app.search.submitted.as_str();
     let title = || line(&format!("Risultati per «{query}»"), width, H1_LINE);
@@ -333,7 +327,7 @@ fn discover_row<'a>(app: &'a App, item: &'a DiscoverItem, text_width: f32) -> El
     if item.lossless {
         detail.push("Lossless".to_owned());
     }
-    let importing = app.search.importing.as_deref() == Some(item.identifier.as_str());
+    let importing = app.external.importing_archive(&item.identifier);
     let art = Art { id: art_id(&item.identifier), title: &item.title, url: item.cover_url.as_deref() };
     external_row(
         app,
@@ -424,8 +418,7 @@ pub fn source_row_with<'a>(
     play: Message,
 ) -> Element<'a, Message> {
     let detail = source_detail(item);
-    let importing = app.search.importing.as_deref() == Some(source_key(item.source, &item.id).as_str())
-        || app.external.importing(item.source, &item.id);
+    let importing = app.external.importing(item.source, &item.id);
     external_row(
         app,
         Art { id: art_id(&item.id), title: &item.title, url: item.cover_url.as_deref() },
@@ -483,12 +476,6 @@ fn wrap_row(chips: Vec<Element<'_, Message>>) -> Element<'_, Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn source_keys_never_collide_with_archive_identifiers() {
-        // Gli identificatori di Archive sono lettere, cifre, `.`, `_` e `-`: mai `:`.
-        assert_eq!(source_key(SourceKind::YouTube, "dQw4w9WgXcQ"), "youtube:dQw4w9WgXcQ");
-    }
 
     #[test]
     fn external_art_colour_is_stable() {

@@ -1,16 +1,14 @@
-//! Il player a schermo intero del telefono: la copertina grande che respira, titolo e artista, la
+//! Il player a schermo intero del telefono, sulla tela nera: la copertina grande, titolo e artista, la
 //! barra di avanzamento con i tempi sotto, i controlli grandi per il pollice e, in fondo, le schede
 //! Testo e Coda. Aperta una scheda, il testo o la coda prendono il posto della copertina, che resta
 //! piccola accanto al titolo; i controlli restano dove sono.
-
-use std::time::Duration;
 
 use iced::widget::{Space, button, column, container, row, slider, stack, text};
 use iced::{Alignment, Color, Element, Length, Padding, Size, alignment};
 
 use super::touch_icon;
 use crate::api::Track;
-use crate::app::{App, MenuTarget, Message, SideTab};
+use crate::app::{App, MenuTarget, Message, PhoneMsg, SideTab};
 use crate::player::queue::Repeat;
 use crate::player::seek::{self, format_time, progress as progress_of};
 use crate::ui::components::{H1_LINE, MUTED_LINE, TITLE_LINE, art_of, heart, line, small};
@@ -19,12 +17,12 @@ use crate::ui::focus::breathing_cover;
 use crate::ui::icons::{Icon, icon};
 use crate::ui::pointer::pointer;
 use crate::ui::touch_seek::touch_seek;
-use crate::ui::{lyrics, motion, side_panel, theme, volume_side};
+use crate::ui::{lyrics, theme, volume_side};
 
 /// Margine del player dai bordi.
 const GUTTER: f32 = 24.0;
-/// Il tasto Play: un tondo bianco, il più grande dello schermo dopo la copertina.
-const PLAY: f32 = 68.0;
+/// Il tasto Play: un quadrato primario, il più grande dello schermo dopo la copertina.
+const PLAY: f32 = psytify_design::tokens::size::phone::PHONE_PLAY_BUTTON;
 /// Precedente e successivo: più grandi degli interruttori ai lati.
 const SKIP: f32 = 56.0;
 /// La copertina piccola sopra il testo e la coda.
@@ -33,11 +31,23 @@ const MINI_COVER: f32 = 52.0;
 /// Il download del brano in corso; spento se la licenza non lo permette (il tocco dice perché),
 /// e «…» mentre scarica.
 fn download_button<'a>(app: &App, track: &Track) -> Element<'a, Message> {
-    if app.downloading.contains(&track.id) {
-        return container(text("…").size(theme::FS_TITLE).color(theme::ACCENT))
+    if let Some(item) = app.downloads.item(track.id).filter(|item| item.is_busy()) {
+        // In corso: la percentuale se si sa; in coda o in preparazione, «…».
+        let label = item.percent().map_or_else(|| "…".to_owned(), |percent| format!("{percent}%"));
+        return container(text(label).size(theme::FS_TITLE).color(theme::TEXT))
             .center_x(Length::Fixed(theme::TOUCH_TARGET))
             .center_y(Length::Fixed(theme::TOUCH_TARGET))
             .into();
+    }
+    if app.downloads.is_saved(track.id) {
+        // Sul dispositivo: il segno di «scaricato». Un file perso torna il tasto, con la tinta d'errore,
+        // per riscaricarlo; con il file a posto un tocco dice che il brano è già qui.
+        let (glyph, tint) = if app.downloads.lost_reason(track.id).is_some() {
+            (Icon::Download, theme::ERROR)
+        } else {
+            (Icon::Downloaded, theme::ICON_ACTIVE)
+        };
+        return touch_icon(glyph, tint, Message::Download(track.clone()));
     }
     let tint = if track.downloadable { theme::MUTED } else { theme::DISABLED };
     touch_icon(Icon::Download, tint, Message::Download(track.clone()))
@@ -49,7 +59,7 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
     };
     let width = (window.width - edges.left - edges.right - 2.0 * GUTTER).max(200.0);
     let header = row![
-        touch_icon(Icon::ChevronDown, theme::TEXT, Message::ToggleFocus),
+        touch_icon(Icon::ChevronDown, theme::TEXT, Message::Phone(PhoneMsg::DismissPlayer)),
         container(text("In riproduzione").size(theme::FS_SMALL).font(theme::FONT_MEDIUM).color(theme::MUTED))
             .width(Length::Fill)
             .align_x(alignment::Horizontal::Center),
@@ -113,7 +123,7 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
             .style(theme::bare)
             .on_press(Message::SideTab(SideTab::NowPlaying));
             let body: Element<'_, Message> = if tab == SideTab::Queue {
-                side_panel::queue_body(app)
+                super::queue::view(app, width)
             } else {
                 lyrics::view_as(app, lyrics::PHONE)
             };
@@ -142,8 +152,6 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
 
     let page = column![header, middle, progress(app), controls(app), tabs].spacing(14).height(Length::Fill);
 
-    let tint = app.covers.tint_of(art_of(track));
-    let drift = if app.playback.is_playing() { motion::drift(Duration::from_secs(14)) } else { 0.0 };
     container(page)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -153,7 +161,7 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
             left: edges.left + GUTTER - 10.0,
             right: edges.right + GUTTER - 10.0,
         })
-        .style(theme::aurora_full(tint, drift))
+        .style(theme::canvas)
         .into()
 }
 
@@ -161,11 +169,11 @@ pub fn view(app: &App, window: Size, edges: Padding) -> Element<'_, Message> {
 /// un bersaglio di tocco, e il dito la trascina (`touch_seek`), non solo la tocca.
 fn progress(app: &App) -> Element<'_, Message> {
     let duration = app.queue.current().map(|t| t.duration()).unwrap_or_default();
-    let position = app.playback.scrubbing.map_or_else(
+    let position = app.scrubbing.map_or_else(
         || app.shown_position().min(duration),
         |fraction| seek::seek_fraction(fraction, duration),
     );
-    let value = app.playback.scrubbing.unwrap_or_else(|| progress_of(position, duration));
+    let value = app.scrubbing.unwrap_or_else(|| progress_of(position, duration));
     let bar = pointer(
         slider(0.0..=1.0, value, Message::Scrub)
             .step(0.001_f32)
@@ -183,30 +191,27 @@ fn progress(app: &App) -> Element<'_, Message> {
 /// Casuale, precedente, Play, successivo e ripeti, distribuiti sulla riga.
 fn controls(app: &App) -> Element<'_, Message> {
     let play_glyph = if app.playback.is_playing() { Icon::Pause } else { Icon::Play };
-    // Al cambio fra Play e Pausa l'icona rimbalza un poco; il tasto resta della sua misura.
-    let pop = app.play_pop.map_or(0.0, |since| motion::pop(since, theme::MOTION_PANEL));
-    let play =
-        button(container(icon(play_glyph, 28.0 * (1.0 + 0.2 * pop), theme::ON_PRIMARY)).center(Length::Fill))
-            .width(PLAY)
-            .height(PLAY)
-            .padding(0)
-            .style(theme::primary)
-            .on_press(Message::TogglePlay);
+    let play = button(container(icon(play_glyph, 0.0, theme::ON_PRIMARY)).center(Length::Fill))
+        .width(PLAY)
+        .height(PLAY)
+        .padding(0)
+        .style(theme::primary)
+        .on_press(Message::TogglePlay);
     let skip = |glyph: Icon, message: Message| {
-        button(container(icon(glyph, 30.0, theme::TEXT)).center(Length::Fill))
+        button(container(icon(glyph, 0.0, theme::TEXT)).center(Length::Fill))
             .width(SKIP)
             .height(SKIP)
             .padding(0)
             .style(theme::bare)
             .on_press(message)
     };
-    // Gli interruttori accesi sono lime con un punto sotto, come nelle app da telefono.
+    // Gli interruttori accesi sono lime con un punto sotto (la forma dice lo stato, non solo il colore).
     let switch = |glyph: Icon, on: bool, message: Message| {
-        let color = if on { theme::ACCENT } else { theme::MUTED };
-        let dot = container(Space::new(4.0, 4.0))
-            .style(theme::bar(if on { color } else { Color::TRANSPARENT }, 2.0));
+        let color = if on { theme::LIME } else { theme::MUTED };
+        let dot =
+            container(Space::new(4.0, 4.0)).style(theme::bar(if on { color } else { Color::TRANSPARENT }));
         button(
-            container(column![icon(glyph, 22.0, color), dot].spacing(3).align_x(Alignment::Center))
+            container(column![icon(glyph, 0.0, color), dot].spacing(3).align_x(Alignment::Center))
                 .center(Length::Fill),
         )
         .width(theme::TOUCH_TARGET)

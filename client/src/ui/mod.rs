@@ -1,7 +1,8 @@
-//! Componenti visivi. Tre pannelli arrotondati su un fondo nero, come i lettori di oggi: la
-//! navigazione e la libreria a sinistra, la pagina al centro con la tinta della sua copertina, e a
-//! destra il pannello «In riproduzione». Sopra c'è la barra con i controlli della finestra, sotto
-//! quella del player. Menu, finestre di dialogo, avvisi e lo splash d'ingresso stanno su livelli propri.
+//! Componenti visivi, nell'identità monocromatica pixel di `docs/design/`. Regioni a filo, divise da
+//! una linea da 1 AP: la navigazione e la libreria a sinistra, la pagina al centro su tela nera (piatta,
+//! senza tinte), a destra il pannello «In riproduzione». Sopra c'è la barra con i controlli della
+//! finestra, sotto quella del player. Menu, finestre di dialogo, avvisi e lo splash d'ingresso stanno
+//! su livelli propri.
 
 pub mod components;
 pub mod context_menu;
@@ -9,6 +10,7 @@ pub mod cover;
 pub mod cursor;
 pub mod dialog;
 pub mod focus;
+pub mod gesture;
 pub mod icons;
 pub mod lyrics;
 pub mod motion;
@@ -29,11 +31,9 @@ pub mod update_banner;
 pub mod volume_side;
 
 use iced::widget::{Space, column, container, mouse_area, responsive, row, scrollable, stack};
-use iced::{Color, Element, Length, Padding, Size, mouse};
+use iced::{Element, Length, Padding, Size, mouse};
 
-use crate::app::{App, Load, Message, ResizeEdge, Screen};
-use components::art_of;
-use cover::Art;
+use crate::app::{App, Message, ResizeEdge, Screen};
 
 /// Spazio riservato alla barra di scorrimento verticale dell'area centrale.
 const SCROLLBAR: f32 = 10.0;
@@ -91,7 +91,7 @@ fn frame(app: &App, window: Size) -> Element<'_, Message> {
     // Il pannello entra da destra: la sua larghezza segue il movimento, il contenuto resta fermo.
     let panel = app.panel_motion.value();
     let drawer = panel * (theme::SIDE_PANEL_WIDTH + theme::OUTER_GAP);
-    let center = window.width - 2.0 * theme::OUTER_GAP - theme::SIDEBAR_WIDTH - theme::OUTER_GAP - drawer;
+    let center = window.width - theme::SIDEBAR_WIDTH - theme::OUTER_GAP - drawer;
     let width = (center - 2.0 * theme::GUTTER - SCROLLBAR).max(MIN_CONTENT);
 
     let page = page(app, width);
@@ -106,11 +106,8 @@ fn frame(app: &App, window: Size) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill)
     .style(theme::scroll);
-    let center_panel = container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .clip(true)
-        .style(theme::tinted_panel(page_tint(app)));
+    let center_panel =
+        container(content).width(Length::Fill).height(Length::Fill).clip(true).style(theme::canvas);
 
     let mut middle = row![sidebar::view(app), center_panel].spacing(theme::OUTER_GAP);
     if drawer >= 1.0 {
@@ -122,15 +119,13 @@ fn frame(app: &App, window: Size) -> Element<'_, Message> {
         middle = middle.push(side);
     }
 
-    let mut screen = column![top_bar::view(app)];
+    // Le regioni stanno a filo: lo spazio tra l'una e l'altra lascia vedere la finestra, che ha il colore
+    // delle linee.
+    let mut screen = column![top_bar::view(app)].spacing(theme::OUTER_GAP);
     if let Some(banner) = update_banner::view(app, false) {
         screen = screen.push(banner);
     }
-    screen = screen.push(container(middle.height(Length::Fill)).padding(Padding {
-        left: theme::OUTER_GAP,
-        right: theme::OUTER_GAP,
-        ..Padding::ZERO
-    }));
+    screen = screen.push(middle.height(Length::Fill));
     container(screen.push(now_playing::view(app, window.width)))
         .width(Length::Fill)
         .height(Length::Fill)
@@ -150,6 +145,7 @@ pub(crate) fn page(app: &App, width: f32) -> Element<'_, Message> {
         Screen::Settings => pages::settings::view(app, width),
         Screen::Jam => pages::jam::view(app, width),
         Screen::Liked => pages::liked::view(app, width),
+        Screen::Downloads => pages::downloads::view(app, width),
         Screen::News => pages::news::view(app, width),
         Screen::SourcePlaylist => pages::source_playlist::view(app, width),
         Screen::Collection => phone::library::view(app, width),
@@ -157,59 +153,6 @@ pub(crate) fn page(app: &App, width: f32) -> Element<'_, Message> {
         Screen::Friends => pages::friends::view(app, width),
         Screen::Profile => pages::profile::view(app, width),
         Screen::FriendPlaylist => pages::profile::playlist_view(app, width),
-    }
-}
-
-/// La tinta della pagina: quella della copertina di ciò che si guarda, o una di casa.
-fn page_tint(app: &App) -> Color {
-    let current = || app.queue.current().map_or(theme::BRAND_TINT, |track| app.covers.tint_of(art_of(track)));
-    match app.screen {
-        Screen::Album(id) => match &app.album {
-            Some((open, Load::Ready(album))) if *open == id => {
-                app.covers.tint_of(Art { id: album.id, title: &album.title, url: album.cover_url.as_deref() })
-            }
-            _ => theme::NEUTRAL_TINT,
-        },
-        Screen::Playlist(id) => match app.playlist(id).and_then(|p| p.tracks.first()) {
-            Some(first) => app.covers.tint_of(art_of(first)),
-            None => cover::color_for(id),
-        },
-        Screen::Liked => theme::LIKED_TINT,
-        Screen::Settings | Screen::Jam => theme::NEUTRAL_TINT,
-        // La Home prende la tinta dell'uscita in evidenza.
-        Screen::Home => match app.home.feed.hero.get(app.home.hero.index) {
-            Some(release) => app.covers.tint_of(shelf::release_art(release)),
-            None => current(),
-        },
-        Screen::News | Screen::Collection | Screen::SignIn | Screen::Friends => theme::BRAND_TINT,
-        Screen::Profile => match &app.social.open {
-            Some((handle, Load::Ready(open))) => app.covers.tint_of(Art {
-                id: pages::search::art_id(handle),
-                title: &open.page.profile.display_name,
-                url: open.page.profile.avatar_url.as_deref(),
-            }),
-            _ => theme::BRAND_TINT,
-        },
-        Screen::FriendPlaylist => match &app.social.playlist {
-            Some(Load::Ready(playlist)) => match playlist.tracks.first() {
-                Some(first) => app.covers.tint_of(art_of(first)),
-                None => cover::color_for(playlist.id),
-            },
-            _ => theme::NEUTRAL_TINT,
-        },
-        Screen::SourcePlaylist => match &app.external.open {
-            Some(open) => cover::color_for(pages::search::art_id(&open.playlist.id)),
-            None => theme::NEUTRAL_TINT,
-        },
-        Screen::Artist(id) => match &app.artist {
-            Some((open, Load::Ready(page))) if *open == id => app.covers.tint_of(Art {
-                id: page.id,
-                title: &page.name,
-                url: pages::artist::portrait_url(page),
-            }),
-            _ => theme::NEUTRAL_TINT,
-        },
-        Screen::Search | Screen::Library => current(),
     }
 }
 

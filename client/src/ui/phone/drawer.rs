@@ -40,7 +40,7 @@ pub fn view(app: &App, window: Size) -> Option<Element<'_, Message>> {
         item(Icon::Settings, "Impostazioni", false, None, Screen::Settings),
     ]
     .width(Length::Fill);
-    if matches!(app.account, Account::SignedIn(_)) {
+    if matches!(app.social.view.account, Account::SignedIn(_)) {
         items = items.push(divider_line()).push(entry(Icon::Close, "Esci", None, Message::SignOut));
     }
 
@@ -77,7 +77,7 @@ pub fn view(app: &App, window: Size) -> Option<Element<'_, Message>> {
 fn profile(app: &App, text_width: f32) -> Element<'_, Message> {
     let (name, detail) = match app.signed_in_profile() {
         Some(profile) => (profile.display_name.clone(), "Vedi il tuo profilo".to_string()),
-        None => match app.account {
+        None => match app.social.view.account {
             Account::SignedIn(_) => ("Il tuo account".to_string(), "Scegli un nome utente".to_string()),
             _ => ("Accedi".to_string(), "Per amici, jam e profilo".to_string()),
         },
@@ -108,7 +108,7 @@ fn requests(app: &App) -> Option<String> {
     (count > 0).then(|| count.to_string())
 }
 
-/// Una voce che porta a una schermata; un punto lime dice che c'è qualcosa di nuovo.
+/// Una voce che porta a una schermata; un punto bianco dice che c'è qualcosa di nuovo.
 fn item(
     glyph: Icon,
     label: &str,
@@ -123,7 +123,7 @@ fn item(
 /// Una riga del cassetto: icona, nome e, a destra, un numero (o un punto se è vuoto).
 fn entry(glyph: Icon, label: &str, trailing: Option<String>, message: Message) -> Element<'static, Message> {
     let mut content = row![
-        icon(glyph, 24.0, theme::MUTED),
+        icon(glyph, 0.0, theme::MUTED),
         text(label.to_owned()).size(theme::FS_SHEET).font(theme::FONT_MEDIUM),
         Space::with_width(Length::Fill),
     ]
@@ -131,9 +131,9 @@ fn entry(glyph: Icon, label: &str, trailing: Option<String>, message: Message) -
     .align_y(Alignment::Center);
     if let Some(count) = trailing {
         content = content.push(if count.is_empty() {
-            container(Space::new(8.0, 8.0)).style(theme::bar(theme::ACCENT, 4.0)).into()
+            container(Space::new(8.0, 8.0)).style(theme::bar(theme::TEXT)).into()
         } else {
-            Element::from(text(count).size(theme::FS_BODY).font(theme::FONT_SEMIBOLD).color(theme::ACCENT))
+            Element::from(text(count).size(theme::FS_BODY).font(theme::FONT_SEMIBOLD).color(theme::TEXT))
         });
     }
     button(container(content).height(Length::Fill).align_y(iced::alignment::Vertical::Center))

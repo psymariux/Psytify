@@ -1,0 +1,14 @@
+# icon_repeat: loop open at two corners, 3x5 heads (full 12 AP wide so icon_repeat_one has room for its numeral)
+@frame
+........#...
+.#########..
+#.......#..#
+#..........#
+#..........#
+#..........#
+#..........#
+#..........#
+#..........#
+#..#.......#
+..#########.
+...#........

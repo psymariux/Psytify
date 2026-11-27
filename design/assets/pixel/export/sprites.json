@@ -1,0 +1,1409 @@
+{
+  "ap_dp": 2,
+  "sprites": [
+    {
+      "name": "icon_play",
+      "group": "icons",
+      "file": "1x/icon_play.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_pause",
+      "group": "icons",
+      "file": "1x/icon_pause.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_next",
+      "group": "icons",
+      "file": "1x/icon_next.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_previous",
+      "group": "icons",
+      "file": "1x/icon_previous.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_shuffle",
+      "group": "icons",
+      "file": "1x/icon_shuffle.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_repeat",
+      "group": "icons",
+      "file": "1x/icon_repeat.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_repeat_one",
+      "group": "icons",
+      "file": "1x/icon_repeat_one.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_heart",
+      "group": "icons",
+      "file": "1x/icon_heart.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_heart_fill",
+      "group": "icons",
+      "file": "1x/icon_heart_fill.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_download",
+      "group": "icons",
+      "file": "1x/icon_download.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_downloaded",
+      "group": "icons",
+      "file": "1x/icon_downloaded.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_queue",
+      "group": "icons",
+      "file": "1x/icon_queue.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_search",
+      "group": "icons",
+      "file": "1x/icon_search.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_home",
+      "group": "icons",
+      "file": "1x/icon_home.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_library",
+      "group": "icons",
+      "file": "1x/icon_library.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_more",
+      "group": "icons",
+      "file": "1x/icon_more.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_close",
+      "group": "icons",
+      "file": "1x/icon_close.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_check",
+      "group": "icons",
+      "file": "1x/icon_check.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_chevron_left",
+      "group": "icons",
+      "file": "1x/icon_chevron_left.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_chevron_right",
+      "group": "icons",
+      "file": "1x/icon_chevron_right.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_chevron_down",
+      "group": "icons",
+      "file": "1x/icon_chevron_down.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_plus",
+      "group": "icons",
+      "file": "1x/icon_plus.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_volume",
+      "group": "icons",
+      "file": "1x/icon_volume.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_volume_low",
+      "group": "icons",
+      "file": "1x/icon_volume_low.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_mute",
+      "group": "icons",
+      "file": "1x/icon_mute.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_lyrics",
+      "group": "icons",
+      "file": "1x/icon_lyrics.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_focus",
+      "group": "icons",
+      "file": "1x/icon_focus.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_fullscreen",
+      "group": "icons",
+      "file": "1x/icon_fullscreen.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_fullscreen_exit",
+      "group": "icons",
+      "file": "1x/icon_fullscreen_exit.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_minimize",
+      "group": "icons",
+      "file": "1x/icon_minimize.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_maximize",
+      "group": "icons",
+      "file": "1x/icon_maximize.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_window_close",
+      "group": "icons",
+      "file": "1x/icon_window_close.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_settings",
+      "group": "icons",
+      "file": "1x/icon_settings.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_settings_fill",
+      "group": "icons",
+      "file": "1x/icon_settings_fill.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_account",
+      "group": "icons",
+      "file": "1x/icon_account.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_people",
+      "group": "icons",
+      "file": "1x/icon_people.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_people_fill",
+      "group": "icons",
+      "file": "1x/icon_people_fill.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_bell",
+      "group": "icons",
+      "file": "1x/icon_bell.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_bell_fill",
+      "group": "icons",
+      "file": "1x/icon_bell_fill.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_radio",
+      "group": "icons",
+      "file": "1x/icon_radio.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_edit",
+      "group": "icons",
+      "file": "1x/icon_edit.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_trash",
+      "group": "icons",
+      "file": "1x/icon_trash.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_copy",
+      "group": "icons",
+      "file": "1x/icon_copy.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_keyboard",
+      "group": "icons",
+      "file": "1x/icon_keyboard.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_video",
+      "group": "icons",
+      "file": "1x/icon_video.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_grip",
+      "group": "icons",
+      "file": "1x/icon_grip.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_home_fill",
+      "group": "icons",
+      "file": "1x/icon_home_fill.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_search_fill",
+      "group": "icons",
+      "file": "1x/icon_search_fill.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_library_fill",
+      "group": "icons",
+      "file": "1x/icon_library_fill.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_list",
+      "group": "icons",
+      "file": "1x/icon_list.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_note",
+      "group": "icons",
+      "file": "1x/icon_note.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_moon",
+      "group": "icons",
+      "file": "1x/icon_moon.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_sparkle",
+      "group": "icons",
+      "file": "1x/icon_sparkle.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_chart",
+      "group": "icons",
+      "file": "1x/icon_chart.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_equalizer",
+      "group": "icons",
+      "file": "1x/icon_equalizer.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_user_plus",
+      "group": "icons",
+      "file": "1x/icon_user_plus.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_bell_ring",
+      "group": "icons",
+      "file": "1x/icon_bell_ring.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 8,
+      "durations_ms": [
+        600,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": "animated: unread news"
+    },
+    {
+      "name": "icon_download_busy",
+      "group": "icons",
+      "file": "1x/icon_download_busy.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 4,
+      "durations_ms": [
+        140,
+        140,
+        140,
+        140
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": "animated: a download is running"
+    },
+    {
+      "name": "icon_people_live",
+      "group": "icons",
+      "file": "1x/icon_people_live.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 2,
+      "durations_ms": [
+        260,
+        260
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": "animated: a jam is live or has an invite"
+    },
+    {
+      "name": "nastro_cheer",
+      "group": "mascot",
+      "file": "1x/nastro_cheer.png",
+      "frame_size": [
+        32,
+        36
+      ],
+      "frames": 12,
+      "durations_ms": [
+        90,
+        80,
+        80,
+        80,
+        80,
+        80,
+        90,
+        90,
+        80,
+        80,
+        80,
+        500
+      ],
+      "palette": [
+        "transparent",
+        "near_black",
+        "graphite",
+        "charcoal",
+        "iron",
+        "stone",
+        "medium_grey",
+        "soft_grey",
+        "warm_white",
+        "pure_white",
+        "lime"
+      ],
+      "note": "mascot hopping twice, for welcome moments"
+    },
+    {
+      "name": "eq",
+      "group": "motifs",
+      "file": "1x/eq.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 6,
+      "durations_ms": [
+        120,
+        120,
+        120,
+        120,
+        120,
+        120
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": "playing indicator; tint lime"
+    },
+    {
+      "name": "eq_rest",
+      "group": "motifs",
+      "file": "1x/eq_rest.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": "paused or buffering; tint stone"
+    },
+    {
+      "name": "mark",
+      "group": "motifs",
+      "file": "1x/mark.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": "brand mark (cassette face: shell, two reels, tape guide); warm_white at rest"
+    },
+    {
+      "name": "mark_play",
+      "group": "motifs",
+      "file": "1x/mark_play.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 2,
+      "durations_ms": [
+        160,
+        160
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": "brand mark while playing: reels swap ring and cross; tint lime"
+    },
+    {
+      "name": "loader",
+      "group": "motifs",
+      "file": "1x/loader.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 8,
+      "durations_ms": [
+        90,
+        90,
+        90,
+        90,
+        90,
+        90,
+        90,
+        90
+      ],
+      "palette": [
+        "transparent",
+        "iron",
+        "medium_grey",
+        "soft_grey",
+        "warm_white"
+      ],
+      "note": "indeterminate loading"
+    },
+    {
+      "name": "album_placeholder",
+      "group": "motifs",
+      "file": "1x/album_placeholder.png",
+      "frame_size": [
+        24,
+        24
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "near_black",
+        "graphite",
+        "charcoal",
+        "iron",
+        "stone",
+        "medium_grey",
+        "soft_grey",
+        "warm_white",
+        "pure_white",
+        "lime"
+      ],
+      "note": "missing cover; centred at 1 AP on a graphite field"
+    },
+    {
+      "name": "nastro_idle",
+      "group": "mascot",
+      "file": "1x/nastro_idle.png",
+      "frame_size": [
+        32,
+        32
+      ],
+      "frames": 4,
+      "durations_ms": [
+        1000,
+        240,
+        1000,
+        120
+      ],
+      "palette": [
+        "transparent",
+        "near_black",
+        "graphite",
+        "charcoal",
+        "iron",
+        "stone",
+        "medium_grey",
+        "soft_grey",
+        "warm_white",
+        "pure_white",
+        "lime"
+      ],
+      "note": "mascot at rest"
+    },
+    {
+      "name": "nastro_listen",
+      "group": "mascot",
+      "file": "1x/nastro_listen.png",
+      "frame_size": [
+        32,
+        32
+      ],
+      "frames": 4,
+      "durations_ms": [
+        140,
+        140,
+        140,
+        140
+      ],
+      "palette": [
+        "transparent",
+        "near_black",
+        "graphite",
+        "charcoal",
+        "iron",
+        "stone",
+        "medium_grey",
+        "soft_grey",
+        "warm_white",
+        "pure_white",
+        "lime"
+      ],
+      "note": "mascot while music plays; LED lime"
+    },
+    {
+      "name": "nastro_sleep",
+      "group": "mascot",
+      "file": "1x/nastro_sleep.png",
+      "frame_size": [
+        32,
+        32
+      ],
+      "frames": 2,
+      "durations_ms": [
+        800,
+        800
+      ],
+      "palette": [
+        "transparent",
+        "near_black",
+        "graphite",
+        "charcoal",
+        "iron",
+        "stone",
+        "medium_grey",
+        "soft_grey",
+        "warm_white",
+        "pure_white",
+        "lime"
+      ],
+      "note": "offline or nothing to show"
+    },
+    {
+      "name": "empty_crate",
+      "group": "mascot",
+      "file": "1x/empty_crate.png",
+      "frame_size": [
+        64,
+        28
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "near_black",
+        "graphite",
+        "charcoal",
+        "iron",
+        "stone",
+        "medium_grey",
+        "soft_grey",
+        "warm_white",
+        "pure_white",
+        "lime"
+      ],
+      "note": "empty library / no results illustration"
+    },
+    {
+      "name": "liked_cover",
+      "group": "motifs",
+      "file": "1x/liked_cover.png",
+      "frame_size": [
+        24,
+        24
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": "cover of the liked-songs playlist: tint warm_white on a graphite field (24 x 24 grid, 22 x 19 art)"
+    },
+    {
+      "name": "app_icon",
+      "group": "motifs",
+      "file": "1x/app_icon.png",
+      "frame_size": [
+        16,
+        16
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "near_black",
+        "graphite",
+        "charcoal",
+        "iron",
+        "stone",
+        "medium_grey",
+        "soft_grey",
+        "warm_white",
+        "pure_white",
+        "lime"
+      ],
+      "note": "launcher / desktop icon: Nastro's face (shell, label, reel eyes, tape guide); built by design/tools/launcher.py"
+    }
+  ]
+}

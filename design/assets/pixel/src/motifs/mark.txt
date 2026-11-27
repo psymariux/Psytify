@@ -1,0 +1,15 @@
+# mark: the Psytify mark = Nastro's face reduced to one colour: notched cassette shell, two reels
+# (rings with open hubs) and the tape-guide trapezoid. warm_white at rest; mark_play while playing.
+@frame
+............
+............
+.##########.
+#..........#
+#.###..###.#
+#.#.#..#.#.#
+#.###..###.#
+#..........#
+#...####...#
+.##########.
+............
+............

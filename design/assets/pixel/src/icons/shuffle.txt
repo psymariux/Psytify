@@ -1,0 +1,14 @@
+# icon_shuffle: two S-paths crossing in a 2x2 knot, lead-in bars on the left, solid 3x5 heads on the right (cannot be mistaken for icon_close)
+@frame
+.........#..
+.........##.
+##......####
+..#....#.##.
+...#..#..#..
+....##......
+....##......
+...#..#..#..
+..#....#.##.
+##......####
+.........##.
+.........#..

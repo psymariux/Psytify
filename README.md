@@ -21,7 +21,8 @@ footprint even while it plays.
 
 ## Highlights
 
-- **Fast and light.** Native GPU-rendered UI ([Iced](https://iced.rs)), no web view, no Electron.
+- **Fast and light.** Native GPU-rendered UI ([GPUI](https://github.com/zed-industries/zed) on the desktop,
+  [Iced](https://iced.rs) on Android), no web view, no Electron.
   It idles at near-zero CPU and avoids per-frame work.
 - **Plays everything.** FLAC, WAV, MP3, Ogg Vorbis and AAC/M4A through
   [Symphonia](https://github.com/pdeljanov/Symphonia) and [rodio](https://github.com/RustAudio/rodio),
@@ -51,6 +52,16 @@ footprint even while it plays.
 | **Account** | Optional in-app sign-in with [Clerk](https://clerk.com): password, email code, GitHub, Google or Discord |
 | **Friends** | Profiles, friend requests, what friends are playing, recent listens, top artists, public playlists, mutual friends |
 | **Discord** | Rich Presence on desktop: "Listening to Psytify" with track, artist, cover and time |
+
+## Design
+
+A monochrome pixel-art identity: true black, warm greys and a single lime accent that only ever means a
+state (playing, selected, on, live). Every icon is a hand-drawn sprite on a whole-pixel grid, scaled by
+integers so it stays sharp at any display scale. The mascot, **Nastro**, is a cassette with reel eyes and is
+the app icon. The sidebar icons move when there is something to see (a ringing bell for unread news, a falling
+arrow while a download runs, bobbing heads for a jam invite), and every animation stops under *Reduce motion*,
+which follows the system setting by default. Sprites live in [`design/assets/pixel`](design/assets/pixel) and the
+rules in [`docs/design`](docs/design).
 
 Keyboard: <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> seek ±5 s · <kbd>Ctrl</kbd>+<kbd>F</kbd> search.
 
@@ -90,13 +101,14 @@ it automatically) and the system libraries below.
 
 | System | Prerequisites |
 |---|---|
-| Arch Linux | `alsa-lib wayland libxkbcommon libx11 libxcursor libxi libxrandr vulkan-icd-loader gstreamer gst-plugins-base gst-plugins-good gst-libav` |
-| Debian / Ubuntu | `pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` |
+| Arch Linux | the `depends` of [`desktop/PKGBUILD`](desktop/PKGBUILD) |
+| Debian / Ubuntu | `pkg-config libasound2-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libfontconfig-dev libfreetype-dev libxcb1-dev libx11-xcb-dev libzstd-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev` |
 | Windows | Visual Studio Build Tools (MSVC) and the `x86_64-pc-windows-msvc` target |
 
 ```bash
 cargo build -p psytify --release        # binary in target/release/psytify
 cargo build -p psytify --release --no-default-features   # without video clips (no GStreamer needed)
+cargo run -p psytify-iced --release     # the Iced app (the Android one) in a desktop window; PSYTIFY_PHONE=1 for the phone layout
 ```
 
 ## Configuration
@@ -147,29 +159,36 @@ opens connections to that one address: audio, video and cover art all come throu
 
 ## Architecture
 
-The app follows the Elm pattern that Iced is built around: one `App` state, a `Message` for every
-event, a pure `update`, and a `view` that only reads.
+The logic lives in `psytify-core`, a UI-free actor: frontends send it commands and draw the snapshots it
+publishes. The desktop (`desktop/`, package `psytify`) draws them with GPUI; the Android app (`client/`,
+package `psytify-iced`) with Iced, in the Elm pattern: one `App` state, a `Message` for every event, a
+pure `update`, and a `view` that only reads.
 
 ```mermaid
 flowchart LR
-    UI["ui/ (Iced views)"] -- Message --> APP["app.rs · update"]
-    APP -- Task --> API["api/ (HTTP client)"]
-    APP -- commands --> PLAYER["player/ (queue, decoder, rodio)"]
+    GPUI["desktop/ (GPUI views)"] -- commands --> CORE["core/ (domain reducers)"]
+    ICED["client/ (Iced, Android)"] -- commands --> CORE
+    CORE -- snapshots --> GPUI
+    CORE -- snapshots --> ICED
+    CORE -- effects --> API["api/ (HTTP client)"]
+    CORE -- effects --> PLAYER["player/ (queue, decoder, rodio)"]
     API -- signed links --> STREAM["player/stream.rs (ranged buffering)"]
     STREAM --> PLAYER
-    APP <-- load / save --> CONFIG["config/ (settings, local taste)"]
-    APP --> UI
+    CORE <-- load / save --> CONFIG["config/ (settings, local taste)"]
 ```
 
 | Path | What lives there |
 |---|---|
-| `client/src/app.rs`, `client/src/app/` | `App`, `Message`, `update`, `subscription`; listening, library, artists and external sources |
-| `client/src/ui/` | Components, pages, shelves, immersive view, synced lyrics, phone layout; `theme.rs` holds every color and size token |
-| `client/src/player/` | Queue (shuffle, repeat), playback state, ranged streaming buffer, Symphonia decoder |
-| `client/src/api/` | HTTP client, models, signed-URL renewal |
-| `client/src/config/` | Settings and local taste: follows, saved albums, play counts, mixes |
+| `desktop/` | `psytify`: the desktop on GPUI. Window, pages, pixel component kit, side panel (queue, lyrics, video), immersive view |
+| `client/src/app.rs`, `client/src/app/` | `psytify-iced`: `App`, `Message`, `update`, `subscription`; each domain's messages become core commands |
+| `client/src/ui/` | Iced components, pages, shelves, immersive view, synced lyrics, phone layout; `theme.rs` holds every color and size token |
+| `core/src/player/` | Queue (shuffle, repeat), playback state, ranged streaming buffer, Symphonia decoder |
+| `core/src/api/` | HTTP client, models, signed-URL renewal |
+| `core/src/config/` | Settings and local taste: follows, saved albums, play counts, mixes |
+| `core/` | `psytify-core`: the UI-free logic shared by the frontends (API client, playback, configuration, shared state) |
+| `design/` | `psytify-design`: design tokens and pixel art sprites as plain data, with the sprite tools and assets |
 | `android/` | Thin `cdylib` shell (NativeActivity) that starts the client with the phone layout |
-| `docs/` | [Backend contract](docs/BACKEND.md), [visual style](docs/STYLE.md), [Android guide](docs/ANDROID.md), [brand kit](docs/brand/BRANDKIT.md) |
+| `docs/` | [Backend contract](docs/BACKEND.md), [visual style](docs/STYLE.md), [Android guide](docs/ANDROID.md), [brand kit](docs/brand/BRANDKIT.md), [design tokens and art direction](docs/design/) |
 
 ## Development
 
@@ -208,7 +227,9 @@ fix, so the direction can be agreed before you invest time. Be kind: the project
 Psytify is free software under the [GNU Affero General Public License v3.0](LICENSE).
 
 The interface uses the [Inter](https://rsms.me/inter/) typeface under the
-[SIL Open Font License 1.1](client/assets/fonts/OFL.txt). Psytify is built on
-[Iced](https://github.com/iced-rs/iced), [rodio](https://github.com/RustAudio/rodio),
+[SIL Open Font License 1.1](client/assets/fonts/OFL.txt), and pixel text uses
+[Departure Mono](https://departuremono.com) under the same license
+([design/assets/fonts/DepartureMono-OFL.txt](design/assets/fonts/DepartureMono-OFL.txt)). Psytify is built on
+[GPUI](https://github.com/zed-industries/zed), [Iced](https://github.com/iced-rs/iced), [rodio](https://github.com/RustAudio/rodio),
 [Symphonia](https://github.com/pdeljanov/Symphonia), [Tokio](https://tokio.rs) and
 [reqwest](https://github.com/seanmonstar/reqwest) — thank you to their authors.

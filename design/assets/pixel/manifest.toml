@@ -1,0 +1,697 @@
+# Psytify pixel sprites: manifest (source of truth together with src/**/*.txt).
+# Compile with: python3 -I design/tools/sprites.py   (lint only: --check)
+# Rules: docs/design/PSYTIFY_PIXEL_ART_GUIDELINES.md. Token values mirror
+# docs/design/PSYTIFY_DESIGN_TOKENS.md and must change together with it.
+
+version = 1
+ap_dp = 2          # 1 art pixel = 2 dp at every scale (device px per AP is quantised)
+max_colors = 15    # per sprite, transparency excluded (4bpp discipline)
+
+[tokens]
+deep_black  = "#000000"
+near_black  = "#0e0d0c"
+graphite    = "#1a1917"
+charcoal    = "#2a2826"
+iron        = "#3d3a37"
+stone       = "#78746d"
+medium_grey = "#9a958d"
+soft_grey   = "#bdb8af"
+warm_white  = "#ece8e0"
+pure_white  = "#ffffff"
+lime        = "#c6f24e"
+error       = "#ff6b5e"
+
+# Icons are 1-bit masks: the frontend tints index 1 with a token per state.
+[palettes.mask]
+"." = "transparent"
+"#" = "tint"
+
+# Mascot, illustration, placeholder: fixed greys, lime only for the "playing" LED.
+[palettes.mascot]
+"." = "transparent"
+"o" = "near_black"
+"k" = "graphite"
+"c" = "charcoal"
+"i" = "iron"
+"s" = "stone"
+"m" = "medium_grey"
+"g" = "soft_grey"
+"w" = "warm_white"
+"p" = "pure_white"
+"l" = "lime"
+
+# Loader: four value steps, no lime (loading is not a playback state).
+[palettes.ramp]
+"." = "transparent"
+"i" = "iron"
+"m" = "medium_grey"
+"g" = "soft_grey"
+"w" = "warm_white"
+
+[[sprite]]
+name = "icon_play"
+group = "icons"
+src = "src/icons/play.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_pause"
+group = "icons"
+src = "src/icons/pause.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_next"
+group = "icons"
+src = "src/icons/next.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_previous"
+group = "icons"
+src = "src/icons/previous.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_shuffle"
+group = "icons"
+src = "src/icons/shuffle.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_repeat"
+group = "icons"
+src = "src/icons/repeat.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_repeat_one"
+group = "icons"
+src = "src/icons/repeat_one.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_heart"
+group = "icons"
+src = "src/icons/heart.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_heart_fill"
+group = "icons"
+src = "src/icons/heart_fill.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white", "lime"]
+
+[[sprite]]
+name = "icon_download"
+group = "icons"
+src = "src/icons/download.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_downloaded"
+group = "icons"
+src = "src/icons/downloaded.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_queue"
+group = "icons"
+src = "src/icons/queue.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_search"
+group = "icons"
+src = "src/icons/search.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_home"
+group = "icons"
+src = "src/icons/home.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_library"
+group = "icons"
+src = "src/icons/library.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_more"
+group = "icons"
+src = "src/icons/more.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_close"
+group = "icons"
+src = "src/icons/close.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_check"
+group = "icons"
+src = "src/icons/check.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_chevron_left"
+group = "icons"
+src = "src/icons/chevron_left.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_chevron_right"
+group = "icons"
+src = "src/icons/chevron_right.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_chevron_down"
+group = "icons"
+src = "src/icons/chevron_down.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_plus"
+group = "icons"
+src = "src/icons/plus.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_volume"
+group = "icons"
+src = "src/icons/volume.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_volume_low"
+group = "icons"
+src = "src/icons/volume_low.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_mute"
+group = "icons"
+src = "src/icons/mute.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_lyrics"
+group = "icons"
+src = "src/icons/lyrics.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_focus"
+group = "icons"
+src = "src/icons/focus.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_fullscreen"
+group = "icons"
+src = "src/icons/fullscreen.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_fullscreen_exit"
+group = "icons"
+src = "src/icons/fullscreen_exit.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_minimize"
+group = "icons"
+src = "src/icons/minimize.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_maximize"
+group = "icons"
+src = "src/icons/maximize.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_window_close"
+group = "icons"
+src = "src/icons/window_close.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_settings"
+group = "icons"
+src = "src/icons/settings.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_settings_fill"
+group = "icons"
+src = "src/icons/settings_fill.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_account"
+group = "icons"
+src = "src/icons/account.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_people"
+group = "icons"
+src = "src/icons/people.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_people_fill"
+group = "icons"
+src = "src/icons/people_fill.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_bell"
+group = "icons"
+src = "src/icons/bell.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_bell_fill"
+group = "icons"
+src = "src/icons/bell_fill.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_radio"
+group = "icons"
+src = "src/icons/radio.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_edit"
+group = "icons"
+src = "src/icons/edit.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_trash"
+group = "icons"
+src = "src/icons/trash.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_copy"
+group = "icons"
+src = "src/icons/copy.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_keyboard"
+group = "icons"
+src = "src/icons/keyboard.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_video"
+group = "icons"
+src = "src/icons/video.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_grip"
+group = "icons"
+src = "src/icons/grip.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_home_fill"
+group = "icons"
+src = "src/icons/home_fill.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_search_fill"
+group = "icons"
+src = "src/icons/search_fill.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_library_fill"
+group = "icons"
+src = "src/icons/library_fill.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_list"
+group = "icons"
+src = "src/icons/list.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_note"
+group = "icons"
+src = "src/icons/note.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_moon"
+group = "icons"
+src = "src/icons/moon.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_sparkle"
+group = "icons"
+src = "src/icons/sparkle.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_chart"
+group = "icons"
+src = "src/icons/chart.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_equalizer"
+group = "icons"
+src = "src/icons/equalizer.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_user_plus"
+group = "icons"
+src = "src/icons/user_plus.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
+name = "icon_bell_ring"
+group = "icons"
+src = "src/icons/bell_ring.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+note = "animated: unread news"
+
+[[sprite]]
+name = "icon_download_busy"
+group = "icons"
+src = "src/icons/download_busy.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+note = "animated: a download is running"
+
+[[sprite]]
+name = "icon_people_live"
+group = "icons"
+src = "src/icons/people_live.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+note = "animated: a jam is live or has an invite"
+
+[[sprite]]
+name = "nastro_cheer"
+group = "mascot"
+src = "src/mascot/nastro_cheer.txt"
+size = [32, 36]
+palette = "mascot"
+note = "mascot hopping twice, for welcome moments"
+
+[[sprite]]
+name = "eq"
+group = "motifs"
+src = "src/motifs/eq.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["lime"]
+note = "playing indicator; tint lime"
+
+[[sprite]]
+name = "eq_rest"
+group = "motifs"
+src = "src/motifs/eq_rest.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["stone"]
+note = "paused or buffering; tint stone"
+
+[[sprite]]
+name = "mark"
+group = "motifs"
+src = "src/motifs/mark.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+note = "brand mark (cassette face: shell, two reels, tape guide); warm_white at rest"
+
+[[sprite]]
+name = "mark_play"
+group = "motifs"
+src = "src/motifs/mark_play.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["lime"]
+note = "brand mark while playing: reels swap ring and cross; tint lime"
+
+[[sprite]]
+name = "loader"
+group = "motifs"
+src = "src/motifs/loader.txt"
+size = [12, 12]
+palette = "ramp"
+note = "indeterminate loading"
+
+[[sprite]]
+name = "album_placeholder"
+group = "motifs"
+src = "src/motifs/album_placeholder.txt"
+size = [24, 24]
+palette = "mascot"
+note = "missing cover; centred at 1 AP on a graphite field"
+
+[[sprite]]
+name = "nastro_idle"
+group = "mascot"
+src = "src/mascot/nastro_idle.txt"
+size = [32, 32]
+palette = "mascot"
+note = "mascot at rest"
+
+[[sprite]]
+name = "nastro_listen"
+group = "mascot"
+src = "src/mascot/nastro_listen.txt"
+size = [32, 32]
+palette = "mascot"
+note = "mascot while music plays; LED lime"
+
+[[sprite]]
+name = "nastro_sleep"
+group = "mascot"
+src = "src/mascot/nastro_sleep.txt"
+size = [32, 32]
+palette = "mascot"
+note = "offline or nothing to show"
+
+[[sprite]]
+name = "empty_crate"
+group = "mascot"
+src = "src/mascot/empty_crate.txt"
+size = [64, 28]
+palette = "mascot"
+note = "empty library / no results illustration"
+
+[[sprite]]
+name = "liked_cover"
+group = "motifs"
+src = "src/motifs/liked_cover.txt"
+size = [24, 24]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+note = "cover of the liked-songs playlist: tint warm_white on a graphite field (24 x 24 grid, 22 x 19 art)"
+
+[[sprite]]
+name = "app_icon"
+group = "motifs"
+src = "src/motifs/app_icon.txt"
+size = [16, 16]
+palette = "mascot"
+note = "launcher / desktop icon: Nastro's face (shell, label, reel eyes, tape guide); built by design/tools/launcher.py"

@@ -22,7 +22,7 @@ use crate::components::separator::Separator;
 use crate::components::tile::Cover;
 use crate::components::tooltip::with_tooltip;
 use crate::pixel::PixelSprite;
-use crate::theme::{Ap, TypeStyle, col, dp};
+use crate::theme::{TypeStyle, col, dp};
 
 /// Spessore in dp della fascia sensibile al ridimensionamento lungo i bordi.
 const RESIZE_BAND: f32 = 5.0;
@@ -131,6 +131,8 @@ pub struct TitleBarState {
     /// Chi apre l'accesso o il profilo (un clic sull'account).
     pub on_account: Option<OnClose>,
     pub on_close: OnClose,
+    /// Ctrl+B: the sidebar between expanded and rail.
+    pub on_sidebar: Option<OnClose>,
 }
 
 /// L'account a destra della ricerca (anche nella galleria).
@@ -203,10 +205,15 @@ pub fn title_bar(state: TitleBarState, window: &mut Window, cx: &mut App) -> Any
 
 /// La riga della barra del titolo, alta `TITLE_BAR_H`, senza il filetto: `Shell` la tiene in una vista in
 /// cache e mette il filetto fuori (BACKLOG 23).
-pub fn title_row(state: TitleBarState, window: &mut Window, _cx: &mut App) -> Div {
+pub fn title_row(state: TitleBarState, _window: &mut Window, _cx: &mut App) -> Div {
     let on_close = state.on_close;
+    let sidebar =
+        IconButton::new("sidebar-toggle", sprite::ICON_LIST).tooltip("Barra laterale", Some("Ctrl B"));
+    let sidebar = match state.on_sidebar {
+        Some(toggle) => sidebar.on_click(move |_, window, cx| toggle(window, cx)),
+        None => sidebar,
+    };
     let account = account(state.account, state.on_account);
-    let ap = Ap::of(window);
     let mark = if state.playing {
         PixelSprite::new(sprite::MARK_PLAY)
     } else {
@@ -236,8 +243,9 @@ pub fn title_row(state: TitleBarState, window: &mut Window, _cx: &mut App) -> Di
                 .items_center()
                 .gap(dp(SPACE_3))
                 .child(mark)
-                .child(div().pixel_type(ap, false).text_color(col(TEXT_PRIMARY)).child("Psytify")),
+                .child(div().pixel_type(false).text_color(col(TEXT_PRIMARY)).child("Psytify")),
         )
+        .child(sidebar)
         .child(
             div()
                 .flex()

@@ -7,7 +7,8 @@
 //! una volta per voce di cache e si scarta insieme a lei; quando una voce esce dalla cache la sua
 //! immagine finisce in `retired` e `drain_retired` la toglie dall'atlante al prossimo disegno.
 //!
-//! Al cambio del fattore di scala si svuota tutto (gli sprite si rifanno alla nuova `art_px`).
+//! When the effective scale (window scale times UI zoom) changes everything is dropped: the sprites are
+//! rebuilt at the new `art_px`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -114,7 +115,7 @@ impl SpriteStore {
         (self.cache.len(), self.cache.bytes())
     }
 
-    /// Svuota tutto se il fattore di scala è cambiato dall'ultimo disegno.
+    /// Drops everything if the effective scale (window scale times zoom) changed since the last paint.
     pub fn ensure_scale(&mut self, scale: f32) {
         let bits = scale.to_bits();
         if bits != self.scale_bits {

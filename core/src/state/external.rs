@@ -47,6 +47,8 @@ pub const ARTIST_EXTRAS: usize = 64;
 const EVENTS: usize = 32;
 /// Artisti seguiti già chiesti in questa sessione: se la lista cresce oltre, si ricomincia.
 const ASKED: usize = 512;
+/// Imports remembered with the server track they became: the oldest go first.
+pub const LINKS: usize = 128;
 
 /// I comandi del dominio.
 #[derive(Debug, Clone)]
@@ -107,6 +109,26 @@ pub struct ImportsView {
     pub step: Option<Importing>,
     /// In pausa dopo un «troppe richieste».
     pub paused: bool,
+}
+
+/// The server track each external item became in this session, newest last, at most [`LINKS`]: a
+/// row of the official catalogue knows from it that the current track is its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImportLinks(VecDeque<(Importing, Track)>);
+
+impl ImportLinks {
+    /// The server track that `key` became, if it was imported in this session.
+    pub fn track(&self, key: &Importing) -> Option<&Track> {
+        self.0.iter().rev().find(|(known, _)| known == key).map(|(_, track)| track)
+    }
+
+    fn put(&mut self, key: Importing, track: &Track) {
+        self.0.retain(|(known, _)| *known != key);
+        self.0.push_back((key, track.clone()));
+        while self.0.len() > LINKS {
+            self.0.pop_front();
+        }
+    }
 }
 
 /// Qualcosa che il frontend deve far sapere o fare.
@@ -184,6 +206,8 @@ pub struct ExternalView {
     /// [`ARTIST_EXTRAS`].
     pub artists: Arc<HashMap<Uuid, Load<ArtistExtras>>>,
     pub imports: ImportsView,
+    /// What the imports of this session became on the server.
+    pub links: Arc<ImportLinks>,
     /// Gli ultimi eventi, dal più vecchio: un frontend mostra quelli con `seq` nuovo, in ordine.
     pub events: Arc<VecDeque<ExternalRaised>>,
 }
@@ -369,6 +393,11 @@ impl External {
         Arc::make_mut(&mut self.view)
     }
 
+    /// Remembers that `key` became `track` on the server.
+    fn link(&mut self, key: Importing, track: &Track) {
+        Arc::make_mut(&mut self.view_mut().links).put(key, track);
+    }
+
     fn api(&self) -> Result<ApiClient, AppError> {
         self.api.clone()
     }
@@ -487,6 +516,7 @@ impl External {
                 *self.imports.failed.entry(playlist).or_default() += 1;
             }
             if let Some(track) = &track {
+                self.link(Importing::Source(source, id.clone()), track);
                 self.raise(ExternalEvent::Imported(Arc::from(vec![track.clone()])));
             }
             self.library.push(LibraryCmd::ImportedToPlaylist { id: playlist, source, item: id, track });
@@ -682,8 +712,14 @@ impl External {
 
     /// Il brano premuto nella ricerca è arrivato: parte, con tutti i brani che l'item ha portato.
     fn clicked(&mut self, pick: u64, result: Result<Box<DiscoverImport>, AppError>) {
-        if matches!(self.imports.clicking, Some((current, _)) if current == pick) {
-            self.imports.clicking = None;
+        let key = match &self.imports.clicking {
+            Some((current, _)) if *current == pick => self.imports.clicking.take().map(|(_, key)| key),
+            _ => None,
+        };
+        if let (Some(key), Ok(imported)) = (key, &result)
+            && let Some(first) = imported.tracks.first()
+        {
+            self.link(key, first);
         }
         // Chi ascolta ha scelto altro nel frattempo: l'ultima scelta vince.
         if pick != self.imports.picks {
@@ -726,6 +762,7 @@ impl External {
             self.imports.start_queue = true;
             return;
         };
+        self.link(Importing::Source(item.source, item.id), &track);
         self.raise(ExternalEvent::Imported(Arc::from(vec![track.clone()])));
         self.catalog.push(CatalogCmd::Changed);
         self.playback.push(PlaybackCmd::Play { tracks: Arc::from(vec![track]), start: 0 });
@@ -740,6 +777,7 @@ impl External {
         }
         imports.queue.pop_front();
         let Some(track) = track else { return };
+        self.link(Importing::Source(source, id.to_owned()), &track);
         let start = std::mem::take(&mut self.imports.start_queue);
         self.raise(ExternalEvent::Imported(Arc::from(vec![track.clone()])));
         if start {
@@ -1319,6 +1357,33 @@ mod tests {
         assert_eq!(rig.state.catalog.home_epoch(), home + 1, "il catalogo è cambiato");
         assert!(matches!(rig.events().last(), Some(ExternalEvent::Imported(tracks)) if tracks.len() == 2));
         assert_eq!(rig.view().imports, ImportsView::default());
+    }
+
+    /// A row of the catalogue finds the server track it became, whichever way it was imported.
+    #[test]
+    fn every_import_remembers_the_server_track_it_became() {
+        let mut rig = Rig::new();
+        rig.cmd(ExternalCmd::PlaySource { source: SourceKind::Deezer, id: "7".into(), video: false });
+        rig.imported(ImportTarget::Click(1), one(70));
+        assert_eq!(rig.view().links.track(&deezer("7")).map(|t| t.id), Some(id(70)));
+
+        rig.open(vec![item("a"), item("b")]);
+        rig.cmd(ExternalCmd::PlayPlaylist { start: 0, video: false });
+        rig.imported(ImportTarget::Start(2), one(1));
+        rig.imported(ImportTarget::Queue, missing());
+        assert_eq!(rig.view().links.track(&deezer("a")).map(|t| t.id), Some(id(1)));
+        assert_eq!(rig.view().links.track(&deezer("b")), None, "not available: no link");
+
+        rig.cmd(ExternalCmd::PlayArchive { identifier: "marea".into() });
+        rig.imported(ImportTarget::Click(3), one(9));
+        assert_eq!(rig.view().links.track(&Importing::Archive("marea".into())).map(|t| t.id), Some(id(9)));
+
+        let mut links = ImportLinks::default();
+        for n in 0..=LINKS {
+            links.put(deezer(&n.to_string()), &track(n as u128));
+        }
+        assert_eq!(links.track(&deezer("0")), None, "the oldest goes past the limit");
+        assert!(links.track(&deezer(&LINKS.to_string())).is_some());
     }
 
     #[test]

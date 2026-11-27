@@ -13,12 +13,14 @@ mod format;
 #[cfg(feature = "profile")]
 mod frame_stats;
 mod gallery;
+mod motion;
 mod notices;
 mod pixel;
 mod theme;
 mod titlebar;
 #[cfg(feature = "video")]
 mod video;
+mod zoom;
 
 use gpui::{
     App, AppContext, Bounds, WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowOptions, px,
@@ -34,15 +36,16 @@ enum Mode {
     Gallery,
 }
 
-const USAGE: &str = "psytify [--gallery] [--search TESTO] [--queue] [--lyrics] [--video] [--focus] [--play-first-official] [--page PAGINA] [--fixture NOME]\n\n\
+const USAGE: &str = "psytify [--gallery] [--search TESTO] [--now] [--queue] [--lyrics] [--video] [--focus] [--play-first-official] [--page PAGINA] [--fixture NOME]\n\n\
     Senza argomenti apre l'app, con la stessa configurazione del client Iced.\n\
     --gallery        apre la galleria dei componenti (nessun core, nessuna rete)\n\
     --search TESTO   apre la ricerca già compilata e la lancia\n\
-    --queue          apre il pannello della coda\n\
-    --lyrics         apre il pannello del testo\n\
-    --video          solo con la feature `video`: apre il pannello sul videoclip; con --focus, la vista\n\
-                     immersiva sul videoclip\n\
-    --focus          apre la vista immersiva (se c'è un brano in coda)\n\
+    --now            apre il pannello laterale su «In riproduzione»\n\
+    --queue          apre il pannello laterale sulla coda\n\
+    --lyrics         apre il pannello laterale sul testo\n\
+    --video          solo con la feature `video`: accende il videoclip nella copertina di «In riproduzione»;\n\
+                     con --focus, in quella del palco\n\
+    --focus          apre il palco (se c'è un brano in coda)\n\
     --play-first-official  con --search: quando arrivano i risultati del catalogo ufficiale suona il\n\
                      primo (serve a provare lo stato «Apro…» senza toccare niente)\n\
     --page PAGINA    apre home, news, search, library, liked, downloads, playlist (la prima della libreria),\n\
@@ -69,6 +72,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 let text = args.next().ok_or("--search vuole un testo")?;
                 launch.search = Some(text);
             }
+            "--now" => launch.now = true,
             "--queue" => launch.queue = true,
             "--lyrics" => launch.lyrics = true,
             #[cfg(feature = "video")]
@@ -253,7 +257,7 @@ mod tests {
 
     #[cfg(feature = "video")]
     #[test]
-    fn the_video_panel_can_open_at_start() {
+    fn the_clip_can_be_on_at_start() {
         let mode = parse_args(args(&["--video", "--focus"]));
         let launch = app::Launch { video: true, focus: true, ..app::Launch::default() };
         assert_eq!(mode, Ok(Mode::App(launch)));

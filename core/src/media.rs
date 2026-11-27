@@ -726,10 +726,12 @@ mod phone {
 
     type Show = Box<dyn Fn(Option<&NowPlaying<'_>>) + Send + Sync>;
     type Commands = (UnboundedSender<Event>, Mutex<Option<UnboundedReceiver<Event>>>);
+    type Install = Box<dyn Fn(&Path) + Send + Sync>;
+    type NotifyUpdate = Box<dyn Fn(&str) + Send + Sync>;
 
     static SHOW: OnceLock<Show> = OnceLock::new();
-    static INSTALL: OnceLock<Box<dyn Fn(&Path) + Send + Sync>> = OnceLock::new();
-    static NOTIFY_UPDATE: OnceLock<Box<dyn Fn(&str) + Send + Sync>> = OnceLock::new();
+    static INSTALL: OnceLock<Install> = OnceLock::new();
+    static NOTIFY_UPDATE: OnceLock<NotifyUpdate> = OnceLock::new();
     static COMMANDS: OnceLock<Commands> = OnceLock::new();
 
     fn commands() -> &'static Commands {
@@ -796,6 +798,19 @@ mod phone {
         pub fn set_volume(&self, _volume: f32) {}
     }
 
+    /// The command receiver, held by one core for its life. It goes back to its place when the stream
+    /// is dropped (the core stops), so a core started later in the same process still gets the
+    /// buttons, including those pressed while no core ran.
+    struct Lease(Option<UnboundedReceiver<Event>>);
+
+    impl Drop for Lease {
+        fn drop(&mut self) {
+            if let Some(receiver) = self.0.take() {
+                *commands().1.lock().unwrap_or_else(PoisonError::into_inner) = Some(receiver);
+            }
+        }
+    }
+
     /// I comandi del guscio. Senza guscio registrato (desktop con `PSYTIFY_PHONE=1`) il flusso
     /// finisce subito.
     pub fn events() -> impl Stream<Item = Event> + Send + 'static {
@@ -803,10 +818,11 @@ mod phone {
             if SHOW.get().is_none() {
                 return;
             }
-            let Some(mut receiver) = commands().1.lock().unwrap_or_else(PoisonError::into_inner).take()
-            else {
+            let Some(receiver) = commands().1.lock().unwrap_or_else(PoisonError::into_inner).take() else {
                 return;
             };
+            let mut lease = Lease(Some(receiver));
+            let Some(receiver) = lease.0.as_mut() else { return };
             if output.send(Event::Ready(Handle)).await.is_err() {
                 return;
             }

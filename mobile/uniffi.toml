@@ -1,0 +1,4 @@
+# UniFFI Kotlin bindings of psytify-mobile (read by uniffi-bindgen in library mode).
+[bindings.kotlin]
+package_name = "dev.psytify.app.rust"
+cdylib_name = "psytify_mobile"

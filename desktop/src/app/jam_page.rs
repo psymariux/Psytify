@@ -1,22 +1,20 @@
-//! La pagina «Jam» (`Page::Jam`): l'ascolto insieme, come il client Iced (`client/src/ui/pages/jam.rs`) e
-//! la direzione artistica («Jam: the code in `TYPE_NUMERIC_PIXEL` with a copy button, members as avatars in
-//! a row, live badge `LIVE` while connected»). Una pagina della barra laterale, fra Scaricati e Amici, come
-//! nel client Iced: non una scheda del pannello laterale, che resta della coda e del testo.
+//! «Jam» (`Page::Jam`): listening together, as in the Iced client (`client/src/ui/pages/jam.rs`) and the
+//! art direction («Jam: the code in `TYPE_NUMERIC_PIXEL` with a copy button, members as avatars in a row,
+//! live badge `LIVE` while connected»). A sidebar page between Scaricati and Amici.
 //!
-//! Senza jam: gli inviti degli amici (Entra, Ignora), poi la scheda «Ascolta insieme» con il nome da
-//! mostrare in stanza, «Crea una jam» e l'ingresso con un codice (sei lettere o cifre, filtrate e in
-//! maiuscolo mentre si scrive; «Entra» si accende solo con un codice valido, `jam::valid_code`). Se la
-//! jam si è chiusa da sola (la stanza non risponde, il collegamento è caduto) la scheda lo dice in
-//! `TEXT_ERROR` sotto i pulsanti, con «Riprova». Il core non ha uno stato «in riconnessione»: un
-//! collegamento perso chiude la jam (`JamEvent::Closed`), e la pagina torna qui.
+//! Without a jam: the friends' invitations (Entra, Ignora), then the «Ascolta insieme» card with the name to
+//! show in the room, «Crea una jam» and joining with a code (six letters or digits, filtered and upper-cased
+//! while typing; «Entra» lights up only with a valid code, `jam::valid_code`). If the jam closed on its own
+//! the card says so in `TEXT_ERROR` under the buttons, with «Riprova». The core has no «reconnecting» state:
+//! a lost link closes the jam (`JamEvent::Closed`) and the page comes back here.
 //!
-//! In connessione: il loader e «Connessione in corso…», con «Esci dalla jam». In stanza: il codice in tipo
-//! pixel con il pulsante per copiarlo e il badge `LIVE`, chi c'è come avatar in fila, poi l'elenco delle
-//! persone (`PersonRow`, «Tu» segna chi sei) e gli amici da invitare (Scegli / Scelto, «Invia l'invito»).
+//! Connecting: the loader and «Connessione in corso…», with «Esci dalla jam». In the room: the code in the
+//! pixel face with the copy button and the `LIVE` badge, who is there as avatars in a row, then the people
+//! (`PersonRow`, «Tu» marks you) and the friends to invite (Scegli / Scelto, «Invia l'invito»). Everything
+//! sits at the frame margins and enters with the page-enter move.
 //!
-//! Le righe e i testi sono una funzione pura delle viste della jam e sociale (`model`, `rows`), rifatta
-//! quando il core pubblica uno dei due domini; la pagina si ridisegna solo se il risultato cambia.
-//! `render` non legge l'istantanea. Nessun timer: una jam ferma non sveglia niente.
+//! Rows and texts are a pure function of the jam and social views (`model`, `rows`), rebuilt when the core
+//! publishes either; the page redraws only if the result changes. No timer: an idle jam wakes nothing.
 
 use gpui::{
     AnyElement, AppContext, ClickEvent, ClipboardItem, Context, Entity, EventEmitter, InteractiveElement,
@@ -30,25 +28,27 @@ use psytify_design::sprite;
 use psytify_design::tokens::color::{
     SURFACE_CANVAS, TEXT_ERROR, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY,
 };
-use psytify_design::tokens::size::{SEARCH_FIELD_MAX_W, TRACK_ROW_H, cover::AVATAR_S};
-use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6};
-use psytify_design::tokens::type_::{TYPE_BODY, TYPE_HEADING, TYPE_LABEL, TYPE_META};
+use psytify_design::tokens::size::{SEARCH_FIELD_MAX_W, TRACK_ROW_H, cover::ART_ROW};
+use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_4, SPACE_5};
+use psytify_design::tokens::type_::{TYPE_BODY, TYPE_HEADING, TYPE_META};
 
 use super::PageEvent;
+use super::page_frame::PageFrame;
 use super::people::{line_chars, status};
 use crate::components::badge::{Badge, BadgeKind};
 use crate::components::button::Button;
 use crate::components::card::Card;
+use crate::components::frame::Frame;
 use crate::components::icon_button::IconButton;
 use crate::components::indicators::LoadingIndicator;
 use crate::components::person_row::{PersonRow, Status};
 use crate::components::search_field::SearchField;
-use crate::components::section::{PageTitle, note, section_heading};
+use crate::components::section::{PageTitle, note_at, section_heading_at};
 use crate::components::tile::Cover;
 use crate::components::tooltip::with_tooltip;
 use crate::core_model::{Changed, CoreModel};
 use crate::notices::Notice;
-use crate::theme::{Ap, TypeStyle, cased, col, dp};
+use crate::theme::{TypeStyle, col, dp};
 
 /// Il filtro del codice mentre si scrive: lettere e cifre ASCII, in maiuscolo (come il client Iced). Il
 /// campo ne tiene al più [`CODE_LEN`].
@@ -328,6 +328,7 @@ pub struct JamPage {
     /// L'ultimo evento sociale letto (per «inviti mandati», che svuota la scelta).
     social_seen: u64,
     list: ListState,
+    frame: PageFrame,
     _changes: Subscription,
 }
 
@@ -394,7 +395,21 @@ impl JamPage {
             dismissed: 0,
             social_seen: social.events.back().map_or(0, |raised| raised.seq),
             list,
+            frame: PageFrame::default(),
             _changes: changes,
+        }
+    }
+
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame != self.frame.frame {
+            self.frame.frame = frame;
+            cx.notify();
         }
     }
 
@@ -532,40 +547,67 @@ impl JamPage {
     }
 
     fn item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let element = self.row(ix, window, cx);
+        // One step per block: a heading or a card starts one.
+        let section = 1 + self
+            .rows
+            .iter()
+            .take(ix + 1)
+            .filter(|row| {
+                matches!(
+                    row,
+                    Row::InvitesHeading(_)
+                        | Row::Start
+                        | Row::Room
+                        | Row::MembersHeading
+                        | Row::InviteHeading
+                )
+            })
+            .count();
+        self.frame.wrap(element, section, window)
+    }
+
+    fn row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(row) = self.rows.get(ix).copied() else { return div().into_any_element() };
+        let margin = self.frame.margin();
         match row {
             Row::InvitesHeading(count) => {
-                section_heading("Inviti".into(), count.to_string().into()).into_any_element()
+                section_heading_at("Inviti".into(), count.to_string().into(), margin).into_any_element()
             }
             Row::Invite(ix) => self.invite_row(ix, cx),
             Row::Start => self.start_card(cx),
             Row::Room => self.room_card(window, cx),
             Row::MembersHeading => {
-                section_heading("Persone".into(), self.model.count.clone()).into_any_element()
+                section_heading_at("Persone".into(), self.model.count.clone(), margin).into_any_element()
             }
             Row::Member(ix) => match self.model.members.get(ix) {
                 Some(member) => {
                     let line = if member.you { "Tu" } else { "Nella jam" };
-                    PersonRow::new(("jam-member", ix), member.name.clone(), Status::Plain(line.into()))
-                        .into_any_element()
+                    self.frame.row(PersonRow::new(
+                        ("jam-member", ix),
+                        member.name.clone(),
+                        Status::Plain(line.into()),
+                    ))
                 }
                 None => div().into_any_element(),
             },
             Row::InviteHeading => {
-                section_heading("Invita amici".into(), chosen_label(self.chosen.len())).into_any_element()
+                section_heading_at("Invita amici".into(), chosen_label(self.chosen.len()), margin)
+                    .into_any_element()
             }
             Row::Friend(ix) => self.friend_row(ix, cx),
             Row::Note(line) => {
-                note(div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(line.text()))
+                note_at(div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(line.text()), margin)
                     .into_any_element()
             }
-            Row::Send => note(
+            Row::Send => note_at(
                 Button::new("jam-invite-send", "Invia l'invito")
                     .primary()
                     .icon(sprite::ICON_USER_PLUS)
                     .loading(self.model.inviting)
                     .disabled(self.chosen.is_empty() || self.model.inviting)
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.send_invites(cx))),
+                margin,
             )
             .into_any_element(),
         }
@@ -574,7 +616,7 @@ impl JamPage {
     fn invite_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
         let Some(invite) = self.model.invites.get(ix) else { return div().into_any_element() };
         let (join, dismiss) = (invite.code.clone(), invite.code.clone());
-        PersonRow::new(("jam-invite", ix), invite.name.clone(), Status::Plain(invite.line.clone()))
+        let row = PersonRow::new(("jam-invite", ix), invite.name.clone(), Status::Plain(invite.line.clone()))
             .action(
                 Button::new(("jam-invite-join", ix), "Entra")
                     .secondary()
@@ -584,8 +626,8 @@ impl JamPage {
                 move |this, _: &ClickEvent, _, cx| {
                     this.core.read(cx).social(SocialCmd::DismissInvite(dismiss.clone()));
                 },
-            )))
-            .into_any_element()
+            )));
+        self.frame.row(row)
     }
 
     fn friend_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -598,17 +640,16 @@ impl JamPage {
         } else {
             Button::new(("jam-friend", ix), "Scegli").secondary()
         };
-        PersonRow::new(("jam-friend-row", ix), friend.name.clone(), friend.status.clone())
-            .avatar(friend.avatar.clone())
-            .action(
-                button.on_click(
+        self.frame.row(
+            PersonRow::new(("jam-friend-row", ix), friend.name.clone(), friend.status.clone())
+                .avatar(friend.avatar.clone())
+                .action(button.on_click(
                     cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_friend(&handle, cx)),
-                ),
-            )
-            .into_any_element()
+                )),
+        )
     }
 
-    /// La scheda per avviare una jam: nome, «Crea una jam», codice ed «Entra», l'errore e «Riprova».
+    /// The card to start a jam: name, «Crea una jam», code and «Entra», the error and «Riprova».
     fn start_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut body =
             div()
@@ -661,19 +702,24 @@ impl JamPage {
             }
             body = body.child(line);
         }
-        padded(Card::new().child(body)).into_any_element()
+        padded(Card::new().child(body), self.frame.margin()).into_any_element()
     }
 
-    /// La scheda della stanza: «Codice» con il badge `LIVE`, il codice in tipo pixel e «Copia», la frase,
-    /// gli avatar in fila. Mentre ci si collega: il loader e «Connessione in corso…».
-    fn room_card(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let ap = Ap::of(window);
+    /// The room card: «Codice» with the `LIVE` badge, the code in the pixel face and «Copia», the line, the
+    /// avatars in a row. While connecting: the loader and «Connessione in corso…».
+    fn room_card(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.model.stage == Stage::Connecting {
-            return padded(Card::new().child(
-                div().flex().items_center().gap(dp(SPACE_4)).child(LoadingIndicator::new()).child(
-                    div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child("Connessione in corso…"),
+            return padded(
+                Card::new().child(
+                    div().flex().items_center().gap(dp(SPACE_4)).child(LoadingIndicator::new()).child(
+                        div()
+                            .type_role(TYPE_BODY)
+                            .text_color(col(TEXT_SECONDARY))
+                            .child("Connessione in corso…"),
+                    ),
                 ),
-            ))
+                self.frame.margin(),
+            )
             .into_any_element();
         }
         let code =
@@ -681,7 +727,7 @@ impl JamPage {
         let avatars = self.model.members.iter().enumerate().map(|(ix, member)| {
             let name = if member.you { format!("{} (tu)", member.name) } else { member.name.to_string() };
             with_tooltip(
-                div().id(("jam-avatar", ix)).flex_none().child(Cover::new(AVATAR_S).circle()),
+                div().id(("jam-avatar", ix)).flex_none().child(Cover::new(ART_ROW).circle()),
                 name,
                 None,
             )
@@ -695,12 +741,7 @@ impl JamPage {
                     .flex()
                     .items_center()
                     .gap(dp(SPACE_3))
-                    .child(
-                        div()
-                            .type_role(TYPE_LABEL)
-                            .text_color(col(TEXT_SECONDARY))
-                            .child(cased("Codice", TYPE_LABEL)),
-                    )
+                    .child(div().type_role(TYPE_META).text_color(col(TEXT_SECONDARY)).child("Codice"))
                     .child(Badge::new("LIVE", BadgeKind::Live)),
             )
             .child(
@@ -708,7 +749,7 @@ impl JamPage {
                     .flex()
                     .items_center()
                     .gap(dp(SPACE_3))
-                    .child(div().text_color(col(TEXT_PRIMARY)).pixel_type(ap, true).child(code))
+                    .child(div().text_color(col(TEXT_PRIMARY)).pixel_type(true).child(code))
                     .child(
                         IconButton::new("jam-copy", sprite::ICON_COPY)
                             .tooltip("Copia il codice", None)
@@ -731,23 +772,24 @@ impl JamPage {
                         .child(self.model.count.clone()),
                 ),
             );
-        padded(Card::new().child(body)).into_any_element()
+        padded(Card::new().child(body), self.frame.margin()).into_any_element()
     }
 }
 
-/// Una scheda della pagina, allineata alle intestazioni e larga al più quanto un campo di ricerca.
-fn padded(card: Card) -> gpui::Div {
-    div().w_full().px(dp(SPACE_6)).py(dp(SPACE_3)).child(div().max_w(dp(SEARCH_FIELD_MAX_W)).child(card))
+/// A card of the page at the frame margin, at most as wide as a search field.
+fn padded(card: Card, margin: f32) -> gpui::Div {
+    div().w_full().px(dp(margin)).py(dp(SPACE_3)).child(div().max_w(dp(SEARCH_FIELD_MAX_W)).child(card))
 }
 
 impl Render for JamPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.frame.begin(window, Some(&self.list));
         let meta = match self.model.stage {
             Stage::Idle => "Ascolta insieme ad altri",
             Stage::Connecting => "Connessione in corso…",
             Stage::Open => "Collegato alla stanza",
         };
-        let mut title = PageTitle::screen("Jam").meta(meta);
+        let mut title = PageTitle::screen("Jam").margin(self.frame.margin()).meta(meta);
         if self.model.stage != Stage::Idle {
             title =
                 title.action(Button::new("jam-leave", "Esci dalla jam").secondary().on_click(
@@ -760,11 +802,13 @@ impl Render for JamPage {
         )
         .size_full();
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
             .bg(col(SURFACE_CANVAS))
-            .child(title)
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame))
+            .child(self.frame.wrap(title.into_any_element(), 0, window))
             .child(div().flex_1().min_h_0().child(list))
     }
 }

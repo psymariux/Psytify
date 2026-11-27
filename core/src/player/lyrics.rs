@@ -94,12 +94,88 @@ pub fn current(lines: &[Line], position: Duration) -> Option<usize> {
     lines.partition_point(|line| line.at <= position).checked_sub(1)
 }
 
+/// Puntini di una pausa strumentale.
+pub const DOTS: u32 = 3;
+
+/// Un verso è una pausa strumentale se non ha parole.
+pub fn is_pause(line: &Line) -> bool {
+    line.text.trim().is_empty()
+}
+
+/// Quanti puntini sono accesi in una pausa che va da `line.at` a `next`, alla posizione `position`: uno
+/// all'inizio, tutti e tre nell'ultimo terzo. Senza un verso dopo resta acceso il primo.
+pub fn dots_lit(line: &Line, next: Option<Duration>, position: Duration) -> u32 {
+    let Some(next) = next else { return 1 };
+    let span = next.saturating_sub(line.at).as_secs_f32();
+    if span <= 0.0 {
+        return DOTS;
+    }
+    let fraction = position.saturating_sub(line.at).as_secs_f32() / span;
+    ((fraction * DOTS as f32).floor() as u32 + 1).min(DOTS)
+}
+
+/// Fra quanto cambia qualcosa da mostrare alla posizione `position`: l'inizio del verso dopo o, dentro
+/// una pausa, il prossimo puntino. `None` dopo l'ultimo verso: non c'è niente da aspettare.
+pub fn next_change(lines: &[Line], position: Duration) -> Option<Duration> {
+    let now = current(lines, position);
+    let next_line = lines.get(now.map_or(0, |ix| ix + 1)).map(|line| line.at);
+    let mut soonest = next_line.map(|at| at.saturating_sub(position));
+    if let (Some(ix), Some(next)) = (now, next_line)
+        && let Some(line) = lines.get(ix)
+        && is_pause(line)
+    {
+        let span = next.saturating_sub(line.at);
+        let step = (1..DOTS).map(|k| line.at + span * k / DOTS).find(|step| *step > position);
+        if let Some(step) = step {
+            soonest = Some(soonest.map_or(step - position, |s| s.min(step - position)));
+        }
+    }
+    soonest
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn secs(s: u64) -> Duration {
         Duration::from_secs(s)
+    }
+
+    fn verse(at_ms: u64, text: &str) -> Line {
+        Line { at: Duration::from_millis(at_ms), text: text.into() }
+    }
+
+    fn ms(value: u64) -> Duration {
+        Duration::from_millis(value)
+    }
+
+    #[test]
+    fn the_next_change_is_the_start_of_the_next_verse() {
+        let lines = [verse(1_000, "a"), verse(5_000, "b")];
+        assert_eq!(next_change(&lines, ms(0)), Some(ms(1_000)));
+        assert_eq!(next_change(&lines, ms(1_000)), Some(ms(4_000)));
+        assert_eq!(next_change(&lines, ms(4_900)), Some(ms(100)));
+        assert_eq!(next_change(&lines, ms(5_000)), None, "dopo l'ultimo verso non si aspetta niente");
+    }
+
+    #[test]
+    fn a_pause_wakes_for_each_dot() {
+        let lines = [verse(0, "a"), verse(3_000, ""), verse(9_000, "b")];
+        assert!(is_pause(&lines[1]) && !is_pause(&lines[0]));
+        assert_eq!(next_change(&lines, ms(3_000)), Some(ms(2_000)));
+        assert_eq!(next_change(&lines, ms(5_500)), Some(ms(1_500)));
+        assert_eq!(next_change(&lines, ms(7_000)), Some(ms(2_000)), "l'ultimo terzo aspetta il verso");
+        assert_eq!(dots_lit(&lines[1], Some(ms(9_000)), ms(3_000)), 1);
+        assert_eq!(dots_lit(&lines[1], Some(ms(9_000)), ms(5_000)), 2);
+        assert_eq!(dots_lit(&lines[1], Some(ms(9_000)), ms(8_999)), 3);
+        assert_eq!(dots_lit(&lines[1], None, ms(8_000)), 1);
+    }
+
+    #[test]
+    fn the_wait_is_never_zero() {
+        // Due versi con lo stesso tempo: si aspetta quello dopo, mai un timer da 0 che gira a vuoto.
+        let lines = [verse(1_000, "a"), verse(1_000, "a bis"), verse(2_000, "b")];
+        assert_eq!(next_change(&lines, ms(1_000)), Some(ms(1_000)));
     }
 
     #[test]

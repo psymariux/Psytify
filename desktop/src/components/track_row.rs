@@ -1,6 +1,7 @@
-//! TrackRow: riga di 48 dp (`uniform_list`-ready: altezza fissa, nessuna misura dei figli) con
-//! indice | copertina | titolo e artista | album | azioni | durata. Stati: rest, hover, premuto,
-//! focus (anello interno), disabilitato (non disponibile), selezionato, in riproduzione.
+//! TrackRow: a 48 dp row (`uniform_list`-ready: fixed height, no child measuring) with index | 40 dp cover
+//! | title and artist | album | actions | duration. States: rest, hover (the tone eases in, the index turns
+//! into the play glyph, the heart and «Altro» slide in 2 AP from the right), pressed, focus (inner ring),
+//! disabled (unavailable), selected, playing.
 
 use gpui::{
     App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
@@ -11,7 +12,7 @@ use psytify_design::tokens::color::{
     ICON_ACTIVE, PURE_WHITE, SURFACE_RAISED, SURFACE_SELECTED, TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY,
     TEXT_TERTIARY,
 };
-use psytify_design::tokens::size::{TRACK_INDEX_W, TRACK_ROW_H, cover::COVER_XS};
+use psytify_design::tokens::size::{TRACK_INDEX_W, TRACK_ROW_H, cover::ART_ROW};
 use psytify_design::tokens::space::{SPACE_3, SPACE_4};
 use psytify_design::tokens::type_::{TYPE_ARTIST, TYPE_NUMERIC, TYPE_TRACK_TITLE};
 
@@ -20,9 +21,10 @@ use super::icon_button::{IconButton, OnStyle};
 use super::indicators::{DownloadIndicator, DownloadState, Equalizer, PlayState};
 use super::playing_spot::PlayingSpot;
 use super::tile::Cover;
+use crate::motion::ap_round;
 use crate::pixel::PixelSprite;
 use crate::pixel::shape::inset_ring;
-use crate::theme::{TypeStyle, col, dp};
+use crate::theme::{Ap, TypeStyle, col, dp, fade};
 
 /// Dati di una riga: stringhe già pronte (la view non formatta, vedi AGENTS.md).
 #[derive(Clone)]
@@ -179,16 +181,28 @@ impl TrackRow {
 impl RenderOnce for TrackRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let available = self.data.available;
+        let ap = Ap::of(window);
         let wired = wire(&self.id, !available, self.preview, window, cx);
         let v = wired.visual;
+        // The hover tone eases in; press and selection are solid at once.
         let fill = if v.pressed || self.selected {
-            Some(SURFACE_SELECTED)
-        } else if v.hovered {
-            Some(SURFACE_RAISED)
+            Some(col(SURFACE_SELECTED))
+        } else if v.hover_t > 0.0 && available {
+            Some(fade(SURFACE_RAISED, v.hover_t))
         } else {
             None
         };
         let hot = v.hovered && available;
+        // The heart and «Altro» slide in 2 AP from the right with the hover, and fade.
+        let shown = v.hover_t > 0.0 && available;
+        let slide = |element: gpui::AnyElement| {
+            div()
+                .relative()
+                .left(ap.n(ap_round((1.0 - v.hover_t) * 2.0)))
+                .opacity(v.hover_t)
+                .child(element)
+                .into_any_element()
+        };
         let text_primary = if available { TEXT_PRIMARY } else { TEXT_DISABLED };
         let text_secondary = if available { TEXT_SECONDARY } else { TEXT_DISABLED };
 
@@ -211,7 +225,7 @@ impl RenderOnce for TrackRow {
         };
 
         let id = format!("{:?}", self.id);
-        let heart = if self.data.liked || hot {
+        let heart = if self.data.liked || shown {
             let mut heart = IconButton::new(SharedString::from(format!("{id}-heart")), sprite::ICON_HEART)
                 .icon_on(sprite::ICON_HEART_FILL)
                 .on_style(OnStyle::Active)
@@ -228,11 +242,11 @@ impl RenderOnce for TrackRow {
                     handler(event, window, cx);
                 });
             }
-            heart.into_any_element()
+            if self.data.liked { heart.into_any_element() } else { slide(heart.into_any_element()) }
         } else {
             div().size(dp(32.0)).into_any_element()
         };
-        let more = if hot && self.show_more {
+        let more = if shown && self.show_more {
             let mut more = IconButton::new(SharedString::from(format!("{id}-more")), sprite::ICON_MORE)
                 .tooltip("Altro", None);
             if let Some(handler) = self.on_more.clone() {
@@ -241,7 +255,7 @@ impl RenderOnce for TrackRow {
                     handler(event, window, cx);
                 });
             }
-            more.into_any_element()
+            slide(more.into_any_element())
         } else {
             div().size(dp(32.0)).into_any_element()
         };
@@ -286,7 +300,7 @@ impl RenderOnce for TrackRow {
             .gap(dp(SPACE_3))
             .px(dp(SPACE_3))
             .child(centered(div().w(dp(TRACK_INDEX_W)).flex_none()).child(index))
-            .child(Cover::new(COVER_XS).url(self.data.cover_url.clone()).unavailable(!available))
+            .child(Cover::new(ART_ROW).url(self.data.cover_url.clone()).unavailable(!available))
             // Title and album share the row 3 to 2, like table columns.
             .child(
                 div()
@@ -338,7 +352,7 @@ impl RenderOnce for TrackRow {
             )
             .child(inset_ring(col(PURE_WHITE), wired.focus.clone(), v.force_ring));
         if let Some(color) = fill {
-            row = row.bg(col(color));
+            row = row.bg(color);
         }
         with_click(row, if available { self.on_click } else { None })
     }

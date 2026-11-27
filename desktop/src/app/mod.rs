@@ -1,6 +1,6 @@
 //! L'app desktop su GPUI: la finestra con barra del titolo lato client, barra laterale, pagina,
-//! pannello laterale (la coda o il testo) e barra «in riproduzione», o al loro posto la vista immersiva
-//! (`focus_view`). Ogni pezzo è una vista (entità) che si abbona al
+//! pannello laterale (In riproduzione, Testo, Coda) e barra «in riproduzione», o al loro posto il palco
+//! (`stage_view`). Ogni pezzo è una vista (entità) che si abbona al
 //! `CoreModel` e si ridisegna solo quando cambia il suo dominio; la radice tiene la pagina corrente,
 //! il pannello aperto, gli avvisi (un solo sistema per gli eventi di tutti i domini, vedi `notices`) e la
 //! chiusura.
@@ -20,14 +20,16 @@ mod artist_page;
 mod chrome;
 mod collection_page;
 mod downloads_page;
-mod focus_view;
 mod friends_page;
 mod home_page;
 mod jam_page;
 mod library_page;
 mod lyrics_view;
+mod media;
 mod nav;
 mod news_page;
+mod now_panel;
+mod page_frame;
 mod page_list;
 mod people;
 mod player_bar;
@@ -36,17 +38,19 @@ mod profile_page;
 mod queue_panel;
 mod search_page;
 pub mod settings_page;
+pub mod sidebar;
 mod sign_in_page;
 mod source_page;
+mod stage_view;
 mod track_list;
 mod track_menu;
 mod update_banner;
-#[cfg(feature = "video")]
-mod video_panel;
 
 pub use nav::{Page, PageArg};
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,58 +65,60 @@ use psytify_core::config::{FollowedArtist, SavedAlbum};
 use psytify_core::player::PlaybackState;
 use psytify_core::snapshot::{Account, PlaybackView, SocialView};
 use psytify_design::sprite;
-use psytify_design::tokens::color::SURFACE_CANVAS;
-use psytify_design::tokens::color::SURFACE_CHROME;
-use psytify_design::tokens::motion::TOAST_HOLD_MS;
+use psytify_design::tokens::color::{SHADOW_HARD, SURFACE_CANVAS, SURFACE_CHROME};
+use psytify_design::tokens::motion::{MOTION_PANEL, TOAST_HOLD_MS};
 use psytify_design::tokens::size::{
-    BP_PANEL_DOCK, BP_RAIL, CONTENT_MAX_W, PLAYER_BAR_H, SIDE_PANEL_W, SIDEBAR_RAIL_W, SIDEBAR_W, TITLE_BAR_H,
+    BP_PANEL_DOCK, BP_RAIL, PLAYER_BAR_H, SIDE_PANEL_W, SIDEBAR_GRIP_W, TITLE_BAR_H,
 };
 use psytify_design::tokens::space::{SPACE_3, SPACE_5};
 
 use crate::actions::{
     CycleRepeat, FocusNext, FocusPrev, FocusSearch, GoBack, GoForward, NextTrack, OpenSettings,
     PreviousTrack, Quit, SHELL_CONTEXT, ToggleFocus as ToggleFocusAction, ToggleLyrics as ToggleLyricsAction,
-    TogglePlay, ToggleQueue as ToggleQueueAction, ToggleShuffle,
+    TogglePlay, ToggleQueue as ToggleQueueAction, ToggleShuffle, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
 };
 use crate::components::indicators::PlayState;
 use crate::components::menu::{MenuItem, MenuPanel, popup};
-use crate::components::navigation::NavigationItem;
+use crate::components::navigation::Tabs;
 use crate::components::overlay::{Toast, scrim};
 use crate::components::playing_spot::{PlayingSpot, overlay as spot_overlay};
 use crate::components::search_field::SearchField;
 use crate::components::separator::Separator;
 use crate::core_model::{Changed, CoreModel};
+use crate::motion::{Tween, ap_round};
 use crate::notices::{Notice, Pushed, Seen, Toasts};
-use crate::theme::{col, dp};
+use crate::pixel::shape::hard_shadow;
+use crate::theme::{Ap, col, dp, to_dp};
 use crate::titlebar::{AccountChip, HistoryButtons, OnClose, TitleBarState, title_row, window_frame};
+use crate::zoom::ZoomPref;
 use album_page::AlbumPage;
 use artist_page::ArtistPage;
 use chrome::{Chrome, Key as ChromeKey, Part};
 use collection_page::{Collection, CollectionPage};
 use downloads_page::DownloadsPage;
-use focus_view::{FocusEvent, FocusView};
 use friends_page::FriendsPage;
 use home_page::HomePage;
 use jam_page::JamPage;
 use library_page::LibraryPage;
 use lyrics_view::{Look, LyricsView};
-use nav::{History, Nav, PersonKey, SourceKey};
+use nav::{History, PersonKey, SourceKey};
 use news_page::NewsPage;
+use now_panel::{NowEvent, NowPanel};
 use player_bar::{BarEvent, PlayerBar};
 use playlist_dialog::{DialogEvent, DialogRequest, PlaylistDialog};
 use profile_page::ProfilePage;
 use queue_panel::QueuePanel;
 use search_page::SearchPage;
 use settings_page::SettingsPage;
+use sidebar::{Layout as SidebarLayout, Mode as SidebarMode, Prefs as SidebarPrefs, Sidebar};
 use sign_in_page::SignInPage;
 use source_page::SourcePage;
+use stage_view::{StageView, StageViewEvent};
 use track_menu::{
     DownloadItems, MenuChoice, MenuLevel, TrackMenu, choice_notice, copy_text, download_label, follow_item,
     playlist_items, quality_items,
 };
 use update_banner::{BANNER_H, Place, UpdateBanner, update_line};
-#[cfg(feature = "video")]
-use video_panel::{PanelEvent, VideoPanel};
 
 #[cfg(feature = "video")]
 use crate::actions::ToggleVideoFocus;
@@ -122,29 +128,44 @@ use crate::video::stage::{StageEvent, Surface, VideoStage};
 /// Quanto si aspetta il salvataggio del core prima di uscire comunque.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
-/// Il pannello laterale: la coda, il testo o (con la feature `video`) il videoclip, mai insieme (come le
-/// schede del pannello del client Iced).
+/// The side panel's tabs (desktop v2 §5): the record, the words, the queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidePanel {
-    Queue,
+    Now,
     Lyrics,
-    #[cfg(feature = "video")]
-    Video,
+    Queue,
 }
 
-/// Dove si vede il videoclip: nella vista immersiva aperta sul videoclip, o nel pannello sul videoclip
-/// quando la vista immersiva non lo copre. Puro.
-#[cfg(feature = "video")]
-pub fn video_surface(panel: Option<SidePanel>, focus_open: bool, focus_video: bool) -> Option<Surface> {
-    if focus_open {
-        focus_video.then_some(Surface::Focus)
-    } else {
-        (panel == Some(SidePanel::Video)).then_some(Surface::Panel)
+impl SidePanel {
+    pub const ALL: [SidePanel; 3] = [SidePanel::Now, SidePanel::Lyrics, SidePanel::Queue];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SidePanel::Now => "In riproduzione",
+            SidePanel::Lyrics => "Testo",
+            SidePanel::Queue => "Coda",
+        }
+    }
+
+    fn ix(self) -> usize {
+        Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0)
     }
 }
 
-/// Il pannello dopo il tasto di `kind`: si apre su quella scheda, o si chiude se era già lei (come
-/// `Message::OpenPanel` del client Iced).
+/// Where the clip shows: the stage's media slot while the stage is open, else the side panel's on
+/// *In riproduzione*; only with the clip on and a track that has one. Pure.
+#[cfg(feature = "video")]
+pub fn video_surface(panel: Option<SidePanel>, stage_open: bool, video_on: bool) -> Option<Surface> {
+    if !video_on {
+        None
+    } else if stage_open {
+        Some(Surface::Stage)
+    } else {
+        (panel == Some(SidePanel::Now)).then_some(Surface::Panel)
+    }
+}
+
+/// The panel after the button of `kind`: it opens on that tab, or closes if it was that one.
 pub fn toggled(open: Option<SidePanel>, kind: SidePanel) -> Option<SidePanel> {
     if open == Some(kind) { None } else { Some(kind) }
 }
@@ -227,8 +248,10 @@ pub struct Launch {
     pub queue: bool,
     /// Il pannello laterale aperto sul testo (`--lyrics`).
     pub lyrics: bool,
-    /// La vista immersiva aperta (`--focus`), se c'è un brano in coda.
+    /// The stage open (`--focus`), if a track is queued.
     pub focus: bool,
+    /// The side panel open on *In riproduzione* (`--now`).
+    pub now: bool,
     /// Suona il primo risultato del catalogo ufficiale appena arriva (per provare l'importazione senza
     /// toccare niente: la riga mostra «Apro…» finché il server lavora).
     pub play_first_official: bool,
@@ -237,7 +260,7 @@ pub struct Launch {
     /// I dati sociali di prova (`--fixture`, solo con la feature `fixtures`).
     #[cfg(feature = "fixtures")]
     pub fixture: Option<String>,
-    /// Il pannello sul videoclip (`--video`); con `--focus`, la vista immersiva sul videoclip.
+    /// The clip on in the media slot (`--video`): the panel's, or with `--focus` the stage's.
     #[cfg(feature = "video")]
     pub video: bool,
 }
@@ -251,19 +274,22 @@ pub struct Shell {
     banner: Entity<UpdateBanner>,
     banner_shown: bool,
     queue: Entity<QueuePanel>,
-    /// Il testo nel pannello laterale.
+    /// *Testo* and *In riproduzione* in the side panel.
     lyrics: Entity<LyricsView>,
-    /// La vista immersiva (con il suo testo): al posto di pagina, pannello e barra quando è aperta.
-    focus_view: Entity<FocusView>,
-    focus_open: bool,
-    /// Il palco del videoclip (uno per finestra), il pannello che lo mostra e la faccia della vista immersiva
-    /// (videoclip o testo).
+    now_panel: Entity<NowPanel>,
+    /// The stage: in place of page, panel and bar when open; over them while it moves.
+    stage_view: Entity<StageView>,
+    stage_open: bool,
+    /// The reveal (0 bar, 1 stage) eased in `MOTION_PANEL` and shared with the stage view.
+    stage_t: Tween,
+    stage_reveal: stage_view::Reveal,
+    /// The stage was moving at the last draw (its end notifies the cached view once).
+    stage_moving: bool,
+    /// The window's single clip stage.
     #[cfg(feature = "video")]
     video: Entity<VideoStage>,
-    #[cfg(feature = "video")]
-    video_panel: Entity<VideoPanel>,
-    #[cfg(feature = "video")]
-    focus_video: bool,
+    /// The clip is on in the media slot (panel or stage).
+    video_on: bool,
     /// Il core sa che qualcuno mostra il testo (`PlaybackCmd::Lyrics`).
     lyrics_wanted: bool,
     search_page: Entity<SearchPage>,
@@ -315,8 +341,9 @@ pub struct Shell {
     shown: Page,
     /// La pagina corrente e quelle dietro e davanti (Indietro e Avanti).
     history: History,
-    /// Il pannello laterale aperto.
+    /// The side panel open, and the tab it showed last (drawn while it slides shut).
     panel: Option<SidePanel>,
+    panel_last: SidePanel,
     /// Il marchio nella barra del titolo è lime solo mentre suona.
     playing: bool,
     /// L'avviso sul display e quelli che aspettano; il timer c'è solo mentre un avviso è mostrato.
@@ -325,6 +352,12 @@ pub struct Shell {
     seen: Seen,
     /// La chiusura è partita: si aspetta che il core salvi.
     closing: bool,
+    /// The UI zoom preference (`Auto` or pinned); the zoom in effect lives in `theme::zoom`.
+    zoom_pref: ZoomPref,
+    /// The sidebar: mode, width, library tabs and filter, the jam card.
+    sidebar: Sidebar,
+    /// The sidebar showed the rail at the last draw (for `ChromeKey::Sidebar`).
+    sidebar_rail: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -349,6 +382,20 @@ impl Shell {
                     move |text, _, cx| core.read(cx).catalog(CatalogCmd::Search(text.trim().to_owned()))
                 })
         });
+        let filter = cx.new(|cx| {
+            SearchField::new("sidebar-filter", "Filtra", cx).without_hint().on_change({
+                let shell = this.clone();
+                move |text, _, cx| {
+                    shell
+                        .update(cx, |shell, cx| {
+                            if shell.sidebar.set_filter(text) {
+                                cx.notify();
+                            }
+                        })
+                        .ok();
+                }
+            })
+        });
         let bar = cx.new(|cx| PlayerBar::new(core.clone(), cx));
         let banner_line = update_line(core.read(cx).update_view(), Place::Banner);
         let banner = cx.new(|_| UpdateBanner::new(core.clone()));
@@ -357,11 +404,19 @@ impl Shell {
         let lyrics = cx.new(|cx| LyricsView::new(core.clone(), Look::Panel, cx));
         #[cfg(feature = "video")]
         let video = cx.new(|cx| VideoStage::new(core.clone(), cx));
-        #[cfg(feature = "video")]
-        let video_panel = cx.new(|cx| VideoPanel::new(core.clone(), video.clone(), cx));
-        let focus_view = cx.new(|cx| {
-            FocusView::new(
+        let now_panel = cx.new(|cx| {
+            NowPanel::new(
                 core.clone(),
+                #[cfg(feature = "video")]
+                video.clone(),
+                cx,
+            )
+        });
+        let stage_reveal: stage_view::Reveal = Rc::new(Cell::new(0.0));
+        let stage_view = cx.new(|cx| {
+            StageView::new(
+                core.clone(),
+                Rc::clone(&stage_reveal),
                 #[cfg(feature = "video")]
                 video.clone(),
                 cx,
@@ -409,14 +464,15 @@ impl Shell {
             banner_shown,
             queue,
             lyrics,
-            focus_view,
-            focus_open: false,
+            now_panel,
+            stage_view,
+            stage_open: false,
+            stage_t: Tween::at(0.0),
+            stage_reveal,
+            stage_moving: false,
             #[cfg(feature = "video")]
             video,
-            #[cfg(feature = "video")]
-            video_panel,
-            #[cfg(feature = "video")]
-            focus_video: false,
+            video_on: false,
             lyrics_wanted: false,
             search_page,
             home_page,
@@ -453,13 +509,24 @@ impl Shell {
                 Some(SidePanel::Lyrics)
             } else if launch.queue {
                 Some(SidePanel::Queue)
+            } else if launch.now {
+                Some(SidePanel::Now)
             } else {
                 None
             },
+            panel_last: SidePanel::Now,
             playing: snapshot.playback.is_playing(),
             toasts: Toasts::default(),
             seen: Seen::at_start(&snapshot),
             closing: false,
+            zoom_pref: ZoomPref::read(&snapshot.settings.ui),
+            sidebar: Sidebar::new(
+                SidebarPrefs::read(&snapshot.settings.ui),
+                filter,
+                Arc::clone(&snapshot.library),
+                &core.read(cx).jam_view(),
+            ),
+            sidebar_rail: false,
             _subscriptions: Vec::new(),
             core: core.clone(),
         };
@@ -467,6 +534,11 @@ impl Shell {
         // ciò che mostrano, rispetto a ciò che mostrano adesso.
         shell.chrome_keys = Some((shell.chrome_key(Part::TitleBar), shell.chrome_key(Part::Sidebar)));
         shell._subscriptions.push(cx.observe_self(|this, cx| this.sync_chrome(cx)));
+        // `Auto` zoom follows the window width.
+        shell
+            ._subscriptions
+            .push(cx.observe_window_bounds(window, |this, window, cx| this.apply_zoom(window, cx)));
+        shell.apply_zoom(window, cx);
         shell._subscriptions.push(cx.subscribe_in(
             &core,
             window,
@@ -477,27 +549,30 @@ impl Shell {
         shell._subscriptions.push(cx.subscribe(&shell.bar, |this, _, event: &BarEvent, cx| match event {
             BarEvent::ToggleQueue => this.toggle_panel(SidePanel::Queue, cx),
             BarEvent::ToggleLyrics => this.toggle_panel(SidePanel::Lyrics, cx),
+            BarEvent::ToggleNow => this.toggle_panel(SidePanel::Now, cx),
             BarEvent::ToggleFocus => this.toggle_focus(cx),
             BarEvent::OpenArtist(id) => this.show(Page::Artist(*id), cx),
             BarEvent::OpenJam => this.show(Page::Jam, cx),
             #[cfg(feature = "video")]
-            BarEvent::ToggleVideo => this.toggle_panel(SidePanel::Video, cx),
+            BarEvent::ToggleVideo => this.toggle_video(cx),
         }));
-        shell._subscriptions.push(cx.subscribe(&shell.focus_view, |this, _, event: &FocusEvent, cx| {
+        shell._subscriptions.push(cx.subscribe(&shell.stage_view, |this, _, event: &StageViewEvent, cx| {
             match event {
-                FocusEvent::Close => this.set_focus(false, cx),
-                #[cfg(feature = "video")]
-                FocusEvent::Video(on) => this.set_focus_video(*on, cx),
+                StageViewEvent::Close => this.set_focus(false, cx),
+                StageViewEvent::Video(on) => this.set_video_on(*on, cx),
             }
         }));
+        shell._subscriptions.push(cx.subscribe(
+            &shell.now_panel,
+            |this, _, event: &NowEvent, cx| match event {
+                NowEvent::OpenLyrics => this.toggle_panel(SidePanel::Lyrics, cx),
+                NowEvent::OpenArtist(id) => this.show(Page::Artist(*id), cx),
+                NowEvent::Video(on) => this.set_video_on(*on, cx),
+            },
+        ));
         #[cfg(feature = "video")]
         {
-            shell._subscriptions.push(cx.subscribe(&shell.video_panel, |this, _, event: &PanelEvent, cx| {
-                match event {
-                    PanelEvent::Fullscreen => this.toggle_video_focus(cx),
-                }
-            }));
-            // Un videoclip che si ferma è un avviso come gli altri.
+            // A clip that stops is a notice like any other.
             shell._subscriptions.push(cx.subscribe(&shell.video, |this, _, event: &StageEvent, cx| {
                 if let StageEvent::Notice(notice) = event {
                     this.notify(notice.clone(), cx);
@@ -592,16 +667,19 @@ impl Shell {
             shell.history = History::new(Page::Search);
         }
         if launch.focus && snapshot.playback.queue.current().is_some() {
-            shell.focus_open = true;
+            shell.stage_open = true;
+            shell.stage_t = Tween::at(1.0);
+            shell.stage_reveal.set(1.0);
         }
         #[cfg(feature = "video")]
         if launch.video {
-            if shell.focus_open {
-                shell.focus_video = true;
-                shell.focus_view.update(cx, |view, cx| view.set_video(true, cx));
-            } else {
-                shell.panel = Some(SidePanel::Video);
+            shell.video_on = true;
+            if !shell.stage_open && shell.panel.is_none() {
+                shell.panel = Some(SidePanel::Now);
             }
+        }
+        if let Some(tab) = shell.panel {
+            shell.panel_last = tab;
         }
         shell.sync_panels(cx);
         match launch.page {
@@ -633,7 +711,7 @@ impl Shell {
             }
             None => {}
         }
-        shell.page_shown(cx);
+        shell.page_shown(true, cx);
         // I dati di prova di un aggiornamento non riuscito portano l'avviso che il core avrebbe dato.
         #[cfg(feature = "fixtures")]
         if let Some(notice) = launch.fixture.as_deref().and_then(crate::fixtures::notice) {
@@ -657,16 +735,26 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let snapshot = core.read(cx).snapshot();
+        if changed.settings {
+            let pref = ZoomPref::read(&snapshot.settings.ui);
+            if pref != self.zoom_pref {
+                self.zoom_pref = pref;
+                self.apply_zoom(window, cx);
+            }
+        }
         if changed.playback {
             let playing = snapshot.playback.is_playing();
             if playing != self.playing {
                 self.playing = playing;
                 cx.notify();
             }
-            if self.focus_open && snapshot.playback.queue.current().is_none() {
-                // Senza brano la vista immersiva non ha niente da mostrare (come nel client Iced).
+            if self.stage_open && snapshot.playback.queue.current().is_none() {
+                // Without a track the stage has nothing to show.
                 self.set_focus(false, cx);
             }
+            // A track with or without a clip moves the clip's place.
+            #[cfg(feature = "video")]
+            self.sync_panels(cx);
         }
         if changed.library
             && let Some(id) = self.pending_playlist
@@ -675,6 +763,12 @@ impl Shell {
             // La playlist appena creata è nella libreria: la si apre.
             self.pending_playlist = None;
             self.show(Page::Playlist(id), cx);
+        }
+        if changed.library && self.sidebar.take_library(Arc::clone(&snapshot.library)) {
+            cx.notify();
+        }
+        if changed.jam && self.sidebar.take_jam(&core.read(cx).jam_view()) {
+            cx.notify();
         }
         if changed.library && snapshot.library.unread_news != self.unread_news {
             self.unread_news = snapshot.library.unread_news;
@@ -803,29 +897,72 @@ impl Shell {
     /// Apre una pagina (e la mette nella cronologia). Niente se è già quella.
     /// Una pagina che si apre chiude la vista immersiva, che la coprirebbe.
     fn show(&mut self, page: Page, cx: &mut Context<Self>) {
+        if self.sidebar.overlay {
+            // Choosing a page closes the sidebar laid over the canvas.
+            self.sidebar.overlay = false;
+            cx.notify();
+        }
         if self.history.go(page) {
             self.set_focus(false, cx);
-            self.page_shown(cx);
+            self.page_shown(true, cx);
+        }
+    }
+
+    /// Ctrl+B and the title bar button: expanded or rail; under `BP_RAIL` the expanded sidebar over the canvas.
+    fn toggle_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if to_dp(window.viewport_size().width) < BP_RAIL {
+            self.sidebar.overlay = !self.sidebar.overlay;
+        } else {
+            self.sidebar.prefs.mode = match self.sidebar.prefs.mode {
+                SidebarMode::Expanded => SidebarMode::Rail,
+                SidebarMode::Rail => SidebarMode::Expanded,
+            };
+            self.core
+                .read(cx)
+                .settings(psytify_core::command::SettingsCmd::SaveUiPrefs(self.sidebar.prefs.prefs()));
+        }
+        cx.notify();
+    }
+
+    /// The right edge is being dragged to `x` (window dp).
+    fn drag_sidebar(&mut self, x: f32, cx: &mut Context<Self>) {
+        if let Some((start_x, start_w)) = self.sidebar.drag {
+            let width = sidebar::clamp_width(start_w + x - start_x);
+            if width != self.sidebar.prefs.width {
+                self.sidebar.prefs.width = width;
+                cx.notify();
+            }
+        }
+    }
+
+    /// The drag ends: the width is saved.
+    fn end_sidebar_drag(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar.drag.take().is_some() {
+            self.core
+                .read(cx)
+                .settings(psytify_core::command::SettingsCmd::SaveUiPrefs(self.sidebar.prefs.prefs()));
+            cx.notify();
         }
     }
 
     fn go_back(&mut self, cx: &mut Context<Self>) {
         if self.history.back().is_some() {
             self.set_focus(false, cx);
-            self.page_shown(cx);
+            self.page_shown(false, cx);
         }
     }
 
     fn go_forward(&mut self, cx: &mut Context<Self>) {
         if self.history.forward().is_some() {
             self.set_focus(false, cx);
-            self.page_shown(cx);
+            self.page_shown(false, cx);
         }
     }
 
     /// La pagina corrente è cambiata: la vista di quella specie prende il suo oggetto (e lo chiede al core
     /// se non c'è), e si ridisegna la radice.
-    fn page_shown(&mut self, cx: &mut Context<Self>) {
+    /// `rise`: the page enter rises (a new page), not on Back and Forward.
+    fn page_shown(&mut self, rise: bool, cx: &mut Context<Self>) {
         let current = self.history.current();
         if self.shown == Page::News && current != Page::News {
             // Come il client Iced: uscendo da «Novità» ciò che c'era si considera visto.
@@ -838,7 +975,10 @@ impl Shell {
                 self.collection_page.update(cx, |page, cx| page.show(Collection::Playlist(id), cx));
             }
             Page::Album(id) => self.album_page.update(cx, |page, cx| page.show(id, cx)),
-            Page::Home => self.home_page.update(cx, |page, cx| page.show(cx)),
+            Page::Home => self.home_page.update(cx, |page, cx| {
+                page.show(cx);
+                page.enter(rise, cx);
+            }),
             Page::News => self.news_page.update(cx, |page, cx| page.show(cx)),
             Page::Artist(id) => self.artist_page.update(cx, |page, cx| page.show(id, cx)),
             Page::Source(key) => {
@@ -860,7 +1000,30 @@ impl Shell {
             }
             Page::Search | Page::Library | Page::Downloads | Page::Settings | Page::Jam => {}
         }
+        self.enter_page(current, rise, cx);
         cx.notify();
+    }
+
+    /// The page enter (desktop v2 §3) of the view that shows `page` (the Home starts its own above).
+    fn enter_page(&mut self, page: Page, rise: bool, cx: &mut Context<Self>) {
+        match page {
+            Page::Album(_) => self.album_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Liked | Page::Playlist(_) | Page::FriendPlaylist(..) => {
+                self.collection_page.update(cx, |page, cx| page.enter(rise, cx));
+            }
+            Page::Artist(_) => self.artist_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Source(_) => self.source_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::News => self.news_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Search => self.search_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Library => self.library_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Downloads => self.downloads_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Friends => self.friends_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Profile(_) => self.profile_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Jam => self.jam_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Settings => self.settings_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::SignIn => self.sign_in_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Home => {}
+        }
     }
 
     /// Apre la pagina di una scheda esterna; le schede che la cronologia non nomina più si scartano.
@@ -1196,80 +1359,108 @@ impl Shell {
         HistoryButtons { on_back: back, on_forward: forward }
     }
 
-    /// Il tasto della coda (Q) o del testo (T): apre il pannello su quella scheda o lo chiude.
+    /// The queue (Q), lyrics (T) or now-playing (the bar cover) button: the panel on that tab, or shut.
     fn toggle_panel(&mut self, kind: SidePanel, cx: &mut Context<Self>) {
         self.panel = toggled(self.panel, kind);
+        if self.panel.is_some() && self.stage_open {
+            // A panel button under the stage leaves it for the panel.
+            self.set_focus(false, cx);
+        }
         self.sync_panels(cx);
         cx.notify();
     }
 
-    /// Il tasto della vista immersiva (F): la apre se c'è un brano, la chiude se è aperta.
-    fn toggle_focus(&mut self, cx: &mut Context<Self>) {
-        let open = !self.focus_open && self.core.read(cx).snapshot().playback.queue.current().is_some();
-        // F apre la faccia del testo (V quella del videoclip).
-        #[cfg(feature = "video")]
-        if open {
-            self.set_focus_video(false, cx);
+    /// A tab of the open panel.
+    fn select_tab(&mut self, tab: SidePanel, cx: &mut Context<Self>) {
+        if self.panel != Some(tab) {
+            self.panel = Some(tab);
+            self.sync_panels(cx);
+            cx.notify();
         }
+    }
+
+    /// F: opens the stage if a track is queued, closes it if open.
+    fn toggle_focus(&mut self, cx: &mut Context<Self>) {
+        let open = !self.stage_open && self.core.read(cx).snapshot().playback.queue.current().is_some();
         self.set_focus(open, cx);
     }
 
     fn set_focus(&mut self, open: bool, cx: &mut Context<Self>) {
-        if self.focus_open != open {
-            self.focus_open = open;
+        if self.stage_open != open {
+            self.stage_open = open;
+            let ms = crate::motion::duration(MOTION_PANEL, cx);
+            self.stage_t.set(if open { 1.0 } else { 0.0 }, ms, std::time::Instant::now());
             self.sync_panels(cx);
             cx.notify();
         }
     }
 
-    /// V (o «Videoclip a tutto schermo» del pannello): apre la vista immersiva sul videoclip se il brano ne
-    /// ha uno, la chiude se è già aperta lì (come `ToggleVideoFocus` del client Iced). Un videoclip che non
-    /// si apriva riprova.
+    /// The playing track has a clip.
+    fn has_video(&self, cx: &App) -> bool {
+        self.core.read(cx).snapshot().playback.queue.current().is_some_and(|track| track.has_video)
+    }
+
+    /// The bar's «Videoclip» and V: off if the clip is on screen; else on, in the stage's slot when the stage
+    /// is open, or in the panel's (opened on *In riproduzione* if it is not there). A clip that failed retries.
     #[cfg(feature = "video")]
-    fn toggle_video_focus(&mut self, cx: &mut Context<Self>) {
-        if self.focus_open && self.focus_video {
-            self.set_focus(false, cx);
+    fn toggle_video(&mut self, cx: &mut Context<Self>) {
+        if !self.has_video(cx) {
             return;
         }
-        let has_video =
-            self.core.read(cx).snapshot().playback.queue.current().is_some_and(|track| track.has_video);
-        if !has_video {
+        let shown = video_surface(self.panel, self.stage_open, self.video_on).is_some();
+        if shown {
+            self.set_video_on(false, cx);
             return;
         }
-        if matches!(self.video.read(cx).status(), crate::video::stage::Status::Failed) {
+        if !self.stage_open && self.panel != Some(SidePanel::Now) {
+            self.panel = Some(SidePanel::Now);
+        }
+        self.set_video_on(true, cx);
+        cx.notify();
+    }
+
+    /// The Cover / Video switch of a media slot.
+    fn set_video_on(&mut self, on: bool, cx: &mut Context<Self>) {
+        #[cfg(feature = "video")]
+        if on && matches!(self.video.read(cx).status(), crate::video::stage::Status::Failed) {
             self.video.read(cx).retry(cx);
         }
-        self.set_focus_video(true, cx);
-        self.set_focus(true, cx);
-    }
-
-    /// La faccia della vista immersiva: il videoclip o il testo.
-    #[cfg(feature = "video")]
-    fn set_focus_video(&mut self, on: bool, cx: &mut Context<Self>) {
-        if self.focus_video != on {
-            self.focus_video = on;
-            self.focus_view.update(cx, |view, cx| view.set_video(on, cx));
+        if self.video_on != on {
+            self.video_on = on;
             self.sync_panels(cx);
-            cx.notify();
         }
     }
 
-    /// Dice a ogni vista se si vede (solo allora ha i suoi timer) e al core se qualcuno mostra il testo.
+    /// Tells every view whether it shows (only then it has its timers) and the core whether anyone shows the
+    /// lyrics.
     fn sync_panels(&mut self, cx: &mut Context<Self>) {
-        let (panel, focus) = (self.panel, self.focus_open);
+        let (panel, stage) = (self.panel, self.stage_open);
+        if let Some(tab) = panel {
+            self.panel_last = tab;
+        }
         self.bar.update(cx, |bar, cx| {
             bar.set_panel(panel, cx);
-            bar.set_hidden(focus, cx);
+            bar.set_hidden(stage, cx);
         });
-        let panel_lyrics = panel == Some(SidePanel::Lyrics) && !focus;
-        self.lyrics.update(cx, |lyrics, cx| lyrics.set_visible(panel_lyrics, cx));
-        self.focus_view.update(cx, |view, cx| view.set_open(focus, cx));
+        let shown = |tab| panel == Some(tab) && !stage;
+        self.lyrics.update(cx, |lyrics, cx| lyrics.set_visible(shown(SidePanel::Lyrics), cx));
+        let now_shown = shown(SidePanel::Now);
+        let video_on = self.video_on && self.has_video(cx);
+        self.now_panel.update(cx, |view, cx| {
+            view.set_visible(now_shown, cx);
+            view.set_video(video_on, cx);
+        });
+        self.stage_view.update(cx, |view, cx| {
+            view.set_open(stage, cx);
+            view.set_video(video_on, cx);
+        });
         #[cfg(feature = "video")]
         {
-            let surface = video_surface(panel, focus, self.focus_video);
-            self.video.update(cx, |stage, cx| stage.set_surface(surface, cx));
+            let surface = video_surface(panel, stage, video_on);
+            self.video.update(cx, |video, cx| video.set_surface(surface, cx));
+            self.bar.update(cx, |bar, cx| bar.set_video_shown(surface.is_some(), cx));
         }
-        let wanted = panel == Some(SidePanel::Lyrics) || focus;
+        let wanted = shown(SidePanel::Lyrics) || now_shown || stage;
         if wanted != self.lyrics_wanted {
             self.lyrics_wanted = wanted;
             self.core.read(cx).playback(PlaybackCmd::Lyrics(wanted));
@@ -1307,6 +1498,29 @@ impl Shell {
         .detach();
     }
 
+    /// Sets the zoom the preference asks for this window width; a change lays everything out again (the
+    /// cached views too, through `Window::refresh`).
+    fn apply_zoom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let width = f32::from(window.viewport_size().width);
+        if crate::theme::set_zoom(self.zoom_pref.effective(width, crate::theme::zoom())) {
+            window.refresh();
+            cx.notify();
+        }
+    }
+
+    /// Ctrl+= / Ctrl+- (`Some(true)` / `Some(false)`) pin the next preset, Ctrl+0 (`None`) goes back to `Auto`.
+    fn step_zoom(&mut self, up: Option<bool>, window: &mut Window, cx: &mut Context<Self>) {
+        let pref = match up {
+            Some(up) => ZoomPref::stepped(crate::theme::zoom(), up),
+            None => ZoomPref::Auto,
+        };
+        if pref != self.zoom_pref {
+            self.zoom_pref = pref;
+            self.core.read(cx).settings(psytify_core::command::SettingsCmd::SaveUiPrefs(pref.prefs()));
+            self.apply_zoom(window, cx);
+        }
+    }
+
     /// Il gestore del clic sull'account nella barra del titolo.
     fn account_handler(&self, cx: &mut Context<Self>) -> OnClose {
         let shell = cx.entity().downgrade();
@@ -1325,8 +1539,11 @@ impl Shell {
                 account: self.account.clone(),
             },
             Part::Sidebar => ChromeKey::Sidebar {
-                current: self.history.current().nav(),
+                current: self.history.current(),
                 counts: [self.busy_downloads, self.unread_news, self.incoming, self.invites],
+                rail: self.sidebar_rail,
+                rev: self.sidebar.rev,
+                tab: self.sidebar.tab,
             },
         }
     }
@@ -1355,12 +1572,18 @@ impl Shell {
                     account: self.account.clone(),
                     on_account: Some(self.account_handler(cx)),
                     on_close: Self::close_handler(&cx.entity()),
+                    on_sidebar: Some({
+                        let shell = cx.entity().downgrade();
+                        std::rc::Rc::new(move |window: &mut Window, cx: &mut App| {
+                            shell.update(cx, |shell, cx| shell.toggle_sidebar(window, cx)).ok();
+                        })
+                    }),
                 };
                 title_row(state, window, cx).into_any_element()
             }
             Part::Sidebar => {
-                let rail = f32::from(window.viewport_size().width) < BP_RAIL;
-                self.sidebar(rail, cx).into_any_element()
+                let rail = self.sidebar_rail;
+                self.sidebar(rail, window, cx)
             }
         }
     }
@@ -1388,108 +1611,155 @@ impl Shell {
         })
     }
 
-    fn sidebar(&self, rail: bool, cx: &mut Context<Self>) -> impl IntoElement {
-        let current = self.history.current().nav();
-        let items = Nav::ALL.iter().copied().enumerate().map(|(ix, nav)| {
-            let (idle, filled) = nav.icons();
-            // Animated icons say "something is going on" without a badge: unread news, a running download, a jam invite.
-            let (idle, filled) = match nav {
-                Nav::News if self.unread_news > 0 => (sprite::ICON_BELL_RING, sprite::ICON_BELL_RING),
-                Nav::Downloads if self.busy_downloads > 0 => {
-                    (sprite::ICON_DOWNLOAD_BUSY, sprite::ICON_DOWNLOAD_BUSY)
-                }
-                Nav::Jam if self.invites > 0 => (sprite::ICON_PEOPLE_LIVE, sprite::ICON_PEOPLE_LIVE),
-                _ => (idle, filled),
-            };
-            let mut item = NavigationItem::new(("nav", ix), nav.label(), idle).icon_selected(filled);
-            if nav == Nav::Downloads && self.busy_downloads > 0 {
-                item = item.count(u32::try_from(self.busy_downloads).unwrap_or(u32::MAX));
-            }
-            if nav == Nav::News && self.unread_news > 0 {
-                item = item.count(u32::try_from(self.unread_news).unwrap_or(u32::MAX));
-            }
-            if nav == Nav::Friends && self.incoming > 0 {
-                item = item.count(u32::try_from(self.incoming).unwrap_or(u32::MAX));
-            }
-            if nav == Nav::Jam && self.invites > 0 {
-                item = item.count(u32::try_from(self.invites).unwrap_or(u32::MAX));
-            }
-            item.selected(current == nav).rail(rail).on_click(cx.listener(
-                move |this, _: &ClickEvent, window, cx| {
-                    if nav == Nav::Search {
-                        this.focus_search(window, cx);
-                    } else {
-                        this.show(nav.page(), cx);
-                    }
-                },
-            ))
-        });
-        div()
-            .flex_none()
-            .h_full()
-            .w(dp(if rail { SIDEBAR_RAIL_W } else { SIDEBAR_W }))
-            .flex()
-            .flex_col()
-            .gap(dp(2.0))
-            .py(dp(SPACE_3))
-            .bg(col(SURFACE_CHROME))
-            .children(items)
-    }
-
     /// La barra laterale, la pagina e il pannello laterale aperto (accanto alla pagina se c'è posto,
     /// altrimenti sopra).
-    fn body(&self, rail: bool, docked: bool) -> gpui::Div {
+    fn body(
+        &self,
+        layout: SidebarLayout,
+        width: f32,
+        docked: bool,
+        panel_w: f32,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // Under the overlay the row keeps a plain rail-wide strip: the view draws once, over the canvas.
+        let slot = if layout.overlay.is_some() {
+            div().flex_none().h_full().w(dp(width)).bg(col(SURFACE_CHROME)).into_any_element()
+        } else {
+            self.sidebar_view.clone().cached(sidebar_style(width)).into_any_element()
+        };
         let mut body = div()
             .relative()
             .flex_1()
             .min_h_0()
             .flex()
-            .child(self.sidebar_view.clone().cached(sidebar_style(rail)))
+            .child(slot)
             .child(Separator::vertical())
-            // On very wide windows the page column stops at `CONTENT_MAX_W` and is centred.
+            // The canvas fills the width between the sidebar and the side panel (no column cap).
             .child(
-                div().flex_1().min_w_0().h_full().flex().justify_center().child(
-                    div()
-                        .relative()
-                        .w_full()
-                        .max_w(dp(CONTENT_MAX_W))
-                        .h_full()
-                        .child(self.page_content())
-                        .children(self.page_spot().map(spot_overlay)),
-                ),
-            );
-        if let Some(kind) = self.panel {
-            let content = match kind {
-                SidePanel::Queue => div()
+                div()
                     .relative()
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(self.queue.clone().cached(fill()))
-                    .child(spot_overlay(self.spots.queue.clone())),
-                SidePanel::Lyrics => {
-                    div().flex_1().min_w_0().h_full().child(self.lyrics.clone().cached(fill()))
-                }
-                #[cfg(feature = "video")]
-                SidePanel::Video => {
-                    div().flex_1().min_w_0().h_full().child(self.video_panel.clone().cached(fill()))
-                }
-            };
-            let panel = div()
-                .flex_none()
-                .h_full()
-                .w(dp(SIDE_PANEL_W))
-                .flex()
-                .bg(col(SURFACE_CHROME))
-                .child(Separator::vertical().strong())
-                .child(content);
+                    .child(self.page_content())
+                    .children(self.page_spot().map(spot_overlay)),
+            );
+        if panel_w > 0.0 {
             body = if docked {
-                body.child(panel)
+                body.child(self.side_panel(panel_w, cx))
             } else {
-                body.child(div().absolute().top_0().bottom_0().right_0().occlude().child(panel))
+                body.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .occlude()
+                        .child(self.side_panel(panel_w, cx)),
+                )
             };
         }
+        if layout.resizable {
+            // The right edge drags the width (`SIDEBAR_MIN_W` to `SIDEBAR_MAX_W`), saved on release.
+            body = body.child(
+                div()
+                    .id("sidebar-grip")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(dp(width - SIDEBAR_GRIP_W / 2.0))
+                    .w(dp(SIDEBAR_GRIP_W))
+                    .cursor(gpui::CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                            this.sidebar.drag = Some((to_dp(event.position.x), this.sidebar.prefs.width));
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+            );
+        }
+        if let Some(over) = layout.overlay {
+            // A click beside the laid-over sidebar closes it.
+            body = body
+                .child(
+                    div()
+                        .id("sidebar-veil")
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .left(dp(over))
+                        .occlude()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                this.sidebar.overlay = false;
+                                cx.notify();
+                            }),
+                        ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left_0()
+                        .w(dp(over))
+                        .occlude()
+                        .child(hard_shadow(0, 2, col(SHADOW_HARD)))
+                        .child(self.sidebar_view.clone().cached(fill())),
+                );
+        }
         body
+    }
+
+    /// The side panel `width` dp wide (less than `SIDE_PANEL_W` while it slides): the tabs, then the tab's
+    /// view at full width, clipped by the sliding edge so the cached view keeps its size.
+    fn side_panel(&self, width: f32, cx: &mut Context<Self>) -> gpui::Div {
+        let tab = self.panel.unwrap_or(self.panel_last);
+        let content = match tab {
+            SidePanel::Queue => div()
+                .relative()
+                .size_full()
+                .child(self.queue.clone().cached(fill()))
+                .child(spot_overlay(self.spots.queue.clone())),
+            SidePanel::Lyrics => div().size_full().child(self.lyrics.clone().cached(fill())),
+            SidePanel::Now => div().size_full().child(self.now_panel.clone().cached(fill())),
+        };
+        let shell = cx.entity().downgrade();
+        let tabs = Tabs::new(
+            SidePanel::ALL
+                .iter()
+                .map(|tab| crate::components::navigation::Tab::new(("panel-tab", tab.ix()), tab.label()))
+                .collect(),
+            tab.ix(),
+        )
+        .on_select(move |ix, _, cx| {
+            let tab = SidePanel::ALL.get(ix).copied().unwrap_or(SidePanel::Now);
+            shell.update(cx, |this, cx| this.select_tab(tab, cx)).ok();
+        });
+        let inner = div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left_0()
+            .w(dp(SIDE_PANEL_W))
+            .flex()
+            .bg(col(SURFACE_CHROME))
+            .child(Separator::vertical().strong())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(div().flex_none().px(dp(SPACE_3)).pt(dp(SPACE_3)).child(tabs))
+                    .child(div().flex_1().min_h_0().child(content)),
+            );
+        div().relative().flex_none().h_full().w(dp(width)).overflow_hidden().child(inner)
     }
 
     /// Il posto dell'equalizzatore della pagina corrente, se è una pagina con righe di brani.
@@ -1582,9 +1852,9 @@ fn title_style() -> StyleRefinement {
     StyleRefinement::default().w_full().h(dp(TITLE_BAR_H)).flex_none()
 }
 
-/// La barra laterale in `.cached()`, larga quanto la voce o la sola icona (`rail`).
-fn sidebar_style(rail: bool) -> StyleRefinement {
-    StyleRefinement::default().flex_none().h_full().w(dp(if rail { SIDEBAR_RAIL_W } else { SIDEBAR_W }))
+/// The sidebar in `.cached()`, `width` dp wide (it eases between the rail and the expanded width).
+fn sidebar_style(width: f32) -> StyleRefinement {
+    StyleRefinement::default().flex_none().h_full().w(dp(width))
 }
 
 /// La fascia dell'aggiornamento in `.cached()`: larga quanto la finestra, alta `BANNER_H`.
@@ -1600,8 +1870,33 @@ impl Focusable for Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let width = f32::from(window.viewport_size().width);
-        let rail = width < BP_RAIL;
+        crate::theme::note_scale(window.scale_factor());
+        let width = to_dp(window.viewport_size().width);
+        let layout = self.sidebar.layout(width);
+        if layout.rail != self.sidebar_rail {
+            self.sidebar_rail = layout.rail;
+            self.sidebar_view.update(cx, |_, cx| cx.notify());
+        }
+        let (side_w, moving) = self.sidebar.width(layout.flow, crate::motion::duration(MOTION_PANEL, cx));
+        crate::motion::keep_running(window, moving);
+        // The side panel slides its width in `MOTION_PANEL`, on whole APs.
+        let panel_target = if self.panel.is_some() { SIDE_PANEL_W } else { 0.0 };
+        let panel_w = crate::motion::follow("side-panel-width", panel_target, MOTION_PANEL, window, cx);
+        let ap_dp = to_dp(Ap::of(window).one());
+        let panel_w = if ap_dp > 0.0 { ap_round(panel_w / ap_dp) as f32 * ap_dp } else { panel_w };
+        let panel_w = panel_w.min(SIDE_PANEL_W);
+        // The stage reveal: while it moves the stage lies over page and bar, uncached.
+        let now = std::time::Instant::now();
+        let stage_moving = self.stage_t.running(now);
+        let reveal = self.stage_t.value(now);
+        self.stage_reveal.set(reveal);
+        crate::motion::keep_running(window, stage_moving);
+        if self.stage_moving && !stage_moving {
+            // Landed: the cached stage view redraws once with the final reveal.
+            self.stage_view.update(cx, |_, cx| cx.notify());
+        }
+        self.stage_moving = stage_moving;
+        let stage_shown = self.stage_open && !stage_moving;
         // Il pannello sta accanto alla pagina se c'è posto, altrimenti ci galleggia sopra.
         let docked = width >= BP_PANEL_DOCK;
         // In cache come le pagine: si rifanno solo quando cambia ciò che mostrano (`sync_chrome`), non a ogni
@@ -1629,11 +1924,15 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &ToggleFocusAction, _, cx| this.toggle_focus(cx)))
             .on_action(cx.listener(|this, _: &GoBack, _, cx| this.go_back(cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| this.show(Page::Settings, cx)))
+            .on_action(cx.listener(|this, _: &ZoomIn, window, cx| this.step_zoom(Some(true), window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, window, cx| this.step_zoom(Some(false), window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomReset, window, cx| this.step_zoom(None, window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| this.toggle_sidebar(window, cx)))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" && this.menu.is_some() {
                     this.close_menu(cx);
                     cx.stop_propagation();
-                } else if event.keystroke.key == "escape" && this.focus_open && this.dialog.is_none() {
+                } else if event.keystroke.key == "escape" && this.stage_open && this.dialog.is_none() {
                     this.set_focus(false, cx);
                     cx.stop_propagation();
                 }
@@ -1667,27 +1966,59 @@ impl Render for Shell {
             .child(Separator::horizontal());
         #[cfg(feature = "video")]
         {
-            root =
-                root.on_action(cx.listener(|this, _: &ToggleVideoFocus, _, cx| this.toggle_video_focus(cx)));
+            root = root.on_action(cx.listener(|this, _: &ToggleVideoFocus, _, cx| this.toggle_video(cx)));
         }
-        if self.banner_shown && !self.focus_open {
+        if self.banner_shown && !stage_shown {
             // In cache alla sua altezza: il loader del download ridisegna solo la fascia.
             root = root.child(self.banner.clone().cached(banner_style())).child(Separator::horizontal());
         }
-        root = if self.focus_open {
-            // La vista immersiva prende tutto sotto la barra del titolo: niente pagina, pannello o barra.
-            root.child(div().flex_1().min_h_0().child(self.focus_view.clone().cached(fill())))
+        root = if stage_shown {
+            // The stage takes everything under the title bar: no page, panel or bar.
+            root.child(div().flex_1().min_h_0().child(self.stage_view.clone().cached(fill())))
         } else {
-            root.child(self.body(rail, docked))
+            let mut below = div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(self.body(layout, side_w, docked, panel_w, cx))
                 .child(Separator::horizontal())
-                // In cache come le pagine: si rifà quando si notifica da sé (il suo battito da 250 ms mentre
-                // suona, un cambio di brano o di stato), non a ogni ridisegno di `Shell` (BACKLOG 23).
-                .child(self.bar.clone().cached(bar_style()))
+                // Cached like the pages: redrawn when it notifies itself (its 250 ms tick while playing, a track
+                // or state change), not at every `Shell` draw (BACKLOG 23).
+                .child(self.bar.clone().cached(bar_style()));
+            if stage_moving {
+                below = below.child(
+                    div().absolute().top_0().left_0().size_full().occlude().child(self.stage_view.clone()),
+                );
+            }
+            root.child(below)
         };
         // Il palco del videoclip dopo pagina, pannelli e vista immersiva: dipinge il fotogramma nel pozzo che il
         // pannello o la vista immersiva hanno segnato in questo stesso disegno (`VideoStage::well`). Un
         // fotogramma rifà `Shell` (la radice: GPUI la rifà a ogni disegno) e il palco; le viste in cache, il
         // pannello e la vista immersiva compresi, si riusano (BACKLOG 41).
+        if self.sidebar.drag.is_some() {
+            // Window-wide listeners only while the edge is dragged.
+            let shell = cx.entity().downgrade();
+            root = root.child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |_, (), window, _| {
+                        let moved = shell.clone();
+                        window.on_mouse_event(move |event: &gpui::MouseMoveEvent, _, _, cx| {
+                            moved.update(cx, |this, cx| this.drag_sidebar(to_dp(event.position.x), cx)).ok();
+                        });
+                        let released = shell.clone();
+                        window.on_mouse_event(move |_: &gpui::MouseUpEvent, _, _, cx| {
+                            released.update(cx, |this, cx| this.end_sidebar_drag(cx)).ok();
+                        });
+                    },
+                )
+                .absolute()
+                .size_0(),
+            );
+        }
         #[cfg(feature = "video")]
         {
             root = root.child(self.video.clone());
@@ -1766,21 +2097,29 @@ mod tests {
 
     #[cfg(feature = "video")]
     #[test]
-    fn the_video_shows_in_one_place_at_a_time() {
-        let video = Some(SidePanel::Video);
-        assert_eq!(video_surface(video, false, false), Some(Surface::Panel));
-        assert_eq!(video_surface(Some(SidePanel::Queue), false, true), None);
-        assert_eq!(video_surface(None, false, false), None);
-        // La vista immersiva copre il pannello: si vede lì, se è sul videoclip, o da nessuna parte.
-        assert_eq!(video_surface(video, true, true), Some(Surface::Focus));
-        assert_eq!(video_surface(video, true, false), None);
-        assert_eq!(video_surface(None, true, true), Some(Surface::Focus));
-        assert_eq!(toggled(video, SidePanel::Video), None);
+    fn the_clip_shows_in_one_media_slot_at_a_time() {
+        let now = Some(SidePanel::Now);
+        assert_eq!(video_surface(now, false, true), Some(Surface::Panel));
+        assert_eq!(video_surface(now, false, false), None, "the clip is off: the cover");
+        assert_eq!(video_surface(Some(SidePanel::Queue), false, true), None, "another tab hides the slot");
+        assert_eq!(video_surface(None, false, true), None);
+        // The stage covers the panel: the clip moves to the stage's slot.
+        assert_eq!(video_surface(now, true, true), Some(Surface::Stage));
+        assert_eq!(video_surface(None, true, true), Some(Surface::Stage));
+        assert_eq!(video_surface(None, true, false), None);
+    }
+
+    #[test]
+    fn the_panel_tabs_are_in_order_and_toggle() {
+        assert_eq!(SidePanel::ALL.map(SidePanel::label), ["In riproduzione", "Testo", "Coda"]);
+        assert_eq!(SidePanel::Queue.ix(), 2);
+        assert_eq!(toggled(Some(SidePanel::Now), SidePanel::Now), None);
+        assert_eq!(toggled(Some(SidePanel::Now), SidePanel::Lyrics), Some(SidePanel::Lyrics));
     }
 
     #[test]
     fn the_queue_and_the_lyrics_share_the_panel() {
-        // Come le schede del client Iced: il tasto apre la sua scheda, o chiude se era già aperta.
+        // A button opens its tab, or closes the panel if that tab was open.
         assert_eq!(toggled(None, SidePanel::Lyrics), Some(SidePanel::Lyrics));
         assert_eq!(toggled(Some(SidePanel::Queue), SidePanel::Lyrics), Some(SidePanel::Lyrics));
         assert_eq!(toggled(Some(SidePanel::Lyrics), SidePanel::Lyrics), None);

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Marchio di Psytify (la faccia di Nastro, sprite `mark`) per la barra di stato: Android lo vuole
+     bianco su trasparente. Generato da design/tools/launcher.py: non modificarlo a mano. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M2,4h20v2h-20zM0,6h2v12h-2zM22,6h2v12h-2zM4,8h6v2h-6zM14,8h6v2h-6zM4,10h2v2h-2zM8,10h2v2h-2zM14,10h2v2h-2zM18,10h2v2h-2zM4,12h6v2h-6zM14,12h6v2h-6zM8,16h8v2h-8zM2,18h20v2h-20z" />
+</vector>

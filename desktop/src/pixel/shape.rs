@@ -282,6 +282,38 @@ pub fn dither(color: Hsla) -> Canvas<()> {
     ))
 }
 
+/// The 2 x 2 ordered-dither (Bayer) threshold of a cell: the order in which cells change in a dissolve.
+pub fn bayer2(col: u32, row: u32) -> u8 {
+    [[0, 2], [3, 1]][(row % 2) as usize][(col % 2) as usize]
+}
+
+/// At most this many dissolve cells along a side: a big slot uses cells of several AP.
+const VEIL_CELLS: f32 = 40.0;
+
+/// The ordered-dither veil of a dissolve: `covered` of every 4 cells (0..=4, in Bayer order) painted in
+/// `color` over `bounds`. Cells are whole APs, a few AP wide on a large slot so a frame stays cheap.
+pub fn paint_dither_veil(window: &mut Window, bounds: Bounds<Pixels>, ap: Ap, covered: u8, color: Hsla) {
+    if covered == 0 {
+        return;
+    }
+    let r = Dev::of(bounds, ap.scale);
+    let unit = ap.device.max(1) as f32;
+    let per = (r.w.max(r.h) / unit / VEIL_CELLS).ceil().max(1.0);
+    let d = unit * per;
+    // Whole cells over a bounded slot: the counts are small.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (cols, rows) = ((r.w / d).ceil() as u32, (r.h / d).ceil() as u32);
+    for row in 0..rows {
+        for c in 0..cols {
+            if bayer2(c, row) < covered.min(4) {
+                let x = r.x + c as f32 * d;
+                let y = r.y + row as f32 * d;
+                Dev { x, y, w: d.min(r.x + r.w - x), h: d.min(r.y + r.h - y) }.paint(window, ap.scale, color);
+            }
+        }
+    }
+}
+
 /// Una fascia di celle AP: `rows` righe da `row`, `width` celle da `col`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellSpan {
@@ -413,6 +445,15 @@ pub fn circle_outline(color: Hsla) -> Canvas<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dissolve_covers_one_more_quarter_of_the_cells_per_frame() {
+        let mut thresholds: Vec<u8> =
+            (0..2).flat_map(|row| (0..2).map(move |col| bayer2(col, row))).collect();
+        thresholds.sort_unstable();
+        assert_eq!(thresholds, vec![0, 1, 2, 3], "each frame changes a different quarter");
+        assert_eq!(bayer2(0, 0), bayer2(2, 2), "the pattern repeats every 2 cells");
+    }
 
     fn cells_of(spans: &[CellSpan]) -> std::collections::HashSet<(u32, u32)> {
         let mut set = std::collections::HashSet::new();

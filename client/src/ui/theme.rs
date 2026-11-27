@@ -192,15 +192,15 @@ pub const SKELETON_PEAK: Color = SELECTED;
 // Tipografia: Inter (assets/fonts). Departure Mono, per i titoli di pagina, non è ancora incorporato:
 // finché non c'è, quei titoli usano Inter alla stessa misura.
 /// Titolo di una pagina di contenuto (album, playlist): il nome grande in testa.
-pub const FS_HERO: f32 = type_::TYPE_DISPLAY.size;
+pub const FS_HERO: f32 = type_::v1::DISPLAY;
 /// Titolo del carosello della Home.
-pub const FS_FEATURE: f32 = type_::TYPE_DISPLAY.size;
+pub const FS_FEATURE: f32 = type_::v1::DISPLAY;
 /// Titolo di pagina (h1): il nome della schermata.
 pub const FS_PAGE: f32 = type_::PIXEL_SIZE;
-pub const FS_TITLE: f32 = type_::TYPE_HEADING.size;
-pub const FS_SECTION: f32 = type_::TYPE_HEADING.size;
-pub const FS_BODY: f32 = type_::TYPE_BODY.size;
-pub const FS_SMALL: f32 = type_::TYPE_META.size;
+pub const FS_TITLE: f32 = type_::v1::HEADING;
+pub const FS_SECTION: f32 = type_::v1::HEADING;
+pub const FS_BODY: f32 = type_::v1::BODY;
+pub const FS_SMALL: f32 = type_::v1::META;
 pub const FONT: Font = Font::with_name("Inter");
 pub const FONT_MEDIUM: Font = Font { weight: Weight::Medium, ..FONT };
 pub const FONT_SEMIBOLD: Font = Font { weight: Weight::Semibold, ..FONT };

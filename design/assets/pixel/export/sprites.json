@@ -38,6 +38,24 @@
       "note": ""
     },
     {
+      "name": "icon_play_pause",
+      "group": "icons",
+      "file": "1x/icon_play_pause.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
       "name": "icon_next",
       "group": "icons",
       "file": "1x/icon_next.png",
@@ -149,6 +167,24 @@
       "name": "icon_heart_fill",
       "group": "icons",
       "file": "1x/icon_heart_fill.png",
+      "frame_size": [
+        12,
+        12
+      ],
+      "frames": 1,
+      "durations_ms": [
+        0
+      ],
+      "palette": [
+        "transparent",
+        "tint"
+      ],
+      "note": ""
+    },
+    {
+      "name": "icon_heart_half",
+      "group": "icons",
+      "file": "1x/icon_heart_half.png",
       "frame_size": [
         12,
         12

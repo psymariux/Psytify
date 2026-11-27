@@ -1,33 +1,33 @@
-//! `VideoStage`: l'entità che tiene la pipeline del brano in corso e ne disegna i fotogrammi. Una sola per
-//! finestra: la mostra il pannello laterale sul videoclip o la vista immersiva sul videoclip (mai tutti e due
-//! insieme), e `Shell` le dice quale (`set_surface`).
-//! - **Dove disegna.** Il palco è l'ultimo figlio di `Shell` (dopo pagina, pannelli e vista immersiva), non un
-//!   figlio del pannello o della vista immersiva: un fotogramma nuovo rifà il palco e `Shell`, che GPUI rifà
-//!   comunque a ogni disegno perché è la radice, e le viste in cache si riusano, pannello e vista immersiva
-//!   compresi (BACKLOG 41). Chi lo mostra mette nel suo riquadro un pozzo (`well`) che, mentre si dipinge,
-//!   segna il posto (`Spot`); il palco dipinge il fotogramma lì sopra, nello stesso disegno, come
-//!   `PlayingSpot` fa per l'equalizzatore. `Shell` non va in `.cached()` sotto un'altra radice: una vista in
-//!   cache che si rifà rifà anche tutte le viste in cache che contiene (GPUI le ridisegna con `refreshing`).
+//! `VideoStage`: the entity that holds the playing track's pipeline and draws its frames. One per window: the
+//! clip shows in one media slot at a time, the side panel's or the stage's, and `Shell` says which
+//! (`set_surface`).
 //!
-//! - **Che cosa aprire** lo dice il core (`VideoView`, letto come `ClipView`), **quando** le regole pure di
-//!   `plan`: una pipeline solo per il brano in corso, mentre suona o si carica e mentre un posto la mostra.
-//!   Aprire e chiudere bloccano e vanno su un thread a parte; una versione migliore (360p → 720p) si apre
-//!   di fianco e prende il posto di quella che suona senza fermarla. In pausa la pipeline si chiude e resta
-//!   l'ultimo fotogramma; alla ripresa si riapre alla posizione dell'audio.
-//! - **Fotogrammi.** GStreamer mette l'ultimo nel posto (`slot`) e sveglia la UI una volta (`Notify`): la
-//!   sveglia notifica solo questa vista, che nel disegno prende il fotogramma, ne fa una `RenderImage` e
-//!   toglie dall'atlante quella di prima. Una UI in ritardo salta fotogrammi, non li accumula.
-//! - **Sincronia.** L'orologio è quello dell'audio (`PlaybackView::clock`): `Alignment::follow` a ogni
-//!   pubblicazione della riproduzione (un brano che parte, un salto, pausa o ripresa) e `Alignment::align`
-//!   sulla sveglia dei fotogrammi, al massimo ogni 250 ms (nessun timer in più).
-//! - **Guasti.** Una pipeline che non si apre o si ferma è `VideoCmd::Failed { seq }`: il core ne chiede un
-//!   altro indirizzo una volta e poi blocca il videoclip, che la vista mostra con «Riprova» (`retry`).
+//! - **Where it draws.** The stage is `Shell`'s last child (after page, panels and the stage view), not a child
+//!   of the view that shows it: a new frame redraws the stage and `Shell`, which GPUI redraws anyway as the
+//!   root, and the cached views are reused (BACKLOG 41). The view showing the clip puts a well (`well`) in its
+//!   media slot that marks the place (`Spot`) while it paints; the stage paints the frame there in the same
+//!   draw, then the dissolve veil the slot asked for, if any. `Shell` must not sit in `.cached()` under another
+//!   root.
+//! - **What to open** comes from the core (`VideoView`, read as `ClipView`), **when** from the pure rules of
+//!   `plan`: a pipeline only for the playing track, while it plays or loads and while a slot shows it. Opening
+//!   and closing block and run on their own thread; a better version (360p to 720p) opens beside and takes
+//!   over without stopping. Paused, the pipeline closes and the last frame stays; on resume it reopens at the
+//!   audio position.
+//! - **Frames.** GStreamer puts the latest in the slot (`slot`) and wakes the UI once (`Notify`): the wake
+//!   notifies only this view, which takes the frame in its draw, makes a `RenderImage` and drops the previous
+//!   one from the atlas. A late UI skips frames, never queues them.
+//! - **Sync.** The clock is the audio's (`PlaybackView::clock`): `Alignment::follow` on every playback
+//!   publication and `Alignment::align` on the frame wake, at most every 250 ms (no extra timer).
+//! - **Failures.** A pipeline that does not open or stops is `VideoCmd::Failed { seq }`: the core asks for
+//!   another address once, then blocks the clip, shown with «Riprova» (`retry`).
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::pixel::shape::paint_dither_veil;
+use crate::theme::Ap;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     App, Bounds, ContentMask, Context, Corners, Div, Entity, EventEmitter, IntoElement, ParentElement,
@@ -53,13 +53,13 @@ use crate::core_model::{Changed, CoreModel};
 use crate::notices::Notice;
 use crate::theme::{col, dp};
 
-/// Il posto che mostra il videoclip.
+/// The media slot that shows the clip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Surface {
-    /// Il mini player del pannello laterale.
+    /// The side panel's *In riproduzione* slot.
     Panel,
-    /// La vista immersiva.
-    Focus,
+    /// The stage's slot.
+    Stage,
 }
 
 /// Il posto del fotogramma in un riquadro: lo segna il pozzo (`VideoStage::well`) mentre si dipinge, con la
@@ -69,8 +69,8 @@ pub enum Surface {
 #[derive(Clone, Default)]
 pub struct Spot(Rc<Cell<Option<Place>>>);
 
-/// I limiti del riquadro e la maschera che lo taglia.
-type Place = (Bounds<Pixels>, ContentMask<Pixels>);
+/// The slot's bounds, the mask that clips it and the dissolve veil (cells covered of every 4).
+type Place = (Bounds<Pixels>, ContentMask<Pixels>, u8);
 
 impl Spot {
     pub fn clear(&self) {
@@ -155,7 +155,7 @@ pub struct VideoStage {
     retired: Vec<Arc<RenderImage>>,
     /// I posti del pannello e della vista immersiva.
     panel_spot: Spot,
-    focus_spot: Spot,
+    stage_spot: Spot,
     status: Status,
     /// I videoclip fermati già detti con un avviso.
     failures_seen: u64,
@@ -184,7 +184,7 @@ impl VideoStage {
             image: None,
             retired: Vec::new(),
             panel_spot: Spot::default(),
-            focus_spot: Spot::default(),
+            stage_spot: Spot::default(),
             status: Status::None,
             _changes: changes,
         };
@@ -234,17 +234,17 @@ impl VideoStage {
     pub fn spot(&self, surface: Surface) -> Spot {
         match surface {
             Surface::Panel => self.panel_spot.clone(),
-            Surface::Focus => self.focus_spot.clone(),
+            Surface::Stage => self.stage_spot.clone(),
         }
     }
 
-    /// Il pozzo del riquadro (`width` x `height` dp) in `surface`: il fondo, la copertina finché non c'è un
-    /// fotogramma, e il segno del posto dove il palco dipinge il fotogramma.
-    pub fn well(&self, surface: Surface, width: f32, height: f32) -> Div {
+    /// The well of the slot (`width` x `height` dp) in `surface`: the ground, the cover until a frame exists,
+    /// and the mark of the place where the stage paints the frame and then `veil` (a dissolve step, 0..=4).
+    pub fn well(&self, surface: Surface, width: f32, height: f32, veil: u8) -> Div {
         let spot = self.spot(surface);
         let marker = canvas(
             |_, _, _| (),
-            move |bounds, (), window, _| spot.0.set(Some((bounds, window.content_mask()))),
+            move |bounds, (), window, _| spot.0.set(Some((bounds, window.content_mask(), veil))),
         )
         .absolute()
         .top_0()
@@ -569,14 +569,16 @@ impl Render for VideoStage {
                 for old in retired {
                     let _ = window.drop_image(old);
                 }
-                let (Some(image), Some((bounds, mask))) = (image, spot.and_then(|spot| spot.0.get())) else {
-                    return;
-                };
-                let target = fitted(bounds, &image, scale);
+                let Some((bounds, mask, veil)) = spot.and_then(|spot| spot.0.get()) else { return };
                 let mask = ContentMask { bounds: mask.bounds.intersect(&bounds) };
                 window.with_content_mask(Some(mask), |window| {
-                    // Se il fotogramma non entra nell'atlante resta il fondo.
-                    let _ = window.paint_image(target, target, Corners::default(), image, 0, false);
+                    if let Some(image) = image {
+                        let target = fitted(bounds, &image, scale);
+                        // A frame that does not fit the atlas leaves the ground.
+                        let _ = window.paint_image(target, target, Corners::default(), image, 0, false);
+                    }
+                    // The dissolve covers the frame or the cover under it.
+                    paint_dither_veil(window, bounds, Ap::of(window), veil, col(SURFACE_WELL));
                 });
             },
         )

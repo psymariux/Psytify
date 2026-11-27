@@ -1,59 +1,60 @@
-//! PageHeader: la testa di una pagina che mostra un oggetto (album, artista, playlist, «Brani che ti
-//! piacciono»), come da `PSYTIFY_ART_DIRECTION.md` (Album, Artist, Playlists). Sulla tela, senza tinta:
-//! a sinistra l'arte (copertina `COVER_L` 224, la foto d'artista `AVATAR_L` 160 nel cerchio pixel, il
-//! mosaico 2 x 2 di una playlist o uno sprite su campo `GRAPHITE`); a destra il kicker (`TYPE_LABEL`,
-//! «ALBUM · 2024»), il nome in `TYPE_DISPLAY` (al più due righe), un collegamento facoltativo
-//! (l'artista dell'album), la riga dei dati (`TYPE_META`, con un badge di qualità se c'è) e i pulsanti.
+//! PageHeader: the head of a page that shows an object (album, artist, playlist, liked songs, a profile).
+//! On the canvas, no tint: on the left the art (cover `ART_HEADER` 232, the artist photo `ART_ARTIST` 200 in
+//! the pixel circle, a person `AVATAR_L` 160, a playlist's 2 x 2 mosaic or a sprite on `GRAPHITE`); on the
+//! right the kicker (`TYPE_LABEL`), the name in `TYPE_DISPLAY` (two lines at most), an optional link (the
+//! album's artist), the data line (`TYPE_META`, with a quality badge) and the action row, led by the 56 dp
+//! primary play button (desktop v2 §6). Everything is in dp, so the head grows with the zoom.
 //!
-//! I titoli delle schermate dell'app (Libreria, Scaricati) restano `PageTitle::screen`, in tipo pixel: il
-//! nome di un oggetto del catalogo può essere in qualunque scrittura e lunghezza, quindi è Inter.
-//! [`PageHeader::loading`] è lo scheletro alla stessa misura, finché la pagina non arriva.
+//! App screens (Libreria, Scaricati) keep `PageTitle::screen`. [`PageHeader::loading`] is the skeleton at the
+//! same size.
 
 use gpui::{
     AnyElement, App, ClickEvent, CursorStyle, ElementId, InteractiveElement, IntoElement, ParentElement,
     RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
 };
+use psytify_design::sprite;
 use psytify_design::tokens::color::{GRAPHITE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, WARM_WHITE};
-use psytify_design::tokens::size::CONTROL_H_LARGE;
-use psytify_design::tokens::size::cover::{AVATAR_L, AVATAR_M, COVER_L};
+use psytify_design::tokens::size::cover::{ART_ARTIST, ART_HEADER, AVATAR_L};
+use psytify_design::tokens::size::{FRAME_MARGIN, PLAY_HERO};
 use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_5, SPACE_6};
 use psytify_design::tokens::type_::{TYPE_DISPLAY, TYPE_LABEL, TYPE_META, TYPE_TRACK_TITLE};
 
 use super::badge::{Badge, BadgeKind};
 use super::control::OnClick;
+use super::icon_button::IconButton;
 use super::indicators::Skeleton;
 use super::tile::Cover;
 use crate::pixel::PixelSprite;
 use crate::theme::{TypeStyle, cased, col, dp};
 
-/// L'arte a sinistra.
+/// The art on the left.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HeaderArt {
-    /// Una copertina (il segnaposto finché non arriva o se non c'è).
+    /// A cover (the placeholder until it arrives, or if there is none).
     Cover(Option<SharedString>),
-    /// La foto di un artista nel cerchio pixel.
+    /// An artist photo in the pixel circle.
     Round(Option<SharedString>),
-    /// L'avatar di una persona nel cerchio pixel, `AVATAR_M` 96 (il profilo).
+    /// A person's avatar in the pixel circle (the profile).
     Avatar(Option<SharedString>),
-    /// Le copertine dei primi brani di una playlist: con quattro diverse un mosaico 2 x 2, altrimenti la
-    /// prima (o il segnaposto).
+    /// The covers of a playlist's first tracks: a 2 x 2 mosaic with four different ones, else the first
+    /// (or the placeholder).
     Mosaic(Vec<SharedString>),
-    /// Uno sprite su campo `GRAPHITE` («Brani che ti piacciono»: il cuore pieno, `WARM_WHITE`).
+    /// A sprite on a `GRAPHITE` field (liked songs: the filled heart, `WARM_WHITE`).
     Sprite(&'static str),
 }
 
 impl HeaderArt {
-    /// Il lato dell'arte: la foto d'artista è più piccola della copertina.
+    /// The side of the art: photos are smaller than covers.
     fn side(&self) -> f32 {
         match self {
-            Self::Round(_) => AVATAR_L,
-            Self::Avatar(_) => AVATAR_M,
-            _ => COVER_L,
+            Self::Round(_) => ART_ARTIST,
+            Self::Avatar(_) => AVATAR_L,
+            _ => ART_HEADER,
         }
     }
 }
 
-/// Fino a quattro copertine diverse, nell'ordine dei brani: ciò che serve al mosaico.
+/// Up to four different covers, in track order: what the mosaic needs.
 pub fn mosaic_urls<'a>(urls: impl IntoIterator<Item = Option<&'a str>>) -> Vec<SharedString> {
     let mut found: Vec<SharedString> = Vec::with_capacity(4);
     for url in urls.into_iter().flatten() {
@@ -98,7 +99,7 @@ fn art(art: HeaderArt) -> AnyElement {
     }
 }
 
-/// La testa di una pagina d'oggetto.
+/// The head of an object page.
 #[derive(IntoElement)]
 pub struct PageHeader {
     art: HeaderArt,
@@ -107,7 +108,9 @@ pub struct PageHeader {
     link: Option<(ElementId, SharedString, OnClick)>,
     meta: SharedString,
     badge: Option<SharedString>,
+    play: Option<(ElementId, OnClick)>,
     actions: Vec<AnyElement>,
+    margin: f32,
 }
 
 impl PageHeader {
@@ -119,11 +122,29 @@ impl PageHeader {
             link: None,
             meta: SharedString::default(),
             badge: None,
+            play: None,
             actions: Vec::new(),
+            margin: FRAME_MARGIN,
         }
     }
 
-    /// Un collegamento sotto il titolo (l'artista di un album): sottolineato al passaggio del mouse.
+    /// The page's canvas margin (`components::frame`).
+    pub fn margin(mut self, margin: f32) -> Self {
+        self.margin = margin;
+        self
+    }
+
+    /// The 56 dp primary play button that leads the action row.
+    pub fn play(
+        mut self,
+        id: impl Into<ElementId>,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.play = Some((id.into(), std::rc::Rc::new(handler)));
+        self
+    }
+
+    /// A link under the title (an album's artist): underlined on hover.
     pub fn link(
         mut self,
         id: impl Into<ElementId>,
@@ -134,36 +155,37 @@ impl PageHeader {
         self
     }
 
-    /// La riga dei dati (brani, durata, ascoltatori), già pronta.
+    /// The data line (tracks, duration, listeners), ready made.
     pub fn meta(mut self, meta: impl Into<SharedString>) -> Self {
         self.meta = meta.into();
         self
     }
 
-    /// Un badge di qualità dopo i dati (`LOSSLESS`): non è lime, la qualità non è uno stato.
+    /// A quality badge after the data (`LOSSLESS`): not lime, quality is not a state.
     pub fn quality(mut self, text: impl Into<SharedString>) -> Self {
         self.badge = Some(text.into());
         self
     }
 
-    /// Un pulsante della riga delle azioni, nell'ordine di lettura.
+    /// A button of the action row, in reading order (after the play button).
     pub fn action(mut self, action: impl IntoElement) -> Self {
         self.actions.push(action.into_any_element());
         self
     }
 
-    /// Lo scheletro della testa, alla stessa misura: arte, kicker, titolo, dati e una riga di pulsanti.
-    pub fn loading(round: bool) -> impl IntoElement {
-        Self::skeleton(if round { AVATAR_L } else { COVER_L }, round)
+    /// The skeleton of the head at the same size: art, kicker, title, data and the action row.
+    pub fn loading(round: bool, margin: f32) -> impl IntoElement {
+        Self::skeleton(if round { ART_ARTIST } else { ART_HEADER }, round, margin)
     }
 
-    /// Lo scheletro della testa di un profilo (avatar `AVATAR_M` nel cerchio).
-    pub fn loading_person() -> impl IntoElement {
-        Self::skeleton(AVATAR_M, true)
+    /// The skeleton of a profile head (the avatar in the circle).
+    pub fn loading_person(margin: f32) -> impl IntoElement {
+        Self::skeleton(AVATAR_L, true, margin)
     }
 
-    fn skeleton(side: f32, round: bool) -> impl IntoElement {
+    fn skeleton(side: f32, round: bool, margin: f32) -> impl IntoElement {
         frame(
+            margin,
             if round {
                 Cover::new(side).circle().into_any_element()
             } else {
@@ -178,25 +200,25 @@ impl PageHeader {
                 .child(Skeleton::new(64.0, 12.0))
                 .child(Skeleton::new(320.0, 32.0))
                 .child(Skeleton::new(200.0, 12.0))
-                .child(div().pt(dp(SPACE_3)).child(Skeleton::new(240.0, CONTROL_H_LARGE))),
+                .child(div().pt(dp(SPACE_3)).child(Skeleton::new(240.0, PLAY_HERO))),
         )
     }
 }
 
-/// L'arte a sinistra e la colonna di testo a destra, allineata in basso.
-fn frame(art: AnyElement, column: impl IntoElement) -> gpui::Div {
+/// The art on the left and the text column on the right, aligned to the bottom.
+fn frame(margin: f32, art: AnyElement, column: impl IntoElement) -> gpui::Div {
     div()
         .flex_none()
         .w_full()
         .flex()
         .items_end()
         .gap(dp(SPACE_6))
-        .px(dp(SPACE_6))
+        .px(dp(margin))
         .pt(dp(SPACE_6))
-        .pb(dp(SPACE_5))
+        .pb(dp(SPACE_6))
         .child(art)
-        // La colonna prende la larghezza che resta e può stringersi sotto il suo contenuto (`min_w_0`):
-        // il titolo va a capo lì dentro e le righe corte si troncano, non escono dalla testa.
+        // The column takes the width left and may shrink below its content (`min_w_0`): the title wraps
+        // inside it and short lines truncate instead of leaving the head.
         .child(div().flex_1().min_w_0().flex().flex_col().child(column))
 }
 
@@ -212,7 +234,7 @@ impl RenderOnce for PageHeader {
                     .child(cased(&self.kicker, TYPE_LABEL)),
             );
         }
-        // Al più due righe; se non basta, l'ultima finisce con «…».
+        // Two lines at most; the last ends with an ellipsis.
         text = text.child(
             div()
                 .w_full()
@@ -256,12 +278,26 @@ impl RenderOnce for PageHeader {
             text = text.child(meta);
         }
         let mut column = div().w_full().min_w_0().flex().flex_col().gap(dp(SPACE_5)).child(text);
-        if !self.actions.is_empty() {
-            // In una colonna stretta i pulsanti vanno a capo invece di uscire dalla testa.
-            column =
-                column.child(div().flex().flex_wrap().items_center().gap(dp(SPACE_3)).children(self.actions));
+        let play = self.play.map(|(id, handler)| {
+            IconButton::new(id, sprite::ICON_PLAY)
+                .primary()
+                .size(PLAY_HERO)
+                .tooltip("Riproduci", None)
+                .on_click(move |event, window, cx| handler(event, window, cx))
+        });
+        if play.is_some() || !self.actions.is_empty() {
+            // In a narrow column the buttons wrap instead of leaving the head.
+            column = column.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(dp(SPACE_3))
+                    .children(play)
+                    .children(self.actions),
+            );
         }
-        frame(art(self.art), column)
+        frame(self.margin, art(self.art), column)
     }
 }
 
@@ -280,9 +316,9 @@ mod tests {
 
     #[test]
     fn an_artist_photo_is_smaller_than_a_cover() {
-        assert_eq!(HeaderArt::Round(None).side(), AVATAR_L);
-        assert_eq!(HeaderArt::Cover(None).side(), COVER_L);
-        assert_eq!(HeaderArt::Sprite("x").side(), COVER_L);
-        assert_eq!(HeaderArt::Avatar(None).side(), AVATAR_M, "un profilo: avatar da 96");
+        assert_eq!(HeaderArt::Round(None).side(), ART_ARTIST);
+        assert_eq!(HeaderArt::Cover(None).side(), ART_HEADER);
+        assert_eq!(HeaderArt::Sprite("x").side(), ART_HEADER);
+        assert_eq!(HeaderArt::Avatar(None).side(), AVATAR_L, "a profile: a 160 avatar");
     }
 }

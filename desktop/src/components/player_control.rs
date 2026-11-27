@@ -1,8 +1,10 @@
-//! PlayerControl: gruppo di trasporto. Shuffle, precedente, play/pausa (primario 40 dp), successivo,
-//! repeat a tre stati (off, all, one). Lime solo su shuffle/repeat accesi, sempre con il punto.
+//! PlayerControl: the transport group. Shuffle, previous, play/pause (primary, 40 dp or 56 dp on the stage),
+//! next, three-state repeat (off, all, one). Lime only on shuffle and repeat when on, always with the dot.
+//! Play and pause swap through one in-between frame (`icon_play_pause`).
 
 use gpui::{App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 use psytify_design::sprite;
+use psytify_design::tokens::motion::SPRITE_FRAME_MIN_MS;
 use psytify_design::tokens::size::CONTROL_H_LARGE;
 use psytify_design::tokens::space::SPACE_3;
 
@@ -31,6 +33,7 @@ pub struct PlayerControl {
     shuffle: bool,
     repeat: Repeat,
     disabled: bool,
+    play_size: f32,
     play_preview: Preview,
     on_play: Option<OnClick>,
     on_shuffle: Option<OnClick>,
@@ -47,6 +50,7 @@ impl PlayerControl {
             shuffle: false,
             repeat: Repeat::Off,
             disabled: false,
+            play_size: CONTROL_H_LARGE,
             play_preview: Preview::Live,
             on_play: None,
             on_shuffle: None,
@@ -74,6 +78,12 @@ impl PlayerControl {
     /// Coda vuota: tutto disabilitato.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// The play button's side in dp (40 in the player bar, 56 on the stage).
+    pub fn play_size(mut self, side: f32) -> Self {
+        self.play_size = side;
         self
     }
 
@@ -123,13 +133,18 @@ fn wired(button: IconButton, handler: Option<OnClick>) -> IconButton {
 }
 
 impl RenderOnce for PlayerControl {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let id = |suffix: &str| SharedString::from(format!("{}-{suffix}", self.id));
-        let play_icon =
-            if self.transport == Transport::Playing { sprite::ICON_PAUSE } else { sprite::ICON_PLAY };
+        let playing = self.transport == Transport::Playing;
+        let swapping = crate::motion::since_change(id("glyph"), playing, SPRITE_FRAME_MIN_MS, window, cx);
+        let play_icon = match (swapping, playing) {
+            (Some(_), _) => sprite::ICON_PLAY_PAUSE,
+            (None, true) => sprite::ICON_PAUSE,
+            (None, false) => sprite::ICON_PLAY,
+        };
         let mut play = IconButton::new(id("play"), play_icon)
             .primary()
-            .size(CONTROL_H_LARGE)
+            .size(self.play_size)
             .disabled(self.disabled)
             .loading(self.transport == Transport::Loading)
             .preview(self.play_preview)

@@ -10,5 +10,6 @@ pub mod size;
 pub mod space;
 pub mod type_;
 pub mod z;
+pub mod zoom;
 
 pub use color::Rgba;

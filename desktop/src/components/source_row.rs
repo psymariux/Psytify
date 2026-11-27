@@ -20,7 +20,7 @@ use super::indicators::{Equalizer, PlayState};
 use super::tile::Cover;
 use crate::pixel::PixelSprite;
 use crate::pixel::shape::inset_ring;
-use crate::theme::{TypeStyle, col, dp};
+use crate::theme::{TypeStyle, col, dp, fade};
 
 /// Larghezza della coda della riga: quanto occupano cuore, download e «Altro» in `TrackRow` (3 x 32 dp).
 const TAIL_W: f32 = 96.0;
@@ -74,10 +74,11 @@ impl RenderOnce for SourceRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let wired = wire(&self.id, false, self.preview, window, cx);
         let v = wired.visual;
+        // The hover tone eases in, as on `TrackRow`; the press is solid at once.
         let fill = if v.pressed && !self.busy {
-            Some(SURFACE_SELECTED)
-        } else if v.hovered {
-            Some(SURFACE_RAISED)
+            Some(col(SURFACE_SELECTED))
+        } else if v.hover_t > 0.0 {
+            Some(fade(SURFACE_RAISED, v.hover_t))
         } else {
             None
         };
@@ -146,7 +147,7 @@ impl RenderOnce for SourceRow {
             )
             .child(inset_ring(col(PURE_WHITE), wired.focus.clone(), v.force_ring));
         if let Some(color) = fill {
-            row = row.bg(col(color));
+            row = row.bg(color);
         }
         with_click(row, if self.busy { None } else { self.on_click })
     }

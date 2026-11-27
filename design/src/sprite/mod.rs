@@ -8,7 +8,7 @@
 //!
 //! # Memoria
 //!
-//! I 72 sprite 1x occupano **159 744 byte** (156,0 KiB) di RGBA decodificato, più qualche KiB di nomi e
+//! I 74 sprite 1x occupano **160 896 byte** (157,1 KiB) di RGBA decodificato, più qualche KiB di nomi e
 //! indici; i PNG incorporati nel binario ne pesano circa 60 KiB. Si decodificano una volta sola
 //! (`sheet()`, `OnceLock`), mai per frame. Le versioni ingrandite stanno nella [`UpscaleCache`], che
 //! il frontend possiede (un fattore di scala per volta): vedi i limiti in `cache`.
@@ -232,7 +232,7 @@ impl SpriteSheet {
         self.sprites.iter()
     }
 
-    /// Byte totali di RGBA decodificato a 1x (159 744 con i 72 sprite attuali).
+    /// Byte totali di RGBA decodificato a 1x (160 896 con i 74 sprite attuali).
     pub fn decoded_bytes(&self) -> usize {
         self.sprites.iter().map(Sprite::decoded_bytes).sum()
     }

@@ -482,6 +482,9 @@ pub(crate) struct Playback {
     /// profilo li manda al server, se c'è un accesso in quel momento.
     listens: Vec<Uuid>,
     target: Option<Target>,
+    /// Where to resume the current entry after a restart (read from `config.json`, or kept at
+    /// shutdown). Only «play» on the stopped entry uses it; starting anything else forgets it.
+    resume: Option<(Uuid, Duration)>,
     /// La posizione dell'audio al battito precedente: il tempo ascoltato è la differenza.
     last_polled: Duration,
     /// Millisecondi ascoltati che la libreria non ha ancora.
@@ -526,12 +529,19 @@ fn next_seed(seed: u64) -> u64 {
 impl Playback {
     /// Il dominio con i campi letti all'avvio. `seed` e `unix` (secondi dal 1970) li sceglie l'host.
     pub(crate) fn new(fields: PlaybackFields, server: Option<String>, seed: u64, unix: u64) -> Self {
+        let resume = fields
+            .queue
+            .current()
+            .filter(|_| fields.position_ms > 0)
+            .map(|track| (track.id, Duration::from_millis(fields.position_ms)));
         let view = PlaybackView {
             volume: fields.volume.clamp(0.0, 1.0),
             quality: fields.quality,
             equalizer: fields.equalizer,
             autoplay: fields.autoplay,
             queue: fields.queue,
+            // The stopped entry shows where it will resume.
+            clock: Clock { position: resume.map_or(Duration::ZERO, |(_, at)| at), ..Clock::default() },
             ..PlaybackView::default()
         };
         Self {
@@ -551,6 +561,7 @@ impl Playback {
             heal: Vec::new(),
             listens: Vec::new(),
             target: None,
+            resume,
             last_polled: Duration::ZERO,
             listened_ms: 0,
             ticking: false,
@@ -595,13 +606,28 @@ impl Playback {
 
     /// I campi di `config.json` di questo dominio come stanno adesso: il volume è quello di prima
     /// del muto.
-    pub(crate) fn fields(&self) -> PlaybackFields {
+    pub(crate) fn fields(&self, now: Instant) -> PlaybackFields {
         PlaybackFields {
             volume: self.before_mute.unwrap_or(self.view.volume),
             queue: Arc::clone(&self.view.queue),
+            position_ms: u64::try_from(self.resume_point(now).as_millis()).unwrap_or(u64::MAX),
             quality: self.view.quality,
             equalizer: self.view.equalizer,
             autoplay: self.view.autoplay,
+        }
+    }
+
+    /// Where the current entry would resume: the clock while it plays or is paused, the target
+    /// while it loads to resume, the saved point while it is stopped, otherwise its start.
+    fn resume_point(&self, now: Instant) -> Duration {
+        let current = self.view.queue.current().map(|track| track.id);
+        let at = |(track, position): (Uuid, Duration)| (Some(track) == current).then_some(position);
+        match self.view.state {
+            PlaybackState::Playing | PlaybackState::Paused => self.view.clock.at(now),
+            PlaybackState::Loading { .. } => {
+                self.target.as_ref().and_then(|t| at((t.track, t.position))).unwrap_or_default()
+            }
+            PlaybackState::Stopped | PlaybackState::Error(_) => self.resume.and_then(at).unwrap_or_default(),
         }
     }
 
@@ -972,6 +998,7 @@ impl Playback {
             AudioFact::Position(position) => {
                 if self.view.state == PlaybackState::Paused && self.view.clock.position != position {
                     self.set_clock(Clock::paused(position, now));
+                    self.persist = true;
                 }
             }
             AudioFact::Polled { position, finished, seek_failed } => {
@@ -984,6 +1011,13 @@ impl Playback {
     /// Il core si ferma: l'audio tace, le connessioni dei brani caldi si chiudono e il tempo
     /// ascoltato arriva alla libreria prima che le impostazioni scrivano l'ultima volta.
     pub(crate) fn close(&mut self, now: Instant, effects: &mut Vec<Effect>) {
+        // The last save keeps where the entry was, so the next start resumes it there.
+        if self.view.is_active()
+            && let Some(track) = self.view.queue.current()
+        {
+            self.resume = Some((track.id, self.view.clock.at(now)));
+            self.persist = true;
+        }
         self.stop(now, effects);
         self.warm.clear();
         self.flush_listened();
@@ -1126,6 +1160,7 @@ impl Playback {
     fn begin_loading(&mut self, track_id: Uuid, now: Instant) -> u64 {
         self.flush_listened();
         self.starting = None;
+        self.resume = None;
         self.last_polled = Duration::ZERO;
         let view = self.view_mut();
         view.generation += 1;
@@ -1224,7 +1259,16 @@ impl Playback {
                 self.set_state(PlaybackState::Playing);
                 self.set_clock(Clock::running(position, now));
             }
-            PlaybackState::Stopped | PlaybackState::Error(_) => self.start_current(now, effects),
+            PlaybackState::Stopped | PlaybackState::Error(_) => {
+                // After a restart the entry resumes where the last save left it.
+                let resume = self.resume.take();
+                self.start_current(now, effects);
+                if let Some((track, position)) = resume
+                    && self.view.queue.current().is_some_and(|current| current.id == track)
+                {
+                    self.target = Some(Target { track, position, playing: true });
+                }
+            }
             PlaybackState::Loading { .. } => {}
         }
     }
@@ -1234,6 +1278,8 @@ impl Playback {
         let position = self.view.clock.at(now);
         self.set_state(PlaybackState::Paused);
         self.set_clock(Clock::paused(position, now));
+        // A pause is a good moment to remember where the entry is.
+        self.persist = true;
         self.flush_listened();
     }
 
@@ -1873,6 +1919,73 @@ mod tests {
         assert_eq!(rig.loads(), [(id(2), 2)]);
     }
 
+    /// The domain of a core started again from `fields`.
+    fn restarted(fields: PlaybackFields) -> Rig {
+        Rig { playback: Playback::new(fields, None, 7, 1_000), ..Rig::new() }
+    }
+
+    #[test]
+    fn a_paused_entry_is_saved_with_its_position_and_resumes_there_after_a_restart() {
+        let mut rig = Rig::new();
+        rig.play(vec![track(1, 60), track(2, 60)], 0);
+        rig.listen_until(Duration::ZERO, secs(20));
+        assert!(rig.playback.take_persist(), "starting a track saves");
+        rig.cmd(PlaybackCmd::Toggle);
+        assert!(rig.playback.take_persist(), "a pause saves where it is");
+        let fields = rig.playback.fields(rig.now);
+        assert_eq!(fields.position_ms, 20_000);
+
+        let mut rig = restarted(fields);
+        assert_eq!((rig.state(), rig.current()), (PlaybackState::Stopped, Some(id(1))));
+        assert_eq!(rig.view().clock.position, secs(20), "the stopped entry shows where it resumes");
+        assert_eq!(rig.playback.fields(rig.now).position_ms, 20_000, "a save before play keeps it");
+        rig.cmd(PlaybackCmd::Toggle);
+        let (_, generation) = rig.loads().pop().expect("a load");
+        assert_eq!(rig.playback.fields(rig.now).position_ms, 20_000, "and so does a save while it loads");
+        rig.load_arrives(generation);
+        rig.started();
+        assert!(rig.ops.iter().any(|op| matches!(op, AudioOp::Seek(at) if *at == secs(20))), "{:?}", rig.ops);
+        assert_eq!((rig.state(), rig.view().clock.at(rig.now)), (PlaybackState::Playing, secs(20)));
+    }
+
+    #[test]
+    fn shutting_down_keeps_the_position_of_the_playing_entry() {
+        let mut rig = Rig::new();
+        rig.play(vec![track(1, 60)], 0);
+        rig.listen_until(Duration::ZERO, secs(7));
+        let mut effects = Vec::new();
+        rig.playback.close(rig.now, &mut effects);
+        assert_eq!(rig.state(), PlaybackState::Stopped);
+        assert!(rig.playback.take_persist());
+        assert_eq!(rig.playback.fields(rig.now).position_ms, 7_000);
+    }
+
+    #[test]
+    fn starting_anything_else_forgets_the_resume_point() {
+        let mut fields = CoreConfig::default().playback();
+        let mut queue = Queue::default();
+        queue.replace(vec![track(1, 60), track(2, 60)], 0, 3);
+        fields.queue = Arc::new(queue);
+        fields.position_ms = 30_000;
+        let mut rig = restarted(fields);
+        rig.cmd(PlaybackCmd::PlayAt(1));
+        let (_, generation) = rig.loads().pop().expect("a load");
+        rig.load_arrives(generation);
+        rig.started();
+        assert!(!rig.ops.iter().any(|op| matches!(op, AudioOp::Seek(_))), "{:?}", rig.ops);
+        rig.cmd(PlaybackCmd::PlayAt(0));
+        assert_eq!(rig.playback.fields(rig.now).position_ms, 0, "the first entry starts again from zero");
+    }
+
+    #[test]
+    fn nothing_to_resume_without_a_current_entry() {
+        let mut fields = CoreConfig::default().playback();
+        fields.position_ms = 30_000;
+        let rig = restarted(fields);
+        assert_eq!(rig.view().clock.position, Duration::ZERO);
+        assert_eq!(rig.playback.fields(rig.now).position_ms, 0);
+    }
+
     #[test]
     fn pause_then_resume_keeps_the_position() {
         let mut rig = Rig::new();
@@ -2377,11 +2490,11 @@ mod tests {
         assert!(matches!(rig.ops.last(), Some(AudioOp::Volume(v)) if *v == 0.5));
         rig.cmd(PlaybackCmd::Save);
         assert!(rig.playback.take_persist());
-        assert_eq!(rig.playback.fields().volume, 0.5);
+        assert_eq!(rig.playback.fields(rig.now).volume, 0.5);
 
         rig.cmd(PlaybackCmd::ToggleMute);
         assert!(rig.view().muted && rig.view().volume == 0.0);
-        assert_eq!(rig.playback.fields().volume, 0.5, "si salva il volume di prima del muto");
+        assert_eq!(rig.playback.fields(rig.now).volume, 0.5, "si salva il volume di prima del muto");
         assert!(rig.playback.take_persist());
         rig.cmd(PlaybackCmd::ToggleMute);
         assert!(!rig.view().muted && rig.view().volume == 0.5);

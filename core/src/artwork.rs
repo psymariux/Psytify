@@ -10,8 +10,10 @@ use std::sync::LazyLock;
 use bytes::Bytes;
 use tokio::sync::Semaphore;
 
-/// Lato massimo di una copertina decodificata: basta per la carta più grande su schermi 2x.
+/// The default side of a decoded cover (the Iced app and the desktop's row and tile versions).
 pub const COVER_SIDE: u32 = 256;
+/// The largest side a frontend may ask for ([`fetch_side`]): a header cover at 2x and zoom.
+pub const COVER_SIDE_MAX: u32 = 512;
 /// Dimensioni massime accettate prima della decodifica (niente immagini "bomba").
 const MAX_SOURCE_SIDE: u32 = 4096;
 const MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
@@ -56,23 +58,38 @@ impl std::fmt::Debug for CoverPixels {
 /// `None` se l'indirizzo non è ammesso, se il backend non risponde o se l'immagine non è valida: il
 /// frontend resta sulla copertina disegnata. Al più [`MAX_FETCHES`] richieste insieme.
 pub async fn fetch(api: &crate::api::ApiClient, url: &str) -> Option<CoverPixels> {
+    fetch_side(api, url, COVER_SIDE).await
+}
+
+/// [`fetch`] reduced to at most `side` pixels (clamped to [`COVER_SIDE_MAX`]).
+pub async fn fetch_side(api: &crate::api::ApiClient, url: &str, side: u32) -> Option<CoverPixels> {
     let bytes = {
         let _permit = FETCHES.acquire().await.ok()?;
         api.cover(url).await.ok()?
     };
-    decode(bytes).await
+    decode_side(bytes, side).await
 }
 
 /// Decodifica una copertina scaricata su un thread bloccante del runtime: né il thread della UI né
 /// un worker asincrono restano fermi sull'immagine. `None` come [`decode_square`].
 pub async fn decode(bytes: Vec<u8>) -> Option<CoverPixels> {
+    decode_side(bytes, COVER_SIDE).await
+}
+
+/// [`decode`] reduced to at most `side` pixels (clamped to [`COVER_SIDE_MAX`]).
+pub async fn decode_side(bytes: Vec<u8>, side: u32) -> Option<CoverPixels> {
     let _permit = DECODES.acquire().await.ok()?;
-    tokio::task::spawn_blocking(move || decode_square(&bytes)).await.ok().flatten()
+    tokio::task::spawn_blocking(move || decode_square_max(&bytes, side)).await.ok().flatten()
 }
 
 /// Decodifica un'immagine, ne ritaglia il quadrato centrale e lo riduce a [`COVER_SIDE`]. `None`
 /// se il formato non è supportato, se l'immagine è vuota o troppo grande.
 pub fn decode_square(bytes: &[u8]) -> Option<CoverPixels> {
+    decode_square_max(bytes, COVER_SIDE)
+}
+
+/// [`decode_square`] reduced to at most `max_side` pixels (between 1 and [`COVER_SIDE_MAX`]).
+pub fn decode_square_max(bytes: &[u8], max_side: u32) -> Option<CoverPixels> {
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(MAX_SOURCE_SIDE);
     limits.max_image_height = Some(MAX_SOURCE_SIDE);
@@ -86,7 +103,7 @@ pub fn decode_square(bytes: &[u8]) -> Option<CoverPixels> {
     let (left, top, width, height) = content_box(&decoded);
     let side = width.min(height);
     let square = decoded.crop_imm(left + (width - side) / 2, top + (height - side) / 2, side, side);
-    let target = side.min(COVER_SIDE);
+    let target = side.min(max_side.clamp(1, COVER_SIDE_MAX));
     let resized = square.resize_exact(target, target, image::imageops::FilterType::Triangle);
     let rgba = resized.to_rgba8().into_raw();
     // Un quadrato di lato almeno 1 ha sempre un pixel: la media c'è.
@@ -208,6 +225,10 @@ mod tests {
     #[test]
     fn large_images_are_scaled_down() {
         assert_eq!(decode_square(&png(1000, 800)).unwrap().side, COVER_SIDE);
+        assert_eq!(decode_square_max(&png(1000, 800), 512).unwrap().side, 512);
+        assert_eq!(decode_square_max(&png(1000, 800), 4096).unwrap().side, COVER_SIDE_MAX, "clamped");
+        assert_eq!(decode_square_max(&png(300, 300), 512).unwrap().side, 300, "never enlarged");
+        assert_eq!(decode_square_max(&png(300, 300), 0).unwrap().side, 1);
     }
 
     #[test]

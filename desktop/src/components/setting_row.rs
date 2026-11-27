@@ -1,11 +1,10 @@
-//! La riga di un'impostazione: a sinistra il nome (`TYPE_TRACK_TITLE`) e una spiegazione breve
-//! (`TYPE_ARTIST`), a destra il controllo (un interruttore, una scelta, un pulsante o un valore). Alta
-//! almeno [`SETTING_ROW_MIN_H`], allineata alle intestazioni di sezione (`SPACE_6` ai lati), così le
-//! righe di un gruppo hanno tutte la stessa misura. La spiegazione può andare a capo: il controllo resta
-//! centrato in verticale.
+//! The row of a setting: on the left the name (`TYPE_TRACK_TITLE`) and a short explanation (`TYPE_ARTIST`,
+//! within the running-text measure), on the right the control (a switch, a choice, a button or a value). At
+//! least [`SETTING_ROW_MIN_H`] tall, with `SPACE_6` each side (pages add the rest of their frame margin), so
+//! the rows of a group share one measure. The explanation may wrap: the control stays centred vertically.
 //!
-//! Il gruppo di righe sta sotto un'intestazione di sezione (`section::section_heading`); fra un gruppo e
-//! il prossimo c'è un separatore di 1 AP (`setting_gap`), come chiede la direzione artistica.
+//! A group of rows sits under a section heading (`section::section_heading`); between two groups there is a
+//! 1 AP separator (`setting_gap`), as the art direction asks.
 
 use gpui::{AnyElement, App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 use psytify_design::tokens::color::{LINE_STRONG, TEXT_ERROR, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY};
@@ -13,19 +12,20 @@ use psytify_design::tokens::size::{TRACK_ROW_DENSE_H, TRACK_ROW_H};
 use psytify_design::tokens::space::{SPACE_1, SPACE_2, SPACE_4, SPACE_5, SPACE_6};
 use psytify_design::tokens::type_::{TYPE_ARTIST, TYPE_BODY, TYPE_META, TYPE_TRACK_TITLE};
 
+use super::frame::measure;
 use super::separator::Separator;
 use crate::pixel::shape::notch_box;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Altezza minima di una riga: una riga di brano più `SPACE_5`, così nome e spiegazione stanno su due
-/// righe di testo con il loro margine.
+/// The least height of a row: a track row plus `SPACE_5`, so name and explanation fit two lines with their
+/// margin.
 pub const SETTING_ROW_MIN_H: f32 = TRACK_ROW_H + SPACE_5;
 
 #[derive(IntoElement)]
 pub struct SettingRow {
     label: SharedString,
     description: SharedString,
-    /// La spiegazione è un errore (in `TEXT_ERROR`).
+    /// The explanation is an error (in `TEXT_ERROR`).
     error: bool,
     control: Option<AnyElement>,
 }
@@ -35,7 +35,7 @@ impl SettingRow {
         Self { label: label.into(), description: SharedString::default(), error: false, control: None }
     }
 
-    /// La spiegazione sotto il nome, già pronta.
+    /// The explanation under the name, ready made.
     pub fn description(mut self, description: impl Into<SharedString>) -> Self {
         self.description = description.into();
         self
@@ -46,7 +46,7 @@ impl SettingRow {
         self
     }
 
-    /// Il controllo a destra.
+    /// The control on the right.
     pub fn control(mut self, control: impl IntoElement) -> Self {
         self.control = Some(control.into_any_element());
         self
@@ -64,7 +64,13 @@ impl RenderOnce for SettingRow {
             .child(div().type_role(TYPE_TRACK_TITLE).text_color(col(TEXT_PRIMARY)).child(self.label));
         if !self.description.is_empty() {
             let tint = if self.error { TEXT_ERROR } else { TEXT_SECONDARY };
-            text = text.child(div().type_role(TYPE_ARTIST).text_color(col(tint)).child(self.description));
+            text = text.child(
+                div()
+                    .max_w(measure(TYPE_ARTIST))
+                    .type_role(TYPE_ARTIST)
+                    .text_color(col(tint))
+                    .child(self.description),
+            );
         }
         div()
             .w_full()
@@ -79,13 +85,12 @@ impl RenderOnce for SettingRow {
     }
 }
 
-/// Lo spazio fra due gruppi di righe: un separatore di 1 AP con `SPACE_5` sopra.
+/// The space between two groups of rows: a 1 AP separator with `SPACE_5` above.
 pub fn setting_gap() -> gpui::Div {
     div().w_full().pt(dp(SPACE_5)).px(dp(SPACE_6)).child(Separator::horizontal())
 }
 
-/// Un tasto disegnato: il nome in `TYPE_META` in una scatola di 1 AP `LINE_STRONG` (come il suggerimento
-/// «Ctrl K» del campo di ricerca).
+/// A drawn key: the name in `TYPE_META` in a 1 AP `LINE_STRONG` box (like the search field's «Ctrl K» hint).
 pub fn key_cap(text: impl Into<SharedString>) -> gpui::Div {
     div()
         .relative()
@@ -96,7 +101,7 @@ pub fn key_cap(text: impl Into<SharedString>) -> gpui::Div {
         .child(div().relative().child(text.into()))
 }
 
-/// La riga fitta di una scorciatoia: che cosa fa a sinistra, i tasti a destra.
+/// The dense row of a shortcut: what it does on the left, the keys on the right.
 pub fn shortcut_row(what: impl Into<SharedString>, keys: &[&'static str]) -> gpui::Div {
     div()
         .w_full()

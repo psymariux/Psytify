@@ -1,13 +1,14 @@
-//! La pagina di un album del catalogo del server, come da `PSYTIFY_ART_DIRECTION.md` (Album) e come il
-//! client Iced (`client/src/ui/pages/album.rs`): la testa con la copertina, «ALBUM · 2024», il titolo,
-//! l'artista (si apre), brani, durata e `LOSSLESS` se ogni brano lo è; Riproduci, Casuale, salva nella
-//! libreria (il cuore) e «Scarica tutto»; poi i brani (`TrackRow`) e i crediti delle licenze che chiedono
-//! l'attribuzione.
+//! The page of an album of the server catalogue (`PSYTIFY_ART_DIRECTION.md`, Album; the Iced client's
+//! `client/src/ui/pages/album.rs`): the head with the cover, «ALBUM · 2024», the title, the artist (opens),
+//! tracks, duration and `LOSSLESS` when every track is; the 56 dp play button, shuffle, save to the library
+//! (the heart) and «Scarica tutto»; then the tracks (`TrackRow`, one column, title : album 3 : 2) and the
+//! credits of the licences that ask for attribution. The page fills the frame (desktop v2 §2) and enters
+//! with the page-enter move.
 //!
-//! L'album lo tiene il catalogo del core (`CatalogView::album`, LRU di 24 pagine, riletto in silenzio dopo
-//! 90 s): aprire la pagina manda `CatalogCmd::Ensure`, e la pagina mostra ciò che il core pubblica per il
-//! suo identificatore: lo scheletro mentre carica, l'errore con «Riprova» (`CatalogCmd::Retry`), l'album.
-//! I testi delle righe si rifanno solo quando l'album cambia (un altro `Arc`).
+//! The core's catalogue keeps the album (`CatalogView::album`, LRU of 24 pages, quietly reread after 90 s):
+//! opening the page sends `CatalogCmd::Ensure`, and the page shows what the core publishes for its id: the
+//! skeleton while it loads, the error with «Riprova» (`CatalogCmd::Retry`), the album. Row texts are rebuilt
+//! only when the album changes (another `Arc`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -23,12 +24,13 @@ use psytify_core::config::SavedAlbum;
 use psytify_core::snapshot::{CatalogView, DownloadsView, LibraryView};
 use psytify_design::sprite;
 use psytify_design::tokens::color::{SURFACE_CANVAS, TEXT_ERROR, TEXT_PRIMARY, TEXT_SECONDARY};
-use psytify_design::tokens::size::cover::COVER_XS;
+use psytify_design::tokens::size::cover::ART_ROW;
 use psytify_design::tokens::size::{TRACK_INDEX_W, TRACK_ROW_H};
-use psytify_design::tokens::space::{SPACE_1, SPACE_3, SPACE_5, SPACE_6, SPACE_8};
+use psytify_design::tokens::space::{SPACE_1, SPACE_3, SPACE_5, SPACE_8};
 use psytify_design::tokens::type_::{TYPE_BODY, TYPE_META, TYPE_NUMERIC};
 use uuid::Uuid;
 
+use super::page_frame::PageFrame;
 use super::page_list::{new_list, remeasure_header, set_rows, to_top};
 use super::track_list::{
     RowText, batch_label, download_all_label, download_command, download_state, now_playing, plays,
@@ -37,30 +39,31 @@ use super::track_list::{
 use super::track_menu::TrackMenu;
 use super::{Page, PageEvent};
 use crate::components::button::Button;
+use crate::components::frame::{Frame, measure};
 use crate::components::icon_button::{IconButton, OnStyle};
 use crate::components::indicators::{PlayState, Skeleton};
 use crate::components::page_header::{HeaderArt, PageHeader};
 use crate::components::playing_spot::PlayingSpot;
-use crate::components::section::{note, section_heading};
+use crate::components::section::{note_at, section_heading_at};
 use crate::components::track_row::{TrackData, TrackRow};
 use crate::core_model::{Changed, CoreModel};
 use crate::format;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Righe dello scheletro mentre l'album arriva.
+/// Skeleton rows while the album arrives.
 const SKELETON_ROWS: usize = 8;
 
-/// Una riga dopo la testa.
+/// A row after the head.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Track(usize),
-    /// Nessun brano pubblicato.
+    /// No track published.
     Empty,
     CreditsHeading,
     Credit(usize),
 }
 
-/// Le righe: i brani, poi i crediti (se qualcuno li chiede). Pura.
+/// The rows: the tracks, then the credits (if a licence asks for them). Pure.
 fn plan(tracks: usize, credits: usize) -> Vec<Row> {
     let mut rows: Vec<Row> = (0..tracks).map(Row::Track).collect();
     if tracks == 0 {
@@ -73,7 +76,7 @@ fn plan(tracks: usize, credits: usize) -> Vec<Row> {
     rows
 }
 
-/// «Album · 2024» (l'anno se c'è).
+/// «Album · 2024» (with the year when known).
 fn kicker(album: &Album) -> String {
     match album.released_on.as_deref().and_then(|date| date.get(..4)) {
         Some(year) => format!("Album · {year}"),
@@ -81,13 +84,13 @@ fn kicker(album: &Album) -> String {
     }
 }
 
-/// `Lossless` se ogni brano è in un formato senza perdita (FLAC, WAV): la qualità, non uno stato.
+/// `Lossless` when every track is in a lossless format (FLAC, WAV): a quality, not a state.
 fn quality(tracks: &[Track]) -> Option<&'static str> {
     let lossless = |t: &Track| matches!(t.audio_format.as_str(), "flac" | "wav" | "alac" | "aiff");
     (!tracks.is_empty() && tracks.iter().all(lossless)).then_some("Lossless")
 }
 
-/// I crediti delle licenze che chiedono l'attribuzione (CC BY e simili): «Titolo — CC BY · Titolare».
+/// The credits of the licences that ask for attribution (CC BY and the like): «Title — CC BY · Holder».
 pub fn credits(tracks: &[Track]) -> Vec<SharedString> {
     tracks
         .iter()
@@ -96,21 +99,21 @@ pub fn credits(tracks: &[Track]) -> Vec<SharedString> {
         .collect()
 }
 
-/// Una riga dei crediti: fitta come nel client Iced (le righe di una lista virtuale possono avere altezze
-/// diverse); l'ultima lascia spazio in fondo alla pagina.
-pub fn credit_line(text: SharedString, last: bool) -> gpui::Div {
-    div()
-        .px(dp(SPACE_6))
-        .pt(dp(SPACE_1))
-        .pb(dp(if last { SPACE_8 } else { SPACE_1 }))
-        .min_w_0()
-        .truncate()
-        .type_role(TYPE_META)
-        .text_color(col(TEXT_SECONDARY))
-        .child(text)
+/// A credit line, dense as in the Iced client, at the frame margin and within the running-text measure;
+/// the last leaves room at the bottom of the page.
+pub fn credit_line(text: SharedString, last: bool, margin: f32) -> gpui::Div {
+    div().px(dp(margin)).pt(dp(SPACE_1)).pb(dp(if last { SPACE_8 } else { SPACE_1 })).child(
+        div()
+            .max_w(measure(TYPE_META))
+            .min_w_0()
+            .truncate()
+            .type_role(TYPE_META)
+            .text_color(col(TEXT_SECONDARY))
+            .child(text),
+    )
 }
 
-/// Cosa mostra la pagina.
+/// What the page shows.
 #[derive(Clone, Debug, PartialEq)]
 enum Shown {
     Loading,
@@ -120,7 +123,7 @@ enum Shown {
 
 pub struct AlbumPage {
     core: Entity<CoreModel>,
-    /// L'album che la pagina mostra (lo sceglie `Shell`).
+    /// The album the page shows (`Shell` picks it).
     id: Option<Uuid>,
     shown: Shown,
     album: Option<Arc<Album>>,
@@ -139,7 +142,8 @@ pub struct AlbumPage {
     downloads: Arc<DownloadsView>,
     now: Option<(Uuid, PlayState)>,
     list: ListState,
-    /// Il posto dell'equalizzatore del brano in corso: lo dipinge `Shell` (BACKLOG 23).
+    frame: PageFrame,
+    /// Where the playing track's equalizer goes: `Shell` paints it (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
@@ -147,7 +151,7 @@ pub struct AlbumPage {
 impl EventEmitter<PageEvent> for AlbumPage {}
 
 impl AlbumPage {
-    /// Il posto dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// This view's equalizer spot, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -175,13 +179,28 @@ impl AlbumPage {
             downloads: Arc::clone(&snapshot.downloads),
             now: now_playing(&snapshot.playback),
             list: new_list(0),
+            frame: PageFrame::default(),
             core,
             spot: PlayingSpot::new(),
             _changes: changes,
         }
     }
 
-    /// Mostra l'album `id`: il core lo serve dalla cache se c'è, altrimenti lo carica.
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    /// A new width: the margins may move.
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame != self.frame.frame {
+            self.frame.frame = frame;
+            cx.notify();
+        }
+    }
+
+    /// Shows album `id`: the core serves it from its cache or loads it.
     pub fn show(&mut self, id: Uuid, cx: &mut Context<Self>) {
         self.core.read(cx).catalog(CatalogCmd::Ensure(Resource::Album(id)));
         if self.id == Some(id) {
@@ -236,7 +255,7 @@ impl AlbumPage {
         self.id.is_some_and(|id| self.library.saved_albums.iter().any(|album| album.id == id))
     }
 
-    /// Prende dal catalogo l'album di questa pagina; `true` se ciò che si vede è cambiato.
+    /// Takes this page's album from the catalogue; `true` if what is shown changed.
     fn take(&mut self, catalog: &CatalogView) -> bool {
         let Some(id) = self.id else { return false };
         let (shown, album) = match &catalog.album {
@@ -287,7 +306,7 @@ impl AlbumPage {
         remeasure_header(&self.list);
     }
 
-    /// Doppio clic o Invio: la coda diventa l'album, da `start`; sul brano in corso, play o pausa.
+    /// Double click or Enter: the queue becomes the album from `start`; on the playing track, play or pause.
     fn play(&self, start: usize, cx: &gpui::App) {
         let core = self.core.read(cx);
         match (self.tracks.get(start), self.now) {
@@ -296,12 +315,19 @@ impl AlbumPage {
         }
     }
 
-    fn item(&mut self, ix: usize, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let element = match ix.checked_sub(1) {
             None => self.album.clone().map(|album| self.header(&album, cx).into_any_element()),
             Some(row) => self.row(row, cx),
         };
-        element.unwrap_or_else(|| div().into_any_element())
+        let element = element.unwrap_or_else(|| div().into_any_element());
+        // The head, the tracks and the credits enter one step apart.
+        let section = match ix.checked_sub(1).and_then(|row| self.rows.get(row)) {
+            None => 0,
+            Some(Row::CreditsHeading | Row::Credit(_)) => 2,
+            Some(_) => 1,
+        };
+        self.frame.wrap(element, section, window)
     }
 
     fn header(&self, album: &Album, cx: &mut Context<Self>) -> PageHeader {
@@ -311,6 +337,7 @@ impl AlbumPage {
             self.kicker.clone(),
             album.title.clone(),
         )
+        .margin(self.frame.margin())
         .link(
             "album-artist",
             album.artist.name.clone(),
@@ -322,13 +349,14 @@ impl AlbumPage {
         }
         if !self.tracks.is_empty() {
             header = header
-                .action(Button::new("album-play", "Riproduci").primary().icon(sprite::ICON_PLAY).on_click(
+                .play(
+                    "album-play",
                     cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.core
                             .read(cx)
                             .playback(PlaybackCmd::Play { tracks: Arc::clone(&this.tracks), start: 0 });
                     }),
-                ))
+                )
                 .action(
                     IconButton::new("album-shuffle", sprite::ICON_SHUFFLE)
                         .tooltip("Riproduci in ordine casuale", None)
@@ -354,7 +382,7 @@ impl AlbumPage {
                 })),
         );
         match (&self.batch, self.download_label) {
-            // Mentre il lotto scarica, al posto dell'icona c'è il conteggio.
+            // While the batch downloads, the count replaces the icon.
             (Some(count), _) => {
                 header = header
                     .action(div().type_role(TYPE_NUMERIC).text_color(col(TEXT_PRIMARY)).child(count.clone()))
@@ -374,22 +402,24 @@ impl AlbumPage {
     }
 
     fn row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let margin = self.frame.margin();
         Some(match *self.rows.get(ix)? {
-            Row::Empty => note(
+            Row::Empty => note_at(
                 div()
                     .type_role(TYPE_BODY)
                     .text_color(col(TEXT_SECONDARY))
                     .child("Questo album non ha ancora brani pubblicati."),
+                margin,
             )
             .into_any_element(),
             Row::CreditsHeading => {
-                section_heading("Crediti".into(), SharedString::default()).into_any_element()
+                section_heading_at("Crediti".into(), SharedString::default(), margin).into_any_element()
             }
             Row::Credit(position) => {
-                credit_line(self.credits.get(position)?.clone(), position + 1 == self.credits.len())
+                credit_line(self.credits.get(position)?.clone(), position + 1 == self.credits.len(), margin)
                     .into_any_element()
             }
-            Row::Track(position) => self.track_row(position, cx)?.into_any_element(),
+            Row::Track(position) => self.frame.row(self.track_row(position, cx)?),
         })
     }
 
@@ -446,31 +476,33 @@ impl AlbumPage {
     }
 }
 
-/// Lo scheletro di una pagina d'oggetto: la testa e qualche riga, alla misura vera.
-pub fn skeleton_page(round: bool) -> gpui::Div {
-    let rows = (0..SKELETON_ROWS).map(|_| {
-        div()
-            .h(dp(TRACK_ROW_H))
-            .flex()
-            .items_center()
-            .gap(dp(SPACE_3))
-            // La griglia di `TrackRow`: margine, colonna dell'indice, copertina.
-            .px(dp(SPACE_3))
-            .child(div().w(dp(TRACK_INDEX_W)).flex_none())
-            .child(Skeleton::new(COVER_XS, COVER_XS))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(dp(SPACE_3 / 2.0))
-                    .child(Skeleton::new(220.0, 12.0))
-                    .child(Skeleton::new(140.0, 10.0)),
-            )
-    });
-    div().size_full().flex().flex_col().child(PageHeader::loading(round)).children(rows)
+/// The skeleton of an object page: the head and a few rows, at their real size.
+pub fn skeleton_page(round: bool, margin: f32) -> gpui::Div {
+    let rows = (0..SKELETON_ROWS).map(|_| skeleton_row(margin));
+    div().size_full().flex().flex_col().child(PageHeader::loading(round, margin)).children(rows)
 }
 
-/// Un guasto al centro, con «Riprova».
+/// A waiting track row on the `TrackRow` grid: margin, index column, cover, two lines.
+pub fn skeleton_row(margin: f32) -> gpui::Div {
+    div()
+        .h(dp(TRACK_ROW_H))
+        .flex()
+        .items_center()
+        .gap(dp(SPACE_3))
+        .px(dp(margin))
+        .child(div().w(dp(TRACK_INDEX_W)).flex_none())
+        .child(Skeleton::new(ART_ROW, ART_ROW))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(dp(SPACE_3 / 2.0))
+                .child(Skeleton::new(220.0, 12.0))
+                .child(Skeleton::new(140.0, 10.0)),
+        )
+}
+
+/// A failure in the middle, with «Riprova».
 pub fn failure(
     id: &'static str,
     text: SharedString,
@@ -488,12 +520,17 @@ pub fn failure(
 }
 
 impl Render for AlbumPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Il posto si segna di nuovo nel paint di questo fotogramma, se la riga in corso è visibile.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The spot is marked again in this frame's paint, if the playing row is visible.
         self.spot.clear();
-        let page = div().size_full().bg(col(SURFACE_CANVAS));
+        self.frame.begin(window, Some(&self.list));
+        let page = div()
+            .relative()
+            .size_full()
+            .bg(col(SURFACE_CANVAS))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame));
         match &self.shown {
-            Shown::Loading => page.child(skeleton_page(false)),
+            Shown::Loading => page.child(skeleton_page(false, self.frame.margin())),
             Shown::Failed(error) => page.child(failure(
                 "album-retry",
                 error.clone(),

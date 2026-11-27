@@ -45,8 +45,9 @@ pub enum MediaOp {
 
 /// Un'operazione su Discord Rich Presence.
 #[derive(Debug)]
+// `testing` re-exports the type, so its fields count as read there.
 #[cfg_attr(
-    target_os = "android",
+    all(target_os = "android", not(any(test, feature = "test-support"))),
     expect(dead_code, reason = "su Android non c'è Discord: l'host non legge i campi")
 )]
 pub enum DiscordOp {

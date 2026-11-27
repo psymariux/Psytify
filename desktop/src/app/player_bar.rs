@@ -1,18 +1,19 @@
-//! La barra «in riproduzione» (72 dp in basso): copertina, titolo e artista, «mi piace»; trasporto e
-//! barra di avanzamento al centro; testo, coda, volume e vista immersiva a destra (l'ordine della direzione
-//! artistica). Tutti i comandi vanno al core.
+//! The «in riproduzione» bar (72 dp at the bottom): cover, title and artist, the heart; transport and seek bar
+//! in the centre; lyrics, queue, volume and the stage on the right (the art direction's order). Every command
+//! goes to the core. The cover opens the side panel on *In riproduzione*.
 //!
-//! Con la feature `video` e un brano con il videoclip, a sinistra del testo, «Videoclip»: il pannello laterale
-//! sul videoclip (acceso mentre è aperto).
+//! With the `video` feature and a track that has a clip, «Videoclip» left of the lyrics button turns the clip
+//! on in the side panel's media slot (lit while the clip is on screen).
 //!
-//! In una jam, a sinistra del testo, il segno della jam: il gruppo e il badge `LIVE` (il lime della direzione
-//! artistica per «jam in progress»), che apre la pagina Jam; mentre ci si collega il gruppo ha il loader.
-//! Fuori da una jam non c'è niente. Cambia solo quando cambia la fase, il codice o il numero di persone.
+//! In a jam, left of the lyrics button, the jam mark: the group and the `LIVE` badge, which opens the Jam page;
+//! while connecting the group has the loader. It changes only with the phase, the code or the head count.
 //!
-//! La posizione non sta nell'istantanea: si calcola da `clock.at(now)` a ogni disegno. Un timer da 250 ms
-//! (`PROGRESS_TICK_MS`) la ridisegna, e **esiste solo mentre suona**: in pausa, fermo o in caricamento
-//! non c'è nessun timer e quindi nessun frame (la barra non si muove, non c'è niente da aggiornare). Neanche
-//! quando la vista immersiva copre la barra (`set_hidden`).
+//! A track change cross-fades the cover in `MOTION_BASE` and raises the title and artist 2 AP, asking for
+//! frames only while that runs.
+//!
+//! The position is not in the snapshot: it comes from `clock.at(now)` at every draw. A 250 ms timer
+//! (`PROGRESS_TICK_MS`) redraws it and **exists only while playing** and the bar is visible: paused, stopped,
+//! loading or under the stage there is no timer and no frame.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -30,8 +31,8 @@ use psytify_design::sprite;
 use psytify_design::tokens::color::{
     SURFACE_CHROME, TEXT_ERROR, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY,
 };
-use psytify_design::tokens::motion::PROGRESS_TICK_MS;
-use psytify_design::tokens::size::{PLAYER_BAR_H, cover::COVER_S};
+use psytify_design::tokens::motion::{MOTION_BASE, PROGRESS_TICK_MS, ease_out};
+use psytify_design::tokens::size::{PLAYER_BAR_H, cover::ART_SHORTCUT};
 use psytify_design::tokens::space::{SPACE_3, SPACE_4, SPACE_5};
 use psytify_design::tokens::type_::{TYPE_ARTIST, TYPE_NUMERIC, TYPE_TRACK_TITLE};
 use uuid::Uuid;
@@ -39,26 +40,29 @@ use uuid::Uuid;
 use super::SidePanel;
 use crate::components::badge::{Badge, BadgeKind};
 use crate::components::icon_button::{IconButton, OnStyle};
+use crate::components::like_button::LikeButton;
 use crate::components::player_control::{PlayerControl, Repeat, Transport};
 use crate::components::progress::ProgressBar;
 use crate::components::tile::Cover;
 use crate::core_model::{Changed, CoreModel};
 use crate::format;
-use crate::theme::{TypeStyle, col, dp};
+use crate::motion::{ap_round, keep_running};
+use crate::theme::{Ap, TypeStyle, col, dp};
 
-/// Quello che la barra chiede alla finestra.
+/// What the bar asks of the window.
 pub enum BarEvent {
-    /// Il pulsante della coda è stato premuto.
     ToggleQueue,
-    /// Il pulsante del testo (il pannello laterale sul testo).
+    /// The lyrics button: the side panel on *Testo*.
     ToggleLyrics,
-    /// Il pulsante della vista immersiva.
+    /// The cover: the side panel on *In riproduzione*.
+    ToggleNow,
+    /// The stage (F).
     ToggleFocus,
-    /// Il nome dell'artista del brano in corso: apre la sua pagina (come nel client Iced).
+    /// The playing track's artist name: opens the artist page.
     OpenArtist(uuid::Uuid),
-    /// Il segno della jam: apre la pagina Jam.
+    /// The jam mark: opens the Jam page.
     OpenJam,
-    /// Il pulsante del videoclip (il pannello laterale sul videoclip), solo con la feature `video`.
+    /// «Videoclip»: the clip in the media slot, `video` feature only.
     #[cfg(feature = "video")]
     ToggleVideo,
 }
@@ -95,15 +99,15 @@ pub fn jam_chip(view: &JamView) -> JamChip {
 impl EventEmitter<BarEvent> for PlayerBar {}
 
 impl PlayerBar {
-    /// «Videoclip», solo se il brano in corso ne ha uno.
+    /// «Videoclip», only when the playing track has one.
     #[cfg(feature = "video")]
     fn video_button(&self, cx: &mut Context<Self>) -> Option<IconButton> {
         self.now.as_ref().filter(|now| now.track.has_video)?;
         Some(
             IconButton::new("video-toggle", sprite::ICON_VIDEO)
-                .selected(self.panel == Some(SidePanel::Video))
+                .selected(self.video_shown)
                 .on_style(OnStyle::Active)
-                .tooltip("Videoclip", None)
+                .tooltip("Videoclip", Some("V"))
                 .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(BarEvent::ToggleVideo))),
         )
     }
@@ -144,8 +148,13 @@ pub struct PlayerBar {
     now: Option<Now>,
     /// Il pannello laterale aperto (il suo pulsante è acceso).
     panel: Option<SidePanel>,
-    /// La vista immersiva copre la barra: niente battito.
+    /// The stage covers the bar: no tick.
     hidden: bool,
+    /// The clip is on screen somewhere (the «Videoclip» button is lit).
+    #[cfg(feature = "video")]
+    video_shown: bool,
+    /// The cover of the track before a change and when the change began: the cross-fade.
+    swap: Option<(Option<SharedString>, Instant)>,
     /// Il timer da 250 ms: c'è solo mentre il brano suona.
     tick: Option<Task<()>>,
     /// Il testo del tempo trascorso, rifatto solo quando cambia il secondo.
@@ -167,13 +176,16 @@ impl PlayerBar {
             core,
             panel: None,
             hidden: false,
+            #[cfg(feature = "video")]
+            video_shown: false,
+            swap: None,
             tick: None,
             elapsed: (u64::MAX, SharedString::default()),
             jam: JamChip::None,
             _changes: changes,
         };
         bar.jam = jam_chip(&bar.core.read(cx).jam_view());
-        bar.rebuild_now();
+        bar.rebuild_now(false);
         bar.sync_tick(cx);
         bar
     }
@@ -182,6 +194,15 @@ impl PlayerBar {
     pub fn set_panel(&mut self, panel: Option<SidePanel>, cx: &mut Context<Self>) {
         if self.panel != panel {
             self.panel = panel;
+            cx.notify();
+        }
+    }
+
+    /// The clip is on screen (or not): lights «Videoclip».
+    #[cfg(feature = "video")]
+    pub fn set_video_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if self.video_shown != shown {
+            self.video_shown = shown;
             cx.notify();
         }
     }
@@ -202,7 +223,8 @@ impl PlayerBar {
             let same_queue = Arc::ptr_eq(&snapshot.playback.queue, &self.view.queue);
             self.view = Arc::clone(&snapshot.playback);
             if !same_queue {
-                self.rebuild_now();
+                let animate = !crate::motion::reduced(cx);
+                self.rebuild_now(animate);
             }
             self.sync_tick(cx);
             dirty = true;
@@ -223,8 +245,29 @@ impl PlayerBar {
         }
     }
 
-    fn rebuild_now(&mut self) {
-        self.now = self.view.queue.current().map(Now::of);
+    /// The playing track's texts; a different track starts the cross-fade from the old cover.
+    fn rebuild_now(&mut self, animate: bool) {
+        let next = self.view.queue.current().map(Now::of);
+        let old = self.now.as_ref().map(|now| (now.track.id, now.cover_url.clone()));
+        let changed = old.as_ref().map(|(id, _)| *id) != next.as_ref().map(|now| now.track.id);
+        if animate
+            && changed
+            && let Some((_, cover)) = old
+        {
+            self.swap = Some((cover, Instant::now()));
+        }
+        self.now = next;
+    }
+
+    /// Progress of the track-change move (0..=1), or `None` at rest.
+    fn swap_progress(&mut self, now: Instant) -> Option<f32> {
+        let (_, start) = self.swap.as_ref()?;
+        let t = now.saturating_duration_since(*start).as_secs_f32() * 1000.0 / MOTION_BASE.ms as f32;
+        if t >= 1.0 {
+            self.swap = None;
+            return None;
+        }
+        Some(ease_out(t.max(0.0)))
     }
 
     /// Accende il timer mentre suona (e la barra si vede) e lo spegne altrimenti.
@@ -256,7 +299,10 @@ impl PlayerBar {
 }
 
 impl Render for PlayerBar {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let swap = self.swap_progress(Instant::now());
+        keep_running(window, swap.is_some());
+        let ap = Ap::of(window);
         let view = Arc::clone(&self.view);
         let active = view.is_active();
         let position = if active { view.position(Instant::now()) } else { Duration::ZERO };
@@ -291,7 +337,8 @@ impl Render for PlayerBar {
             move |_: &ClickEvent, _: &mut Window, cx: &mut App| core.read(cx).playback(command.clone())
         };
 
-        // Sinistra: copertina, testi, «mi piace».
+        // Left: cover, texts, heart.
+        let open_now = cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(BarEvent::ToggleNow));
         let left = match &self.now {
             Some(now) => {
                 let liked = self.liked.contains(&now.track.id);
@@ -325,13 +372,43 @@ impl Render for PlayerBar {
                             .into_any_element()
                     }
                 };
+                // The new cover fades in over the old one; title and artist rise 2 AP.
+                let mut cover = div()
+                    .id("bar-cover")
+                    .relative()
+                    .flex_none()
+                    .size(dp(ART_SHORTCUT))
+                    .cursor_pointer()
+                    .on_click(open_now);
+                let fade = swap.unwrap_or(1.0);
+                if let (Some(t), Some((old, _))) = (swap, self.swap.as_ref()) {
+                    cover = cover.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .opacity(1.0 - t)
+                            .child(Cover::new(ART_SHORTCUT).url(old.clone())),
+                    );
+                }
+                cover = cover.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .opacity(fade)
+                        .child(Cover::new(ART_SHORTCUT).url(now.cover_url.clone())),
+                );
+                let rise = swap.map_or(0, |t| ap_round((1.0 - t) * 2.0));
                 div()
                     .flex()
                     .items_center()
                     .gap(dp(SPACE_4))
-                    .child(Cover::new(COVER_S).url(now.cover_url.clone()))
+                    .child(cover)
                     .child(
                         div()
+                            .relative()
+                            .top(ap.n(rise))
                             .flex_1()
                             .min_w_0()
                             .flex()
@@ -345,26 +422,16 @@ impl Render for PlayerBar {
                             )
                             .child(status),
                     )
-                    .child(
-                        IconButton::new("like", sprite::ICON_HEART)
-                            .icon_on(sprite::ICON_HEART_FILL)
-                            .on_style(OnStyle::Active)
-                            .selected(liked)
-                            .tooltip(
-                                if liked { "Rimuovi dai preferiti" } else { "Aggiungi ai preferiti" },
-                                None,
-                            )
-                            .on_click(move |_, _, cx| {
-                                core.read(cx).library(LibraryCmd::ToggleLike(track.clone()));
-                            }),
-                    )
+                    .child(LikeButton::new("like", liked).on_click(move |_, _, cx| {
+                        core.read(cx).library(LibraryCmd::ToggleLike(track.clone()));
+                    }))
                     .into_any_element()
             }
             None => div()
                 .flex()
                 .items_center()
                 .gap(dp(SPACE_4))
-                .child(Cover::new(COVER_S))
+                .child(Cover::new(ART_SHORTCUT))
                 .child(div().type_role(TYPE_ARTIST).text_color(col(TEXT_TERTIARY)).child("Nessun brano"))
                 .into_any_element(),
         };
@@ -489,7 +556,7 @@ impl Render for PlayerBar {
             .child(
                 IconButton::new("focus-toggle", sprite::ICON_FOCUS)
                     .disabled(self.now.is_none())
-                    .tooltip("Testo a tutto schermo", Some("F"))
+                    .tooltip("Palco", Some("F"))
                     .on_click(toggle_focus),
             );
 

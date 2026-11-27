@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, ContentMask, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, canvas, div, px,
+    App, Bounds, ContentMask, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, canvas, div,
 };
 use psytify_design::sprite;
 use psytify_design::tokens::Rgba;
@@ -29,6 +29,7 @@ use psytify_design::tokens::color::{STATE_ON, STONE};
 
 use super::indicators::PlayState;
 use crate::pixel::sprite::{nominal_size, paint_sprite};
+use crate::theme::dp;
 
 /// Dove dipingere l'equalizzatore e come.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -112,8 +113,8 @@ impl RenderOnce for Marker {
             |_, _, _| (),
             move |slot, (), window, _| spot.mark(Spot { slot, mask: window.content_mask(), state }),
         )
-        .w(px(w))
-        .h(px(h))
+        .w(dp(w))
+        .h(dp(h))
         .flex_none()
     }
 }
@@ -153,7 +154,7 @@ mod tests {
     fn a_view_keeps_a_few_spots_and_drops_the_rest() {
         let spot = PlayingSpot::new();
         let mark = |x: f32| Spot {
-            slot: Bounds { origin: gpui::point(px(x), px(0.0)), size: Default::default() },
+            slot: Bounds { origin: gpui::point(gpui::px(x), gpui::px(0.0)), size: Default::default() },
             mask: ContentMask { bounds: Bounds::default() },
             state: PlayState::Paused,
         };

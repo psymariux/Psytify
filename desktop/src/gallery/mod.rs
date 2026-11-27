@@ -2,6 +2,7 @@
 //! affiancati senza tenere premuto il mouse), la lista da 10 000 righe e tutti gli sprite alla scala
 //! corrente. Si apre con `psytify --gallery` (oggi anche senza argomenti).
 
+mod now_playing;
 mod sections;
 
 use std::time::Duration;
@@ -168,6 +169,7 @@ impl Render for Gallery {
                 account: crate::titlebar::AccountChip::SignedIn { avatar: None, name: "Psy".into() },
                 on_account: None,
                 on_close: std::rc::Rc::new(|_, cx| cx.quit()),
+                on_sidebar: None,
             },
             window,
             cx,

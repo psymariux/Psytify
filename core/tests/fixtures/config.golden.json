@@ -1,6 +1,7 @@
 {
   "server": "https://backend.example.test",
   "volume": 0.5,
+  "position_ms": 42000,
   "last_screen": {
     "kind": "album",
     "id": "00000000-0000-0000-0000-000000000007"

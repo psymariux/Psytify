@@ -123,10 +123,12 @@ pub fn body(g: &mut Gallery, window: &mut Window, cx: &mut Context<Gallery>) -> 
         section("TrackRow", track_rows()),
         section("Titolo di pagina, intestazione di sezione, riga di lista e nota", page_parts()),
         section("AlbumTile e ArtistTile", tiles()),
+        section("Sidebar v2 · library rows, rail covers and the Jam card", sidebar_parts(window, cx)),
         section("Shelf (frecce, rotella in orizzontale, «Mostra tutto») e Shortcut", shelves(g, cx)),
         section("Equalizer, LoadingIndicator, DownloadIndicator", indicators()),
         section("Toast e Dialog", overlays(cx)),
         section("EmptyState e Nastro", empty_states()),
+        section("Now playing v2 · side panel, stage, dissolve and like", super::now_playing::now_playing()),
     ];
     div().flex().flex_col().children(sections).into_any_element()
 }
@@ -759,7 +761,7 @@ fn page_parts() -> AnyElement {
                     .meta("300 brani · 17 h 2 min")
                     .into_any_element(),
                 ))
-                .child(framed(PageHeader::loading(false).into_any_element()))
+                .child(framed(PageHeader::loading(false, 24.0).into_any_element()))
                 .into_any_element(),
         ))
         .child(cell(
@@ -836,6 +838,56 @@ fn page_parts() -> AnyElement {
             framed(note(LoadingIndicator::new().caption("Controllo dei file…")).into_any_element()),
         ))
         .into_any_element()
+}
+
+/// The v2 sidebar parts in their states: library rows (rest, hover, selected), the rail, the Jam card.
+fn sidebar_parts(window: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    use crate::app::sidebar::{JamCard, LibraryItem, jam_card_element};
+    use psytify_design::tokens::color::SURFACE_CHROME;
+    use psytify_design::tokens::size::{SIDEBAR_DEFAULT_W, SIDEBAR_RAIL_W};
+    let item = |id: &'static str, art: RowArt, title: &'static str, meta: &'static str| {
+        LibraryItem::new(id, art, title.into(), meta.into())
+    };
+    let expanded = div()
+        .w(dp(SIDEBAR_DEFAULT_W))
+        .flex()
+        .flex_col()
+        .bg(col(SURFACE_CHROME))
+        .child(item(
+            "sb-liked",
+            RowArt::Sprite(sprite::ICON_HEART_FILL),
+            "Brani che ti piacciono",
+            "Playlist · 24 brani",
+        ))
+        .child(item("sb-hover", RowArt::Cover(None), "Notte", "Playlist · 12 brani").preview(Preview::Hover))
+        .child(item("sb-sel", RowArt::Cover(None), "Discovery", "Album · Daft Punk").selected(true))
+        .child(item("sb-artist", RowArt::Round(None), "Orbit Choir", "Artista"));
+    let rail = div()
+        .w(dp(SIDEBAR_RAIL_W))
+        .flex()
+        .flex_col()
+        .bg(col(SURFACE_CHROME))
+        .child(
+            item("sb-r0", RowArt::Sprite(sprite::ICON_HEART_FILL), "Brani che ti piacciono", "Playlist")
+                .rail(true),
+        )
+        .child(item("sb-r1", RowArt::Cover(None), "Notte", "Playlist").rail(true).selected(true))
+        .child(item("sb-r2", RowArt::Round(None), "Orbit Choir", "Artista").rail(true));
+    let card = JamCard {
+        members: vec!["ada".into(), "bruno".into(), "cleo".into(), "dario".into(), "eva".into()],
+        meta: "5 persone".into(),
+    };
+    let jam = div().w(dp(SIDEBAR_DEFAULT_W)).p(dp(SPACE_3)).bg(col(SURFACE_CHROME)).child(jam_card_element(
+        &card,
+        std::rc::Rc::new(|_, _, _| {}),
+        window,
+        cx,
+    ));
+    row(vec![
+        cell("expanded: rest, hover, selected, artist", expanded),
+        cell("rail (72 dp)", rail),
+        cell("Jam card (56 dp, LIVE)", jam),
+    ])
 }
 
 fn tiles() -> AnyElement {

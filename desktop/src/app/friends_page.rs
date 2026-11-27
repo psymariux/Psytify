@@ -1,17 +1,16 @@
-//! La pagina «Amici» (`Page::Friends`), come da `PSYTIFY_ART_DIRECTION.md` («Friends») e dal client Iced
-//! (`client/src/ui/pages/friends.rs`): il titolo con il proprio nome utente, la ricerca per nome utente
-//! (Invio cerca, un campo vuoto azzera i risultati), poi in una lista sola da 48 dp le persone trovate, le
-//! richieste arrivate (Accetta secondario, Rifiuta ghost), quelle in attesa (Ritira) e gli amici con il
-//! brano che ascoltano («Sta ascoltando …» con il punto dal vivo). Un clic su una persona apre il suo
-//! profilo. Mentre una richiesta per una persona è in volo (`SocialView::pending`) i suoi pulsanti sono
-//! spenti.
+//! «Amici» (`Page::Friends`, `PSYTIFY_ART_DIRECTION.md` «Friends», the Iced client's
+//! `client/src/ui/pages/friends.rs`): the title with your username, the search by username (Enter searches,
+//! an empty field clears the results), then one list of 48 dp rows at the frame margins: the people found,
+//! the requests received (Accetta secondary, Rifiuta ghost), those pending (Ritira) and the friends with what
+//! they listen to («Sta ascoltando …» with the live dot). A click on a person opens their profile. While a
+//! request for a person is in flight (`SocialView::pending`) their buttons are off.
 //!
-//! Senza accesso: Nastro e «Accedi»; senza nome utente: l'invito a sceglierlo nelle Impostazioni; senza
-//! nessuno (né amici né richieste): la cassa vuota. Al più un Nastro per schermata. All'apertura la pagina
-//! chiede `RefreshFriends`.
+//! Signed out: Nastro and «Accedi»; without a username: the invitation to choose one in Settings; nobody yet:
+//! the empty crate. At most one Nastro per screen. On opening the page asks for `RefreshFriends`. The page
+//! enters with the page-enter move.
 //!
-//! Le righe e i loro testi sono una funzione pura della vista sociale (`model`), rifatta quando il core
-//! pubblica; la pagina si ridisegna solo se il risultato cambia. `render` non legge l'istantanea.
+//! The rows and their texts are a pure function of the social view (`model`), rebuilt when the core
+//! publishes; the page redraws only if the result changes. `render` does not read the snapshot.
 
 use std::sync::Arc;
 
@@ -25,16 +24,19 @@ use psytify_core::command::SocialCmd;
 use psytify_core::snapshot::{Account, SocialView};
 use psytify_design::sprite;
 use psytify_design::tokens::color::{SURFACE_CANVAS, TEXT_ERROR, TEXT_SECONDARY};
-use psytify_design::tokens::space::{SPACE_3, SPACE_5, SPACE_6, SPACE_9};
+use psytify_design::tokens::size::TRACK_ROW_H;
+use psytify_design::tokens::space::{SPACE_3, SPACE_5, SPACE_9};
 use psytify_design::tokens::type_::TYPE_BODY;
 
+use super::page_frame::PageFrame;
 use super::people::{at, status};
 use super::{Page, PageEvent};
 use crate::components::button::Button;
+use crate::components::frame::Frame;
 use crate::components::overlay::EmptyState;
 use crate::components::person_row::{PersonRow, Status};
 use crate::components::search_field::SearchField;
-use crate::components::section::{PageTitle, note, section_heading};
+use crate::components::section::{PageTitle, note_at, section_heading_at};
 use crate::core_model::{Changed, CoreModel};
 use crate::theme::{TypeStyle, col, dp};
 
@@ -240,6 +242,7 @@ pub struct FriendsPage {
     model: Model,
     search: Entity<SearchField>,
     scroll: UniformListScrollHandle,
+    frame: PageFrame,
     _changes: Subscription,
 }
 
@@ -279,10 +282,30 @@ impl FriendsPage {
                 })
         });
         let model = model(&core.read(cx).social_view());
-        Self { core, model, search, scroll: UniformListScrollHandle::new(), _changes: changes }
+        Self {
+            core,
+            model,
+            search,
+            scroll: UniformListScrollHandle::new(),
+            frame: PageFrame::default(),
+            _changes: changes,
+        }
     }
 
-    /// La pagina si apre: rilegge amici e richieste.
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame != self.frame.frame {
+            self.frame.frame = frame;
+            cx.notify();
+        }
+    }
+
+    /// The page opens: friends and requests are read again.
     pub fn show(&mut self, cx: &mut Context<Self>) {
         if self.model.gate == Gate::Ready {
             self.core.read(cx).social(SocialCmd::RefreshFriends);
@@ -322,21 +345,31 @@ impl FriendsPage {
                 .action(action("friends-reject", "Rifiuta", false, cx).ghost()),
             Actions::Withdraw => row.action(action("friends-withdraw", "Ritira", false, cx).ghost()),
         };
-        Some(row.into_any_element())
+        Some(self.frame.row(row))
+    }
+
+    /// List row `ix`, in its enter move (one step per section).
+    fn line(&self, ix: usize, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let element = self.row(ix, cx)?;
+        let section =
+            2 + self.model.rows.iter().take(ix + 1).filter(|row| matches!(row, Row::Heading(..))).count();
+        let element = div().h(dp(TRACK_ROW_H)).w_full().child(element).into_any_element();
+        Some(self.frame.wrap(element, section, window))
     }
 
     fn row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let margin = self.frame.margin();
         Some(match *self.model.rows.get(ix)? {
             Row::Heading(section, count) => {
                 let meta = if count > 0 { count.to_string() } else { String::new() };
-                section_heading(section.title().into(), meta.into()).into_any_element()
+                section_heading_at(section.title().into(), meta.into(), margin).into_any_element()
             }
             Row::Person(person) => return self.person(person, cx),
             Row::Note(line) => {
-                note(div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(line.text()))
+                note_at(div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(line.text()), margin)
                     .into_any_element()
             }
-            Row::Retry => note(
+            Row::Retry => note_at(
                 div()
                     .flex()
                     .items_center()
@@ -350,23 +383,32 @@ impl FriendsPage {
                     .child(Button::new("friends-retry", "Riprova").secondary().on_click(cx.listener(
                         |this, _: &ClickEvent, _, cx| this.core.read(cx).social(SocialCmd::RefreshFriends),
                     ))),
+                margin,
             )
             .into_any_element(),
         })
     }
 }
 
-/// Uno stato vuoto al centro, a un terzo dall'alto.
+/// An empty state in the middle, a third from the top.
 fn centered(content: impl IntoElement) -> gpui::Div {
     div().flex_1().flex().justify_center().pt(dp(SPACE_9)).child(content)
 }
 
 impl Render for FriendsPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let page = div().size_full().flex().flex_col().bg(col(SURFACE_CANVAS));
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.frame.begin(window, None);
+        let margin = self.frame.margin();
+        let page = div()
+            .relative()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(col(SURFACE_CANVAS))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame));
         match self.model.gate {
             Gate::SignedOut => {
-                return page.child(PageTitle::screen("Amici")).child(centered(
+                return page.child(PageTitle::screen("Amici").margin(margin)).child(centered(
                     EmptyState::new(
                         sprite::NASTRO_IDLE,
                         "Accedi per trovare i tuoi amici",
@@ -378,7 +420,7 @@ impl Render for FriendsPage {
                 ));
             }
             Gate::NoProfile => {
-                return page.child(PageTitle::screen("Amici")).child(centered(
+                return page.child(PageTitle::screen("Amici").margin(margin)).child(centered(
                     EmptyState::crate_(
                         "Scegli un nome utente",
                         "Gli amici ti trovano così: sceglilo nelle impostazioni, in Account.",
@@ -392,9 +434,9 @@ impl Render for FriendsPage {
             }
             Gate::Ready => {}
         }
-        let title = PageTitle::screen("Amici").meta(self.model.me.clone());
+        let title = PageTitle::screen("Amici").margin(margin).meta(self.model.me.clone());
         let search =
-            div().flex().items_center().gap(dp(SPACE_3)).px(dp(SPACE_6)).child(self.search.clone()).child(
+            div().flex().items_center().gap(dp(SPACE_3)).px(dp(margin)).child(self.search.clone()).child(
                 Button::new("friends-search-go", "Cerca").secondary().on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
                         let query = this.search.read(cx).text().trim().trim_start_matches('@').to_owned();
@@ -402,7 +444,11 @@ impl Render for FriendsPage {
                     },
                 )),
             );
-        let page = page.child(title).child(search);
+        let page = page.child(self.frame.wrap(title.into_any_element(), 0, window)).child(self.frame.wrap(
+            search.into_any_element(),
+            1,
+            window,
+        ));
         if self.model.rows.is_empty() {
             return page.child(centered(EmptyState::crate_(
                 "Ancora nessun amico",
@@ -412,8 +458,8 @@ impl Render for FriendsPage {
         let list = uniform_list(
             "friends-list",
             self.model.rows.len(),
-            cx.processor(|this: &mut Self, range: std::ops::Range<usize>, _window, cx| {
-                range.filter_map(|ix| this.row(ix, cx)).collect::<Vec<_>>()
+            cx.processor(|this: &mut Self, range: std::ops::Range<usize>, window, cx| {
+                range.filter_map(|ix| this.line(ix, window, cx)).collect::<Vec<_>>()
             }),
         )
         .track_scroll(&self.scroll)

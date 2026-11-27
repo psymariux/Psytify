@@ -1,5 +1,5 @@
-//! ProgressBar (seek) e Slider (volume): stessa anatomia, area sensibile di 24 dp attorno a un
-//! binario di 2 AP. Segmenti da sinistra: trascorso `WARM_WHITE`, bufferizzato `IRON`, resto a
+//! ProgressBar (seek) and Slider (volume): the same anatomy, a 24 dp hit area around a track that grows
+//! from 1 to 2 AP on hover and shows a 2 x 4 AP thumb. Segmenti da sinistra: trascorso `WARM_WHITE`, bufferizzato `IRON`, resto a
 //! dither 50 % `CHARCOAL`/`GRAPHITE`. Trascinabile con il mouse (anche fuori dal binario), ←/→ e
 //! rotella per i passi.
 //!
@@ -17,12 +17,14 @@ use gpui::{
 use psytify_design::tokens::color::{
     CHARCOAL, GRAPHITE, IRON, PURE_WHITE, STONE, SURFACE_RAISED, WARM_WHITE,
 };
+use psytify_design::tokens::motion::MOTION_HOVER;
 use psytify_design::tokens::size::{SEEK_HIT_H, VOLUME_W};
 
 use super::control::Preview;
 use super::tooltip::TooltipBox;
+use crate::motion::{ap_round, follow};
 use crate::pixel::shape::{focus_ring, static_ring};
-use crate::theme::{Ap, col, dp};
+use crate::theme::{Ap, col, dp, to_dp};
 
 /// Callback con il nuovo valore (0..=1).
 pub type OnValue = Rc<dyn Fn(f32, &mut Window, &mut App)>;
@@ -130,12 +132,13 @@ fn paint_track(
     value: f32,
     buffered: Option<f32>,
     head: psytify_design::tokens::color::Rgba,
+    track_ap: u32,
     show_thumb: bool,
     disabled: bool,
 ) {
     let scale = ap.scale;
     let d = ap.device as f32;
-    let track_h = 2.0 * d;
+    let track_h = track_ap as f32 * d;
     let x0 = (f32::from(bounds.origin.x) * scale).round();
     let w = (f32::from(bounds.size.width) * scale).round();
     let y0 =
@@ -155,7 +158,7 @@ fn paint_track(
     // Il resto è un dither a scacchiera di quadrati di 1 AP: CHARCOAL e GRAPHITE.
     let cols = ((w - buffer) / d).ceil() as u32;
     for c in 0..cols {
-        for r in 0..2u32 {
+        for r in 0..track_ap {
             let color = if (c + r) % 2 == 0 { CHARCOAL } else { GRAPHITE };
             let cx = x0 + buffer + c as f32 * d;
             let cw = d.min(x0 + w - cx);
@@ -163,9 +166,9 @@ fn paint_track(
         }
     }
     if show_thumb && !disabled {
-        // Pomello 2 x 6 AP sulla testa.
+        // A 2 x 4 AP thumb on the head, centred on the track.
         let tx = (x0 + elapsed - d).clamp(x0, (x0 + w - 2.0 * d).max(x0));
-        rect(window, tx, y0 - 2.0 * d, 2.0 * d, 6.0 * d, PURE_WHITE);
+        rect(window, tx, y0 + track_h / 2.0 - 2.0 * d, 2.0 * d, 4.0 * d, PURE_WHITE);
     }
 }
 
@@ -190,6 +193,10 @@ impl RenderOnce for ProgressBar {
             Preview::Pressed => (true, true),
         };
         let shown = drag.unwrap_or(self.value);
+        // The track grows from 1 to 2 AP on hover (and while dragging), with the thumb once it is 2 AP.
+        let grow_id = ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "grow".into());
+        let grow = follow(grow_id, if hovered || dragging { 1.0 } else { 0.0 }, MOTION_HOVER, window, cx);
+        let track_ap = 1 + ap_round(grow);
         let head = if hovered || dragging { PURE_WHITE } else { WARM_WHITE };
         let disabled = self.disabled;
         let buffered = self.buffered;
@@ -199,7 +206,7 @@ impl RenderOnce for ProgressBar {
             move |bounds, (), window, cx| {
                 paint_state.update(cx, |s, _| s.bounds = bounds);
                 let ap = Ap::of(window);
-                paint_track(window, bounds, ap, shown, buffered, head, hovered || dragging, disabled);
+                paint_track(window, bounds, ap, shown, buffered, head, track_ap, track_ap > 1, disabled);
             },
         )
         .absolute()
@@ -334,12 +341,12 @@ impl RenderOnce for ProgressBar {
         // Anteprima (tempo o percentuale) sopra il puntatore, mentre si sta sopra o si trascina.
         if let (Some(label), true) = (&self.label, hovered || dragging) {
             let frac = drag.or(hover).unwrap_or(self.value);
-            let width = f32::from(state.read(cx).bounds.size.width);
+            let width = to_dp(state.read(cx).bounds.size.width);
             root = root.child(
                 div()
                     .absolute()
                     .bottom(dp(SEEK_HIT_H))
-                    .left(px((width * frac - 24.0).max(0.0)))
+                    .left(dp((width * frac - 24.0).max(0.0)))
                     .child(TooltipBox::new(label(frac))),
             );
         }

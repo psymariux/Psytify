@@ -1,23 +1,23 @@
-//! Le pagine «Brani che ti piacciono» e di una playlist locale: una vista sola, che cambia raccolta quando
-//! `Shell` apre l'altra (`CollectionPage::show`). Come nel client Iced (`client/src/ui/pages/liked.rs` e
-//! `playlist.rs`): il titolo con il conteggio e la durata, Riproduci, Casuale e «Scarica tutto» (per la
-//! playlist anche Rinomina ed Elimina, con il dialogo di `Shell`); poi i brani, `TrackRow` da 48 dp. La
-//! testa è il `PageHeader` delle pagine d'oggetto (il cuore su campo `GRAPHITE` per i piaciuti, il mosaico
-//! delle prime copertine per una playlist) e scorre con i brani (`page_list`).
+//! The liked songs and a local playlist: one view that switches collection when `Shell` opens the other
+//! (`CollectionPage::show`). As in the Iced client (`client/src/ui/pages/liked.rs`, `playlist.rs`): the head
+//! with the count and duration, the 56 dp play button, shuffle and «Scarica tutto» (a playlist also has
+//! rename and delete, through `Shell`'s dialog); then the tracks, 48 dp `TrackRow`s in one column (title :
+//! album 3 : 2). The head is the object pages' `PageHeader` (the heart on `GRAPHITE` for the liked songs, the
+//! mosaic of the first covers for a playlist) and scrolls with the tracks (`page_list`). The page fills the
+//! frame (desktop v2 §2) and enters with the page-enter move.
 //!
-//! Doppio clic o Invio su un brano: la coda diventa la raccolta e parte da lì (`PlaybackCmd::Play`), o
-//! pausa se è il brano in corso. Il cuore (bianco, mai lime) manda `LibraryCmd::ToggleLike`: nei brani
-//! piaciuti toglierlo fa sparire la riga. Il download manda `DownloadsCmd::Download`, «Scarica tutto»
-//! `DownloadAll` (mentre il lotto scarica, al suo posto c'è il conteggio). Al passaggio
-//! del mouse «Altro» apre il menu del brano (di `Shell`: coda, playlist e, in una playlist, «Togli da
-//! questa playlist»). Niente qui ricalcola la logica del core.
+//! Double click or Enter on a track: the queue becomes the collection from there (`PlaybackCmd::Play`), or
+//! pauses on the playing track. The heart (white, never lime) sends `LibraryCmd::ToggleLike`: in the liked
+//! songs, removing it removes the row. The download sends `DownloadsCmd::Download`, «Scarica tutto»
+//! `DownloadAll` (while the batch downloads its count takes the place). On hover «Altro» opens `Shell`'s
+//! track menu. Nothing here recomputes the core's logic.
 //!
-//! La stessa vista mostra la playlist pubblica di un amico (`Collection::Public`, dalla pagina del suo profilo):
-//! «Playlist pubblica» con il nome del proprietario che apre il suo profilo, Riproduci, Casuale e «Scarica
-//! tutto», senza Rinomina ed Elimina; i brani vengono da `SocialView::playlist`.
+//! The same view shows a friend's public playlist (`Collection::Public`, from their profile): «Playlist
+//! pubblica» with the owner's name linking to the profile, without rename and delete; the tracks come from
+//! `SocialView::playlist`.
 //!
-//! I testi delle righe si rifanno solo quando la raccolta cambia (la sua lista in `LibraryView`, che il
-//! core cambia solo se la tocca); un ascolto o un cuore altrove notificano la pagina senza rifarli.
+//! Row texts are rebuilt only when the collection changes (its list in `LibraryView`, which the core only
+//! replaces when it touches it).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -33,11 +33,11 @@ use psytify_core::command::{DownloadsCmd, LibraryCmd, PlaybackCmd};
 use psytify_core::snapshot::{DownloadsView, LibraryView, SocialView};
 use psytify_design::sprite;
 use psytify_design::tokens::color::{SURFACE_CANVAS, TEXT_PRIMARY, TEXT_SECONDARY};
-use psytify_design::tokens::size::BP_RAIL;
 use psytify_design::tokens::space::SPACE_5;
 use psytify_design::tokens::type_::{TYPE_BODY, TYPE_NUMERIC};
 use uuid::Uuid;
 
+use super::page_frame::PageFrame;
 use super::page_list::{new_list, remeasure_header, set_rows, to_top};
 use super::playlist_dialog::DialogRequest;
 use super::track_list::{
@@ -47,34 +47,38 @@ use super::track_list::{
 use super::track_menu::TrackMenu;
 use super::{Page, PageEvent};
 use crate::components::button::Button;
+use crate::components::frame::Frame;
 use crate::components::icon_button::IconButton;
 use crate::components::indicators::{DownloadState, PlayState};
 use crate::components::overlay::EmptyState;
 use crate::components::page_header::{HeaderArt, PageHeader, mosaic_urls};
 use crate::components::playing_spot::PlayingSpot;
-use crate::components::section::note;
+use crate::components::section::note_at;
 use crate::components::track_row::{TrackData, TrackRow};
 use crate::core_model::{Changed, CoreModel};
 use crate::format;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Quale raccolta mostra la pagina.
+/// The album column shows from this inner width (dp) up.
+const ALBUM_COLUMN_MIN: f32 = 640.0;
+
+/// Which collection the page shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Collection {
     Liked,
     Playlist(Uuid),
-    /// La playlist pubblica di un amico.
+    /// A friend's public playlist.
     Public(Uuid),
 }
 
-/// La raccolta letta dalla libreria: i brani e ciò che il titolo dice. `None` se la playlist non c'è più.
+/// The collection read from the library: the tracks and what the head says. `None` if the playlist is gone.
 #[derive(Clone, Debug)]
 struct Found {
     name: String,
     tracks: Arc<[Track]>,
-    /// Brani di una playlist esterna ancora da importare, e da dove arrivano.
+    /// Tracks of an external playlist still to import, and where they come from.
     pending: Option<(usize, &'static str)>,
-    /// Di chi è una playlist pubblica: nome utente e nome.
+    /// Whose public playlist it is: handle and name.
     owner: Option<(String, SharedString)>,
 }
 
@@ -104,7 +108,7 @@ fn find(view: &LibraryView, social: &SocialView, collection: Collection) -> Opti
     }
 }
 
-/// La playlist pubblica pubblicata, per sapere se è cambiata (la stessa `Arc` o lo stesso stato).
+/// The published public playlist, to tell whether it changed (the same `Arc` or the same state).
 fn public_key(social: &SocialView) -> (u8, usize) {
     match &social.playlist {
         None => (0, 0),
@@ -115,7 +119,7 @@ fn public_key(social: &SocialView) -> (u8, usize) {
     }
 }
 
-/// La raccolta è cambiata fra due viste della libreria: la sua lista non è più la stessa `Arc`.
+/// The collection changed between two library views: its list is no longer the same `Arc`.
 fn moved(old: &LibraryView, new: &LibraryView, collection: Collection) -> bool {
     match collection {
         Collection::Liked => !new.liked.same(&old.liked),
@@ -128,7 +132,7 @@ pub struct CollectionPage {
     core: Entity<CoreModel>,
     collection: Collection,
     library: Arc<LibraryView>,
-    /// La vista sociale (la playlist pubblica aperta) e il nome utente del suo proprietario.
+    /// The social view (the open public playlist) and its owner's handle.
     social: Arc<SocialView>,
     public_handle: String,
     downloads: Arc<DownloadsView>,
@@ -138,14 +142,15 @@ pub struct CollectionPage {
     meta: SharedString,
     pending_note: Option<SharedString>,
     download_label: Option<&'static str>,
-    /// Le copertine del mosaico di una playlist.
+    /// The covers of a playlist's mosaic.
     mosaic: Vec<SharedString>,
-    /// Il conteggio di «Scarica tutto» mentre il lotto scarica («3/10»).
+    /// The «Scarica tutto» count while the batch downloads («3/10»).
     batch: Option<SharedString>,
     now: Option<(Uuid, PlayState)>,
-    /// La testa (voce 0) e le righe.
+    /// The head (item 0) and the rows.
     list: ListState,
-    /// Il posto dell'equalizzatore del brano in corso: lo dipinge `Shell` (BACKLOG 23).
+    frame: PageFrame,
+    /// Where the playing track's equalizer goes: `Shell` paints it (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
@@ -153,7 +158,7 @@ pub struct CollectionPage {
 impl EventEmitter<PageEvent> for CollectionPage {}
 
 impl CollectionPage {
-    /// Il posto dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// This view's equalizer spot, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -178,6 +183,7 @@ impl CollectionPage {
             batch: batch_label(&snapshot.downloads),
             now: now_playing(&snapshot.playback),
             list: new_list(0),
+            frame: PageFrame::default(),
             core,
             spot: PlayingSpot::new(),
             _changes: changes,
@@ -186,7 +192,21 @@ impl CollectionPage {
         page
     }
 
-    /// Mostra la playlist pubblica `id` di `handle` e la chiede al core.
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    /// A new width: the margins and the album column may change.
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame != self.frame.frame {
+            self.frame.frame = frame;
+            cx.notify();
+        }
+    }
+
+    /// Shows `handle`'s public playlist `id` and asks the core for it.
     pub fn show_public(&mut self, handle: &str, id: Uuid, cx: &mut Context<Self>) {
         self.core.read(cx).social(SocialCmd::OpenFriendPlaylist { handle: handle.to_owned(), id });
         self.public_handle = handle.to_owned();
@@ -198,7 +218,7 @@ impl CollectionPage {
         self.show(Collection::Public(id), cx);
     }
 
-    /// Mostra un'altra raccolta (la lista torna in cima). Niente se è già quella.
+    /// Shows another collection (the list goes back to the top). Nothing if it is the same.
     pub fn show(&mut self, collection: Collection, cx: &mut Context<Self>) {
         if collection == self.collection {
             return;
@@ -215,7 +235,7 @@ impl CollectionPage {
         if changed.library && !Arc::ptr_eq(&snapshot.library, &self.library) {
             let rebuild = moved(&self.library, &snapshot.library, self.collection);
             let liked = core.read(cx).liked();
-            // I cuori cambiano solo se cambia l'insieme dei piaciuti.
+            // The hearts change only when the liked set does.
             dirty |= !Arc::ptr_eq(&liked, &self.liked);
             self.liked = liked;
             self.library = Arc::clone(&snapshot.library);
@@ -288,7 +308,8 @@ impl CollectionPage {
         self.found.as_ref().map(|found| &found.tracks)
     }
 
-    /// Doppio clic o Invio: la coda diventa la raccolta, da `start`; sul brano in corso, play o pausa.
+    /// Double click or Enter: the queue becomes the collection from `start`; on the playing track, play or
+    /// pause.
     fn play(&self, start: usize, cx: &gpui::App) {
         let Some(tracks) = self.tracks() else { return };
         let core = self.core.read(cx);
@@ -302,29 +323,29 @@ impl CollectionPage {
         download_state(&self.downloads, track)
     }
 
-    /// Le righe della lista: la nota delle importazioni in arrivo (se c'è), poi i brani.
+    /// The list rows: the note on imports on their way (if any), then the tracks.
     fn offset(&self) -> usize {
         usize::from(self.pending_note.is_some())
     }
 
-    /// La voce `ix` della lista: la testa, poi le righe.
+    /// List item `ix`: the head, then the rows; the head and the rows enter one step apart.
     fn item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let element = match ix.checked_sub(1) {
             None => self.found.clone().map(|found| self.header(&found, cx).into_any_element()),
-            Some(row) => {
-                // La colonna dell'album c'è solo con la barra laterale intera (linee guida: da 1100 dp).
-                let wide = f32::from(window.viewport_size().width) >= BP_RAIL;
-                self.row(row, wide, cx)
-            }
+            Some(row) => self.row(row, self.frame.frame.inner >= ALBUM_COLUMN_MIN, cx),
         };
-        element.unwrap_or_else(|| div().into_any_element())
+        let element = element.unwrap_or_else(|| div().into_any_element());
+        self.frame.wrap(element, usize::from(ix > 0), window)
     }
 
     fn row(&self, ix: usize, wide: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         if let Some(text) = self.pending_note.as_ref().filter(|_| ix == 0) {
             return Some(
-                note(div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(text.clone()))
-                    .into_any_element(),
+                note_at(
+                    div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(text.clone()),
+                    self.frame.margin(),
+                )
+                .into_any_element(),
             );
         }
         let position = ix - self.offset();
@@ -346,7 +367,7 @@ impl CollectionPage {
         let mut row = TrackRow::new(("collection-row", position), data)
             .show_album(wide)
             .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                // Un clic non fa niente; doppio clic o Invio suonano.
+                // A click selects nothing; double click or Enter plays.
                 if plays(event) {
                     this.play(position, cx);
                 }
@@ -375,7 +396,7 @@ impl CollectionPage {
         {
             row = row.playing_at(state, &self.spot);
         }
-        Some(row.into_any_element())
+        Some(self.frame.row(row))
     }
 
     fn header(&self, found: &Found, cx: &mut Context<Self>) -> PageHeader {
@@ -384,7 +405,9 @@ impl CollectionPage {
             Collection::Playlist(_) | Collection::Public(_) => HeaderArt::Mosaic(self.mosaic.clone()),
         };
         let kicker = if found.owner.is_some() { "Playlist pubblica" } else { "Playlist" };
-        let mut title = PageHeader::new(art, kicker, found.name.clone()).meta(self.meta.clone());
+        let mut title = PageHeader::new(art, kicker, found.name.clone())
+            .margin(self.frame.margin())
+            .meta(self.meta.clone());
         if let Some((handle, name)) = found.owner.clone() {
             title = title.link(
                 "col-owner",
@@ -394,7 +417,8 @@ impl CollectionPage {
         }
         if !found.tracks.is_empty() {
             title = title
-                .action(Button::new("col-play", "Riproduci").primary().icon(sprite::ICON_PLAY).on_click(
+                .play(
+                    "col-play",
                     cx.listener(|this, _: &ClickEvent, _, cx| {
                         if let Some(tracks) = this.tracks() {
                             this.core
@@ -402,7 +426,7 @@ impl CollectionPage {
                                 .playback(PlaybackCmd::Play { tracks: Arc::clone(tracks), start: 0 });
                         }
                     }),
-                ))
+                )
                 .action(
                     IconButton::new("col-shuffle", sprite::ICON_SHUFFLE)
                         .tooltip("Riproduci in ordine casuale", None)
@@ -413,7 +437,7 @@ impl CollectionPage {
                         })),
                 );
             match (&self.batch, self.download_label) {
-                // Mentre il lotto scarica, al posto dell'icona c'è il conteggio.
+                // While the batch downloads, the count replaces the icon.
                 (Some(count), _) => {
                     title = title.action(
                         div().type_role(TYPE_NUMERIC).text_color(col(TEXT_PRIMARY)).child(count.clone()),
@@ -457,13 +481,20 @@ impl CollectionPage {
 }
 
 impl Render for CollectionPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Il posto si segna di nuovo nel paint di questo fotogramma, se la riga in corso è visibile.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The spot is marked again in this frame's paint, if the playing row is visible.
         self.spot.clear();
-        let page = div().size_full().flex().flex_col().bg(col(SURFACE_CANVAS));
+        self.frame.begin(window, Some(&self.list));
+        let page = div()
+            .relative()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(col(SURFACE_CANVAS))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame));
         let Some(found) = self.found.as_ref() else {
             if let Collection::Public(id) = self.collection {
-                // La playlist di un amico arriva dalla rete: lo scheletro, o l'errore con «Riprova».
+                // A friend's playlist comes from the network: the skeleton, or the error with «Riprova».
                 return match &self.social.playlist {
                     Some(Load::Failed(error)) => page.child(super::album_page::failure(
                         "col-public-retry",
@@ -473,7 +504,7 @@ impl Render for CollectionPage {
                             this.core.read(cx).social(SocialCmd::OpenFriendPlaylist { handle, id });
                         }),
                     )),
-                    _ => page.child(PageHeader::loading(false)),
+                    _ => page.child(PageHeader::loading(false, self.frame.margin())),
                 };
             }
             return page.child(centered(
@@ -515,7 +546,7 @@ impl Render for CollectionPage {
     }
 }
 
-/// Un contenuto al centro, a un terzo dall'alto, come gli stati vuoti delle linee guida.
+/// Content in the middle, a third from the top, like the guidelines' empty states.
 fn centered(content: impl IntoElement) -> gpui::Div {
     div().flex_1().flex().justify_center().pt(dp(64.0 + SPACE_5)).child(content)
 }

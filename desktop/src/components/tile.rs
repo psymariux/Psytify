@@ -1,7 +1,8 @@
-//! Cover (segnaposto o copertina) e AlbumTile/ArtistTile. La copertina vera arriva dal deposito
-//! (`crate::covers`, che la chiede al core) e si disegna sulla griglia dei pixel fisici; finché non c'è,
-//! o se non esiste, resta il segnaposto: campo `GRAPHITE` con `icon_library` (lato < 64 dp) o
-//! `album_placeholder` (oltre), come da token. La galleria non ha il deposito e mostra il segnaposto.
+//! Cover (placeholder or artwork) and AlbumTile/ArtistTile. The artwork comes from the deposit
+//! (`crate::covers`, which asks the core) in the version or tier that covers the drawn device pixels, and
+//! is painted on the device pixel grid; until it is there, or if it does not exist, the placeholder stays:
+//! a `GRAPHITE` field with `icon_library` (side < 64 dp) or `album_placeholder` (larger), as the tokens say.
+//! The gallery has no deposit and shows the placeholder.
 
 use std::sync::Arc;
 
@@ -11,9 +12,10 @@ use gpui::{
 };
 use psytify_design::sprite;
 use psytify_design::tokens::color::{
-    CONTROL_BORDER_HOVER, GRAPHITE, PURE_WHITE, STONE, SURFACE_CANVAS, TEXT_DISABLED, TEXT_PRIMARY,
+    GRAPHITE, PURE_WHITE, SHADOW_HARD, STONE, SURFACE_CANVAS, TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY,
     TEXT_TERTIARY, WARM_WHITE,
 };
+use psytify_design::tokens::motion::STEP_FRAMES;
 use psytify_design::tokens::size::cover::PLACEHOLDER_ART_MIN;
 use psytify_design::tokens::space::SPACE_3;
 use psytify_design::tokens::type_::{TYPE_ARTIST, TYPE_TRACK_TITLE};
@@ -24,9 +26,14 @@ use super::icon_button::IconButton;
 use super::indicators::{Equalizer, PlayState};
 use super::playing_spot::PlayingSpot;
 use crate::covers::{CoverArt, Covers};
+use crate::motion::{ap_round, steps};
 use crate::pixel::PixelSprite;
+use crate::pixel::shape::hard_shadow;
 use crate::pixel::shape::{circle_masks, circle_outline, dither, paint_circle_fill, static_ring};
-use crate::theme::{Ap, TypeStyle, col, dp};
+use crate::theme::{Ap, TypeStyle, col, dp, mix};
+
+/// The tile's play button.
+const PLAY_SIDE: f32 = 40.0;
 
 /// Copertina quadrata di `side` dp. `unavailable` la copre con un dither al 50 % di `DEEP_BLACK`.
 #[derive(IntoElement)]
@@ -34,19 +41,16 @@ pub struct Cover {
     side: f32,
     unavailable: bool,
     round: bool,
-    large: bool,
     url: Option<SharedString>,
 }
 
 impl Cover {
     pub fn new(side: f32) -> Self {
-        Self { side, unavailable: false, round: false, large: false, url: None }
+        Self { side, unavailable: false, round: false, url: None }
     }
 
-    /// La copertina intera (256 px) invece delle versioni ridotte: solo per la vista immersiva, dove la
-    /// copertina arriva a 640 dp (vedi `covers::MAX_LARGE`). Finché non c'è si disegna la versione media.
-    pub fn large(mut self) -> Self {
-        self.large = true;
+    /// Kept for its callers: every cover now picks its tier (up to 512 px) from its drawn size.
+    pub fn large(self) -> Self {
         self
     }
 
@@ -71,7 +75,7 @@ impl Cover {
     }
 }
 
-/// L'immagine da disegnare: una copertina in due versioni ridotte, o quella intera.
+/// The image to draw: a cover in its two small versions, or a tier.
 enum Art {
     Sized(CoverArt),
     Whole(Arc<RenderImage>),
@@ -107,12 +111,14 @@ fn paint_round(window: &mut Window, cx: &mut App, art: Option<&Art>, slot: Bound
 }
 
 impl RenderOnce for Cover {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let device_px = f32::from(dp(self.side)) * window.scale_factor();
         let art = self.url.as_deref().and_then(|url| {
-            let whole = if self.large { Covers::large(url, cx) } else { None };
-            match whole {
+            // The small versions first: the 256 tier may ride on their answer.
+            let sized = Covers::art(url, cx);
+            match Covers::tier(url, device_px, cx) {
                 Some(image) => Some(Art::Whole(image)),
-                None => Covers::art(url, cx).map(Art::Sized),
+                None => sized.map(Art::Sized),
             }
         });
         if self.round {
@@ -193,8 +199,9 @@ fn mosaic(side: f32, urls: &[SharedString], disabled: bool) -> AnyElement {
         .into_any_element()
 }
 
-/// Tile di album o artista: copertina, titolo, sottotitolo. Hover: cornice di 1 AP e Play primario
-/// in basso a destra (solo se c'è chi suona: [`AlbumTile::on_play`]); selezionato: cornice `WARM_WHITE`;
+/// Album or artist tile: cover, title, subtitle. Hover: the cover rises 1 AP over a 2 AP hard ledge, the
+/// 40 dp play button steps in at the bottom right (only with [`AlbumTile::on_play`]) and the title brightens;
+/// pressed: down 1 AP without the ledge; selected: `WARM_WHITE` frame;
 /// in riproduzione: `eq` prima del sottotitolo. ArtistTile ([`AlbumTile::round`]): foto nel cerchio pixel
 /// e testo centrato.
 #[derive(IntoElement)]
@@ -327,20 +334,22 @@ impl RenderOnce for AlbumTile {
             }
             art.into_any_element()
         };
-        let mut cover = div().relative().flex_none().size(dp(self.side)).child(art);
+        // Hover: the cover rises 1 AP over a 2 AP hard ledge (right and bottom); pressed: down 1 AP, no
+        // ledge, like a key. Both land on whole APs.
+        let t = if self.disabled { 0.0 } else { v.hover_t };
+        let (lift, ledge) =
+            if v.pressed && !self.disabled { (-ap.one(), 0) } else { (ap.n(ap_round(t)), ap_round(t * 2.0)) };
+        let mut cover = div().relative().flex_none().size(dp(self.side)).top(-lift).child(art);
+        if ledge > 0 && !self.round {
+            cover = cover.child(hard_shadow(0, ledge, col(SHADOW_HARD)));
+        }
         if let Some(text) = self.badge.clone() {
             cover = cover.child(
                 div().absolute().left(dp(SPACE_3)).top(dp(SPACE_3)).child(Badge::new(text, BadgeKind::Count)),
             );
         }
         // Cornice di 1 AP dentro il bordo della copertina (sul cerchio, il suo contorno).
-        let frame = if self.selected {
-            Some(WARM_WHITE)
-        } else if v.hovered && !self.disabled {
-            Some(CONTROL_BORDER_HOVER)
-        } else {
-            None
-        };
+        let frame = if self.selected { Some(WARM_WHITE) } else { None };
         if let Some(color) = frame {
             cover = cover.child(if self.round {
                 circle_outline(col(color)).into_any_element()
@@ -353,20 +362,25 @@ impl RenderOnce for AlbumTile {
         } else {
             cover = cover.child(crate::pixel::shape::focus_ring(0, col(PURE_WHITE), wired.focus.clone(), ap));
         }
-        if let Some(play) =
-            self.on_play.clone().filter(|_| (v.hovered || self.playing.is_some()) && !self.disabled)
-        {
+        // The 40 dp play button steps in from the bottom-right corner in three frames (always there while the
+        // tile plays).
+        let frames = if self.playing.is_some() { STEP_FRAMES } else { steps(t, STEP_FRAMES) };
+        if let Some(play) = self.on_play.clone().filter(|_| frames > 0 && !self.disabled) {
             let icon =
                 if self.playing == Some(PlayState::Playing) { sprite::ICON_PAUSE } else { sprite::ICON_PLAY };
-            cover = cover.child(div().absolute().right(dp(SPACE_3)).bottom(dp(SPACE_3)).child(
-                IconButton::new(SharedString::from(format!("{:?}-play", self.id)), icon).primary().on_click(
-                    move |event, window, cx| {
-                        // Il Play suona e basta: non apre anche il tile.
-                        cx.stop_propagation();
-                        play(event, window, cx);
-                    },
+            let off = -ap.n(2 * (STEP_FRAMES - frames));
+            cover = cover.child(
+                div().absolute().right(dp(SPACE_3) + off).bottom(dp(SPACE_3) + off).child(
+                    IconButton::new(SharedString::from(format!("{:?}-play", self.id)), icon)
+                        .primary()
+                        .size(PLAY_SIDE)
+                        .on_click(move |event, window, cx| {
+                            // Il Play suona e basta: non apre anche il tile.
+                            cx.stop_propagation();
+                            play(event, window, cx);
+                        }),
                 ),
-            ));
+            );
         }
         let subtitle_color = if self.disabled { TEXT_DISABLED } else { TEXT_TERTIARY };
         let mut subtitle =
@@ -378,19 +392,16 @@ impl RenderOnce for AlbumTile {
             });
         }
         let subtitle = subtitle.child(div().truncate().child(self.subtitle));
-        let title_color = if self.disabled { TEXT_DISABLED } else { TEXT_PRIMARY };
-        let mut text = div().flex().flex_col().gap(px(2.0));
+        let title_color =
+            if self.disabled { col(TEXT_DISABLED) } else { mix(TEXT_SECONDARY, TEXT_PRIMARY, t) };
+        let mut text = div().flex().flex_col().gap(dp(2.0));
         if self.round {
             text = text.items_center();
         }
         let element =
             wired.element.flex().flex_col().flex_none().w(dp(self.side)).gap(dp(SPACE_3)).child(cover).child(
                 text.child(
-                    div()
-                        .type_role(TYPE_TRACK_TITLE)
-                        .text_color(col(title_color))
-                        .truncate()
-                        .child(self.title),
+                    div().type_role(TYPE_TRACK_TITLE).text_color(title_color).truncate().child(self.title),
                 )
                 .child(subtitle),
             );

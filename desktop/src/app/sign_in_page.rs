@@ -35,6 +35,7 @@ use psytify_design::tokens::space::{SPACE_3, SPACE_5, SPACE_6, SPACE_9};
 use psytify_design::tokens::type_::{TYPE_BODY, TYPE_META};
 
 use super::PageEvent;
+use super::page_frame::PageFrame;
 use super::people::{TEXT_MAX, code_chars, handle_chars, line_chars};
 use crate::components::button::Button;
 use crate::components::navigation::{Tab, Tabs};
@@ -42,7 +43,7 @@ use crate::components::search_field::SearchField;
 use crate::components::separator::Separator;
 use crate::core_model::{Changed, CoreModel};
 use crate::pixel::PixelSprite;
-use crate::theme::{Ap, TypeStyle, col, dp};
+use crate::theme::{TypeStyle, col, dp};
 
 /// La scheda del modulo.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -192,6 +193,8 @@ pub struct SignInPage {
     /// cambiato).
     focus_first: bool,
     focus: FocusHandle,
+    /// Only the enter: the 360 dp column stays centred on any width.
+    frame: PageFrame,
     _changes: Subscription,
 }
 
@@ -257,6 +260,7 @@ impl SignInPage {
             fields,
             ready: false,
             focus_first: true,
+            frame: PageFrame::default(),
             focus: cx.focus_handle(),
             _changes: changes,
         }
@@ -265,6 +269,12 @@ impl SignInPage {
     /// La pagina si apre: il focus andrà al primo campo.
     pub fn show(&mut self, cx: &mut Context<Self>) {
         self.focus_first = true;
+        cx.notify();
+    }
+
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
         cx.notify();
     }
 
@@ -513,7 +523,7 @@ impl Focusable for SignInPage {
 
 impl Render for SignInPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let ap = Ap::of(window);
+        self.frame.begin(window, None);
         if self.focus_first {
             // Il focus al primo campo del passo, quando la pagina si apre o il passo cambia (mentre si aspetta
             // il browser non c'è un campo).
@@ -550,7 +560,7 @@ impl Render for SignInPage {
                     .items_center()
                     .gap(dp(SPACE_3))
                     .child(PixelSprite::new(sprite::NASTRO_CHEER))
-                    .child(div().pixel_type(ap, false).text_color(col(TEXT_PRIMARY)).child("Psytify"))
+                    .child(div().pixel_type(false).text_color(col(TEXT_PRIMARY)).child("Psytify"))
                     .child(
                         div()
                             .type_role(TYPE_BODY)
@@ -575,7 +585,7 @@ impl Render for SignInPage {
             .flex()
             .flex_col()
             .items_center()
-            .child(column)
+            .child(self.frame.wrap(column.into_any_element(), 0, window))
     }
 }
 

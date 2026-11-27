@@ -10,13 +10,18 @@ use gpui::{AnyElement, App, IntoElement, ParentElement, RenderOnce, SharedString
 use psytify_design::tokens::color::{TEXT_PRIMARY, TEXT_TERTIARY};
 use psytify_design::tokens::size::TRACK_ROW_H;
 use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_5, SPACE_6};
-use psytify_design::tokens::type_::{TYPE_HEADING, TYPE_META};
+use psytify_design::tokens::type_::{TYPE_HEADING, TYPE_META, TYPE_PAGE_TITLE};
 
-use crate::theme::{Ap, TypeStyle, col, dp};
+use crate::theme::{TypeStyle, col, dp};
 
 /// Intestazione di sezione: alta come una riga, così la lista resta uniforme. `meta` è il conteggio
 /// («3 brani»), vuoto se non serve.
 pub fn section_heading(title: SharedString, meta: SharedString) -> gpui::Div {
+    section_heading_at(title, meta, SPACE_6)
+}
+
+/// [`section_heading`] with the page's canvas margin (`components::frame`).
+pub fn section_heading_at(title: SharedString, meta: SharedString, margin: f32) -> gpui::Div {
     div()
         .h(dp(TRACK_ROW_H))
         .w_full()
@@ -24,7 +29,7 @@ pub fn section_heading(title: SharedString, meta: SharedString) -> gpui::Div {
         .flex()
         .items_end()
         .gap(dp(SPACE_3))
-        .px(dp(SPACE_6))
+        .px(dp(margin))
         .pb(dp(SPACE_3))
         .child(div().type_role(TYPE_HEADING).text_color(col(TEXT_PRIMARY)).child(title))
         .child(div().type_role(TYPE_META).text_color(col(TEXT_TERTIARY)).child(meta))
@@ -32,7 +37,12 @@ pub fn section_heading(title: SharedString, meta: SharedString) -> gpui::Div {
 
 /// Una riga di stato (caricamento, errore, una frase che spiega), alta come le altre.
 pub fn note(content: impl IntoElement) -> gpui::Div {
-    div().h(dp(TRACK_ROW_H)).w_full().flex_none().flex().items_center().px(dp(SPACE_6)).child(content)
+    note_at(content, SPACE_6)
+}
+
+/// [`note`] with the page's canvas margin.
+pub fn note_at(content: impl IntoElement, margin: f32) -> gpui::Div {
+    div().h(dp(TRACK_ROW_H)).w_full().flex_none().flex().items_center().px(dp(margin)).child(content)
 }
 
 /// Il titolo in cima a una schermata: titolo in tipo pixel, una riga di metadati e i pulsanti.
@@ -43,6 +53,7 @@ pub struct PageTitle {
     /// Una seconda riga di metadati, più tenue (la cartella dei download).
     detail: SharedString,
     actions: Vec<AnyElement>,
+    margin: f32,
 }
 
 impl PageTitle {
@@ -53,7 +64,14 @@ impl PageTitle {
             meta: SharedString::default(),
             detail: SharedString::default(),
             actions: Vec::new(),
+            margin: SPACE_6,
         }
+    }
+
+    /// The page's canvas margin (`components::frame`).
+    pub fn margin(mut self, margin: f32) -> Self {
+        self.margin = margin;
+        self
     }
 
     /// La riga sotto il titolo (conteggi, durata, spazio occupato): già pronta.
@@ -76,9 +94,9 @@ impl PageTitle {
 }
 
 impl RenderOnce for PageTitle {
-    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let ap = Ap::of(window);
-        let title = div().text_color(col(TEXT_PRIMARY)).truncate().child(self.title).pixel_type(ap, false);
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let title =
+            div().text_color(col(TEXT_PRIMARY)).truncate().child(self.title).type_role(TYPE_PAGE_TITLE);
         let mut text = div().flex().flex_col().gap(dp(SPACE_2)).min_w_0().child(title);
         if !self.meta.is_empty() {
             text = text.child(div().type_role(TYPE_META).text_color(col(TEXT_TERTIARY)).child(self.meta));
@@ -94,7 +112,7 @@ impl RenderOnce for PageTitle {
             .flex()
             .flex_col()
             .gap(dp(SPACE_5))
-            .px(dp(SPACE_6))
+            .px(dp(self.margin))
             .pt(dp(SPACE_6))
             .pb(dp(SPACE_3))
             .child(text);

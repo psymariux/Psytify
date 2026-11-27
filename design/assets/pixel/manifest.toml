@@ -67,6 +67,15 @@ max_colors = 1
 tint_preview = ["warm_white"]
 
 [[sprite]]
+name = "icon_play_pause"
+group = "icons"
+src = "src/icons/play_pause.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white"]
+
+[[sprite]]
 name = "icon_next"
 group = "icons"
 src = "src/icons/next.txt"
@@ -124,6 +133,15 @@ tint_preview = ["warm_white"]
 name = "icon_heart_fill"
 group = "icons"
 src = "src/icons/heart_fill.txt"
+size = [12, 12]
+palette = "mask"
+max_colors = 1
+tint_preview = ["warm_white", "lime"]
+
+[[sprite]]
+name = "icon_heart_half"
+group = "icons"
+src = "src/icons/heart_half.txt"
 size = [12, 12]
 palette = "mask"
 max_colors = 1

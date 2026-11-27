@@ -364,6 +364,11 @@ impl CoreModel {
         self.core.as_ref().map(|core| core.artwork(url))
     }
 
+    /// [`CoreModel::artwork`] at most `side` pixels wide (the larger tiers of `covers.rs`).
+    pub fn artwork_side(&self, url: String, side: u32) -> Option<oneshot::Receiver<Option<CoverPixels>>> {
+        self.core.as_ref().map(|core| core.artwork_side(url, side))
+    }
+
     /// Ferma il core dopo che ha scritto `config.json`: il ricevitore si risolve a fine lavoro. Da qui
     /// in poi i comandi si perdono. `None` se il core non c'era o è già stato fermato.
     pub fn begin_shutdown(&mut self) -> Option<oneshot::Receiver<Result<(), CoreError>>> {

@@ -12,7 +12,7 @@ const OVERDRAW: f32 = 4.0 * TRACK_ROW_H;
 
 /// Una lista con la testa e `rows` righe.
 pub fn new_list(rows: usize) -> ListState {
-    ListState::new(1 + rows, ListAlignment::Top, px(OVERDRAW))
+    ListState::new(1 + rows, ListAlignment::Top, crate::theme::dp(OVERDRAW))
 }
 
 /// Le righe sono cambiate (ora sono `rows`): la testa resta misurata, lo scorrimento resta dov'è.

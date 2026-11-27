@@ -168,11 +168,17 @@ impl Core {
     /// se l'immagine non è valida o se il core si ferma prima: il frontend resta sulla copertina
     /// disegnata. Il frontend tiene la sua cache di texture e chiede ogni indirizzo una volta sola.
     pub fn artwork(&self, url: String) -> oneshot::Receiver<Option<CoverPixels>> {
+        self.artwork_side(url, artwork::COVER_SIDE)
+    }
+
+    /// [`Core::artwork`] reduced to at most `side` pixels (at most [`artwork::COVER_SIDE_MAX`]), for a
+    /// frontend that draws a cover larger than the default.
+    pub fn artwork_side(&self, url: String, side: u32) -> oneshot::Receiver<Option<CoverPixels>> {
         let (done, answer) = oneshot::channel();
         let api = self.cover_client();
         self.runtime.spawn(async move {
             let pixels = match api {
-                Some(api) => artwork::fetch(&api, &url).await,
+                Some(api) => artwork::fetch_side(&api, &url, side).await,
                 None => None,
             };
             let _ = done.send(pixels);

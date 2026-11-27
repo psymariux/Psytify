@@ -1,12 +1,11 @@
-//! La pagina «Libreria»: ciò che è tuo, in una lista sola, come la Libreria del telefono nel client Iced
-//! (`client/src/ui/phone/library.rs`; sul desktop Iced la stessa lista sta nella barra laterale). In cima
-//! il titolo con «Nuova playlist»; poi «Brani che ti piacciono» e le playlist (un clic le apre; Rinomina ed
-//! Elimina al passaggio del mouse, con il dialogo di `Shell`), gli album salvati e gli artisti seguiti.
+//! «Libreria»: what is yours, in one list, like the phone Library of the Iced client
+//! (`client/src/ui/phone/library.rs`). At the top the title with «Nuova playlist»; then «Brani che ti
+//! piacciono» and the playlists (a click opens them; rename and delete on hover, through `Shell`'s dialog),
+//! the saved albums and the followed artists. Each section's rows flow into columns (desktop v2 §2) and the
+//! page enters with the page-enter move.
 //!
-//! Un clic su un album o su un artista apre la sua pagina (`album_page`, `artist_page`).
-//! Tutto viene da `LibraryView`; la pagina non manda comandi da sé, chiede a `Shell` di aprire una pagina o
-//! un dialogo ([`PageEvent`]). I testi delle righe si rifanno solo quando una delle quattro liste cambia
-//! (un ascolto cambia la libreria ma non queste).
+//! Everything comes from `LibraryView`; the page sends no command itself, it asks `Shell` to open a page or a
+//! dialog ([`PageEvent`]). Row texts are rebuilt only when one of the four lists changes.
 
 use std::sync::Arc;
 
@@ -17,15 +16,18 @@ use gpui::{
 use psytify_core::snapshot::LibraryView;
 use psytify_design::sprite;
 use psytify_design::tokens::color::{SURFACE_CANVAS, TEXT_SECONDARY};
+use psytify_design::tokens::size::TRACK_ROW_H;
 use psytify_design::tokens::space::SPACE_3;
 use psytify_design::tokens::type_::TYPE_BODY;
 
+use super::page_frame::PageFrame;
 use super::playlist_dialog::DialogRequest;
 use super::{Page, PageEvent};
 use crate::components::button::Button;
+use crate::components::frame::{Frame, Line, flow_lines};
 use crate::components::icon_button::IconButton;
 use crate::components::list_row::{ListRow, RowArt};
-use crate::components::section::{PageTitle, note, section_heading};
+use crate::components::section::{PageTitle, note_at, section_heading_at};
 use crate::core_model::{Changed, CoreModel};
 use crate::format;
 use crate::theme::{TypeStyle, col, dp};
@@ -47,19 +49,19 @@ impl Section {
     }
 }
 
-/// Una riga della lista, nell'ordine in cui si disegna. Gli indici sono nelle liste del core.
+/// A list row, in drawing order. Indices are into the core's lists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Heading(Section),
     Liked,
     Playlist(usize),
-    /// Nessuna playlist: una frase che dice come crearne una.
+    /// No playlist: a line on how to make one.
     NoPlaylists,
     Album(usize),
     Artist(usize),
 }
 
-/// Quali righe mostrare. «Brani che ti piacciono» c'è sempre; album e artisti solo se ce ne sono. Pura.
+/// Which rows to show. The liked songs are always there; albums and artists only if any. Pure.
 fn plan(playlists: usize, albums: usize, artists: usize) -> Vec<Row> {
     let mut rows = Vec::with_capacity(playlists + albums + artists + 5);
     rows.push(Row::Heading(Section::Playlists));
@@ -79,7 +81,7 @@ fn plan(playlists: usize, albums: usize, artists: usize) -> Vec<Row> {
     rows
 }
 
-/// «3 playlist · 300 brani piaciuti · 2 album · 3 artisti»: le parti a zero restano fuori, le playlist no.
+/// «3 playlist · 300 brani piaciuti · 2 album · 3 artisti»: zero parts stay out, playlists do not.
 fn summary(playlists: usize, liked: usize, albums: usize, artists: usize) -> String {
     let mut parts = vec![format!("{playlists} playlist")];
     if liked > 0 {
@@ -98,7 +100,16 @@ fn summary(playlists: usize, liked: usize, albums: usize, artists: usize) -> Str
     parts.join(" · ")
 }
 
-/// I testi di una voce, pronti.
+/// The section a row's run flows in (headings and notes stay across the width).
+fn run(row: &Row) -> Option<Section> {
+    match row {
+        Row::Liked | Row::Playlist(_) => Some(Section::Playlists),
+        Row::Album(_) => Some(Section::Albums),
+        Row::Artist(_) => Some(Section::Artists),
+        Row::Heading(_) | Row::NoPlaylists => None,
+    }
+}
+/// The texts of an entry, ready.
 #[derive(Clone, Debug, PartialEq)]
 struct Entry {
     title: SharedString,
@@ -109,12 +120,15 @@ struct Entry {
 pub struct LibraryPage {
     view: Arc<LibraryView>,
     rows: Vec<Row>,
+    /// `rows` flowed into the page's columns.
+    lines: Vec<Line<Row>>,
     summary: SharedString,
     liked: SharedString,
     playlists: Vec<Entry>,
     albums: Vec<Entry>,
     artists: Vec<Entry>,
     scroll: UniformListScrollHandle,
+    frame: PageFrame,
     _changes: Subscription,
 }
 
@@ -133,19 +147,43 @@ impl LibraryPage {
         let mut page = Self {
             view: Arc::default(),
             rows: Vec::new(),
+            lines: Vec::new(),
             summary: SharedString::default(),
             liked: SharedString::default(),
             playlists: Vec::new(),
             albums: Vec::new(),
             artists: Vec::new(),
             scroll: UniformListScrollHandle::new(),
+            frame: PageFrame::default(),
             _changes: changes,
         };
         page.rebuild(Arc::clone(&core.read(cx).snapshot().library));
         page
     }
 
-    /// Prende la vista nuova; `true` se una delle liste mostrate è cambiata (e i testi sono rifatti).
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame == self.frame.frame {
+            return;
+        }
+        let reflow = frame.flow != self.frame.frame.flow;
+        self.frame.frame = frame;
+        if reflow {
+            self.flow();
+        }
+        cx.notify();
+    }
+
+    fn flow(&mut self) {
+        self.lines = flow_lines(self.rows.iter().copied(), self.frame.frame.flow, run);
+    }
+
+    /// Takes the new view; `true` if a shown list changed (and the texts are rebuilt).
     fn take(&mut self, view: Arc<LibraryView>) -> bool {
         let old = &self.view;
         let same = view.playlists.same(&old.playlists)
@@ -162,6 +200,7 @@ impl LibraryPage {
 
     fn rebuild(&mut self, view: Arc<LibraryView>) {
         self.rows = plan(view.playlists.len(), view.saved_albums.len(), view.followed.len());
+        self.flow();
         self.summary =
             summary(view.playlists.len(), view.liked.len(), view.saved_albums.len(), view.followed.len())
                 .into();
@@ -172,7 +211,7 @@ impl LibraryPage {
             .map(|playlist| Entry {
                 title: playlist.name.clone().into(),
                 detail: format!("Playlist · {}", format::tracks(playlist.tracks.len())).into(),
-                // La copertina del primo brano, come la pagina della playlist.
+                // The first track's cover, like the playlist page.
                 cover_url: playlist.tracks.first().and_then(|t| t.cover_url.clone()).map(SharedString::from),
             })
             .collect();
@@ -197,28 +236,49 @@ impl LibraryPage {
         self.view = view;
     }
 
-    fn row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
-        Some(match *self.rows.get(ix)? {
+    /// List line `ix`, in its enter move: one step per section.
+    fn line(&self, ix: usize, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let margin = self.frame.margin();
+        let element = match self.lines.get(ix)? {
+            Line::One(row) => self.row(*row, cx)?,
+            Line::Cells(cells) => {
+                let flow = self.frame.frame.flow;
+                flow.row(margin - SPACE_3, cells.iter().filter_map(|row| self.row(*row, cx)))
+                    .into_any_element()
+            }
+        };
+        let section =
+            self.lines.iter().take(ix + 1).filter(|line| matches!(line, Line::One(Row::Heading(_)))).count();
+        let element = div().h(dp(TRACK_ROW_H)).w_full().child(element).into_any_element();
+        Some(self.frame.wrap(element, section, window))
+    }
+
+    fn row(&self, row: Row, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let margin = self.frame.margin();
+        Some(match row {
             Row::Heading(section) => {
                 let count = match section {
-                    // Come il titolo: «Brani che ti piacciono» non è una playlist che si conta.
+                    // As the title: the liked songs are not a playlist that is counted.
                     Section::Playlists => self.playlists.len(),
                     Section::Albums => self.albums.len(),
                     Section::Artists => self.artists.len(),
                 };
-                section_heading(section.title().into(), count.to_string().into()).into_any_element()
+                section_heading_at(section.title().into(), count.to_string().into(), margin)
+                    .into_any_element()
             }
             Row::Liked => {
                 ListRow::new("lib-liked", RowArt::Sprite(sprite::ICON_HEART_FILL), "Brani che ti piacciono")
+                    .inset(SPACE_3)
                     .detail(self.liked.clone())
                     .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(PageEvent::Open(Page::Liked))))
                     .into_any_element()
             }
-            Row::NoPlaylists => note(
+            Row::NoPlaylists => note_at(
                 div()
                     .type_role(TYPE_BODY)
                     .text_color(col(TEXT_SECONDARY))
                     .child("Nessuna playlist, per ora: creane una con «Nuova playlist»."),
+                margin,
             )
             .into_any_element(),
             Row::Playlist(position) => {
@@ -231,6 +291,7 @@ impl LibraryPage {
                     RowArt::Cover(entry.cover_url.clone()),
                     entry.title.clone(),
                 )
+                .inset(SPACE_3)
                 .detail(entry.detail.clone())
                 .hover_action(
                     IconButton::new(("lib-rename", position), sprite::ICON_EDIT)
@@ -259,6 +320,7 @@ impl LibraryPage {
                     RowArt::Cover(entry.cover_url.clone()),
                     entry.title.clone(),
                 )
+                .inset(SPACE_3)
                 .detail(entry.detail.clone())
                 .on_click(
                     cx.listener(move |_, _: &ClickEvent, _, cx| cx.emit(PageEvent::Open(Page::Album(id)))),
@@ -273,6 +335,7 @@ impl LibraryPage {
                     RowArt::Round(entry.cover_url.clone()),
                     entry.title.clone(),
                 )
+                .inset(SPACE_3)
                 .detail(entry.detail.clone())
                 .on_click(
                     cx.listener(move |_, _: &ClickEvent, _, cx| cx.emit(PageEvent::Open(Page::Artist(id)))),
@@ -284,28 +347,33 @@ impl LibraryPage {
 }
 
 impl Render for LibraryPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let title = PageTitle::screen("Libreria").meta(self.summary.clone()).action(
-            Button::new("lib-new", "Nuova playlist").secondary().icon(sprite::ICON_PLUS).on_click(
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.frame.begin(window, None);
+        let title = PageTitle::screen("Libreria")
+            .margin(self.frame.margin())
+            .meta(self.summary.clone())
+            .action(Button::new("lib-new", "Nuova playlist").secondary().icon(sprite::ICON_PLUS).on_click(
                 cx.listener(|_, _: &ClickEvent, _, cx| {
                     cx.emit(PageEvent::Dialog(DialogRequest::NewPlaylist { seed: Vec::new() }))
                 }),
-            ),
-        );
+            ));
         let list = uniform_list(
             "library-list",
-            self.rows.len(),
-            cx.processor(|this: &mut Self, range: std::ops::Range<usize>, _window, cx| {
-                range.filter_map(|ix| this.row(ix, cx)).collect::<Vec<_>>()
+            self.lines.len(),
+            cx.processor(|this: &mut Self, range: std::ops::Range<usize>, window, cx| {
+                range.filter_map(|ix| this.line(ix, window, cx)).collect::<Vec<_>>()
             }),
         )
         .track_scroll(&self.scroll)
         .size_full();
+        let title = self.frame.wrap(title.into_any_element(), 0, window);
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
             .bg(col(SURFACE_CANVAS))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame))
             .child(title)
             .child(div().flex_1().min_h_0().pt(dp(SPACE_3)).child(list))
     }

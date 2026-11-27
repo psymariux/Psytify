@@ -1,12 +1,12 @@
-//! `PixelSprite`: disegna uno sprite di `psytify-design` nitido a ogni scala.
+//! `PixelSprite`: draws a `psytify-design` sprite crisp at any scale and zoom.
 //!
-//! Il campionatore di GPUI è sempre lineare, quindi lo sprite si ingrandisce sulla CPU di un fattore
-//! intero (`art_px(scale)`, vedi `store`) e si dipinge 1:1 sulla griglia dei pixel fisici: origine
-//! arrotondata al pixel, dimensione uguale alla texture, così il campionatore è l'identità.
+//! GPUI's sampler is always linear, so the sprite is enlarged on the CPU by a whole factor
+//! (`art_px(scale * zoom)`, see `store`) and painted 1:1 on the physical pixel grid: origin rounded to the
+//! pixel, size equal to the texture, so the sampler is the identity.
 //!
-//! Il box di layout è nominale (`frame * 2 dp`): lo sprite vi sta centrato con l'offset arrotondato
-//! per difetto a pixel interi, quindi il layout non cambia con la scala ma l'arte sì (al più di un
-//! passo AP più piccola, mai più grande, mai sfocata).
+//! The layout box is nominal (`frame * 2 dp`, times the zoom): the sprite sits centred in it with the offset
+//! floored to whole pixels, so the layout follows the zoom and the art is at most one AP step smaller, never
+//! larger, never blurred.
 
 use gpui::{
     App, BorrowAppContext, Bounds, Corners, IntoElement, RenderOnce, Styled, Window, canvas, point, px, size,
@@ -16,7 +16,7 @@ use psytify_design::tokens::space::AP_DP;
 
 use super::anim::{ms_until_next_frame, request_refresh};
 use super::store::SpriteStore;
-use crate::theme::Ap;
+use crate::theme::{Ap, dp};
 
 /// Un elemento che mostra uno sprite per nome (le costanti stanno in `psytify_design::sprite`).
 #[derive(IntoElement)]
@@ -67,8 +67,8 @@ impl RenderOnce for PixelSprite {
             |_, _, _| (),
             move |bounds, (), window, cx| paint_sprite(window, cx, name, tint, animate, frame, bounds),
         )
-        .w(px(w))
-        .h(px(h))
+        .w(dp(w))
+        .h(dp(h))
         .flex_none()
     }
 }
@@ -85,10 +85,10 @@ pub fn paint_sprite(
     slot: Bounds<gpui::Pixels>,
 ) {
     let scale = window.scale_factor();
-    let ap = Ap::for_scale(scale);
+    let ap = Ap::of(window);
     let active = window.is_window_active();
     let drawn = cx.update_global::<SpriteStore, _>(|store, _| {
-        store.ensure_scale(scale);
+        store.ensure_scale(ap.effective());
         store.drain_retired(window);
         let sprite = store.sheet()?.get(name)?;
         let moving = animate && sprite.frame_count() > 1 && !store.reduce_motion() && active;

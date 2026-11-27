@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::command::Command;
+use crate::command::{Command, SettingsCmd};
 use crate::config::Config;
 use crate::effect::{Done, Effect, TimerKey};
 use crate::snapshot::{DomainVersions, Snapshot};
@@ -133,7 +133,13 @@ impl CoreState {
         let mut effects = Vec::new();
         match input {
             Input::Command(command) => match command {
-                Command::Settings(command) => self.settings.apply(command, now, &mut effects),
+                Command::Settings(command) => {
+                    // «Save now» also saves where the current entry is.
+                    if matches!(command, SettingsCmd::SaveNow) {
+                        self.settings.store_playback(self.playback.fields(now), &mut effects);
+                    }
+                    self.settings.apply(command, now, &mut effects);
+                }
                 Command::Library(command) => self.library.apply(*command, now, &mut effects),
                 Command::Playback(command) => self.playback.apply(command, now, &mut effects),
                 Command::Catalog(command) => self.catalog.apply(command, now, &mut effects),
@@ -262,7 +268,7 @@ impl CoreState {
             self.settings.store_library(self.library.fields(), effects);
         }
         if self.playback.take_persist() {
-            self.settings.store_playback(self.playback.fields(), effects);
+            self.settings.store_playback(self.playback.fields(now), effects);
         }
         // I file scaricati: la riproduzione dice quelli che non ha potuto aprire (i download li
         // segnano persi), e riceve la mappa di quelli da cui suonare.

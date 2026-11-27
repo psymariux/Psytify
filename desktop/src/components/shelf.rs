@@ -21,11 +21,11 @@ use psytify_design::tokens::space::{SPACE_1, SPACE_6};
 use super::button::Button;
 use super::control::OnClick;
 use super::icon_button::IconButton;
-use super::section::section_heading;
+use super::section::section_heading_at;
 use crate::theme::dp;
 
-/// Quante copertine di lato `side` stanno intere in una riga larga `width`, con i margini della pagina
-/// (`SPACE_6` per lato) e `gap` fra l'una e l'altra. Almeno una.
+/// How many whole tiles `side` dp wide fit a row `width` dp wide, with the page margins (`SPACE_6` each side)
+/// and `gap` between them. At least one. (Fluid grids use `components::frame::TileGrid` instead.)
 pub fn fit(width: f32, side: f32, gap: f32) -> usize {
     let inner = (width - 2.0 * SPACE_6).max(side);
     // Il conto è su numeri piccoli e positivi: il troncamento è voluto.
@@ -133,6 +133,7 @@ pub struct Shelf {
     page: ShelfPage,
     tiles: Vec<AnyElement>,
     gap: f32,
+    margin: f32,
     actions: Vec<AnyElement>,
     more: Option<(SharedString, OnClick)>,
     on_page: Option<OnPage>,
@@ -148,11 +149,19 @@ impl Shelf {
             page,
             tiles: Vec::new(),
             gap: GRID_GAP,
+            margin: SPACE_6,
             actions: Vec::new(),
             more: None,
             on_page: None,
             on_wheel: None,
         }
+    }
+
+    /// The page's canvas margin and the gap of a fluid grid (`components::frame`).
+    pub fn frame(mut self, margin: f32, gap: f32) -> Self {
+        self.margin = margin;
+        self.gap = gap;
+        self
     }
 
     /// Il conteggio accanto al titolo, già pronto.
@@ -199,7 +208,9 @@ impl Shelf {
 impl RenderOnce for Shelf {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let page = self.page;
-        let mut heading = section_heading(self.title, self.meta).child(div().flex_1()).children(self.actions);
+        let mut heading = section_heading_at(self.title, self.meta, self.margin)
+            .child(div().flex_1())
+            .children(self.actions);
         if page.overflows() {
             if let Some(on_page) = self.on_page.clone() {
                 let arrow = |suffix: &str, icon: &'static str, label: &str, enabled: bool, to: usize| {
@@ -238,7 +249,7 @@ impl RenderOnce for Shelf {
                 );
             }
         }
-        let mut row = div().flex().gap(dp(self.gap)).px(dp(SPACE_6)).pb(dp(SPACE_6)).children(self.tiles);
+        let mut row = div().flex().gap(dp(self.gap)).px(dp(self.margin)).pb(dp(SPACE_6)).children(self.tiles);
         if let Some(on_wheel) = self.on_wheel.filter(|_| page.overflows()) {
             row = row.on_scroll(move |event, window, cx| {
                 if let Some(dx) = horizontal(event) {

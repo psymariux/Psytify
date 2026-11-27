@@ -1,13 +1,12 @@
-//! ListRow: riga di 48 dp (`TRACK_ROW_H`, pronta per `uniform_list`) per ciò che non è una riga di brano
-//! del catalogo: le voci della Libreria (playlist, brani piaciuti, album salvati, artisti seguiti), i
-//! download in corso e i brani sul dispositivo. Griglia: indice facoltativo | arte di `COVER_XS` |
-//! titolo sopra dettaglio | barra a dieci passi facoltativa | azioni.
+//! ListRow: a 48 dp row (`TRACK_ROW_H`, `uniform_list`-ready) for what is not a catalogue track row: the
+//! library items (playlists, liked songs, saved albums, followed artists), running downloads and the tracks
+//! on the device. Grid: optional index | 40 dp art (`ART_ROW`) | title over detail | optional ten-step bar |
+//! actions.
 //!
-//! Stati come TrackRow: rest, hover (fill `SURFACE_RAISED`; l'indice diventa `icon_play` se la riga
-//! suona), premuto (`SURFACE_SELECTED`), focus (anello interno), in riproduzione (l'equalizzatore al posto
-//! dell'indice, lime solo mentre suona). Il dettaglio può essere un errore (`TEXT_ERROR`, file mancante o
-//! download non riuscito). Le azioni sono di due tipi: quelle che si vedono sempre (annulla un download) e
-//! quelle che compaiono al passaggio del mouse, con lo spazio tenuto (rinomina, rimuovi).
+//! States as TrackRow: rest, hover (the `SURFACE_RAISED` tone eases in; the index becomes `icon_play`),
+//! pressed (`SURFACE_SELECTED`), focus (inner ring), playing (the equalizer instead of the index, lime only
+//! while it plays). The detail can be an error (`TEXT_ERROR`). Actions are always visible (cancel a download)
+//! or come in on hover, sliding 2 AP from the right with the space kept (rename, remove).
 
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
@@ -18,7 +17,7 @@ use psytify_design::tokens::color::{
     GRAPHITE, ICON_ACTIVE, PURE_WHITE, SURFACE_RAISED, SURFACE_SELECTED, TEXT_ERROR, TEXT_PRIMARY,
     TEXT_SECONDARY, TEXT_TERTIARY,
 };
-use psytify_design::tokens::size::{ICON_BUTTON, TRACK_INDEX_W, TRACK_ROW_H, cover::COVER_XS};
+use psytify_design::tokens::size::{ICON_BUTTON, TRACK_INDEX_W, TRACK_ROW_H, cover::ART_ROW};
 use psytify_design::tokens::space::{SPACE_3, SPACE_6};
 use psytify_design::tokens::type_::{TYPE_ARTIST, TYPE_NUMERIC, TYPE_TRACK_TITLE};
 
@@ -28,9 +27,10 @@ use super::icon_button::IconButton;
 use super::indicators::{DownloadSteps, Equalizer, PlayState};
 use super::playing_spot::PlayingSpot;
 use super::tile::Cover;
+use crate::motion::ap_round;
 use crate::pixel::PixelSprite;
 use crate::pixel::shape::inset_ring;
-use crate::theme::{TypeStyle, col, dp};
+use crate::theme::{Ap, TypeStyle, col, dp, fade};
 
 /// L'arte a sinistra del testo.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +62,7 @@ pub struct ListRow {
     selected: bool,
     actions: Vec<IconButton>,
     hover_actions: Vec<IconButton>,
+    inset: Option<f32>,
     preview: Preview,
     on_click: Option<OnClick>,
 }
@@ -82,6 +83,7 @@ impl ListRow {
             selected: false,
             actions: Vec::new(),
             hover_actions: Vec::new(),
+            inset: None,
             preview: Preview::Live,
             on_click: None,
         }
@@ -149,6 +151,12 @@ impl ListRow {
         self
     }
 
+    /// The left padding in dp, for rows inside a flowing column (`components::frame::Flow`).
+    pub fn inset(mut self, inset: f32) -> Self {
+        self.inset = Some(inset);
+        self
+    }
+
     pub fn preview(mut self, preview: Preview) -> Self {
         self.preview = preview;
         self
@@ -161,7 +169,7 @@ impl ListRow {
     }
 }
 
-/// L'arte di una riga, di lato `side` (`COVER_XS` nelle righe, `COVER_S` nelle scorciatoie della Home).
+/// The art of a row, `side` dp (`ART_ROW` in rows, `ART_SHORTCUT` in the Home shortcuts).
 pub fn row_art(art: RowArt, side: f32) -> AnyElement {
     match art {
         RowArt::Cover(url) => Cover::new(side).url(url).into_any_element(),
@@ -183,12 +191,13 @@ fn stop_propagation(button: IconButton) -> AnyElement {
 
 impl RenderOnce for ListRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let ap = Ap::of(window);
         let wired = wire(&self.id, false, self.preview, window, cx);
         let v = wired.visual;
         let fill = if v.pressed || self.selected {
-            Some(SURFACE_SELECTED)
-        } else if v.hovered {
-            Some(SURFACE_RAISED)
+            Some(col(SURFACE_SELECTED))
+        } else if v.hover_t > 0.0 {
+            Some(fade(SURFACE_RAISED, v.hover_t))
         } else {
             None
         };
@@ -203,7 +212,7 @@ impl RenderOnce for ListRow {
             .items_center()
             .gap(dp(SPACE_3))
             // Senza la colonna del numero l'arte si allinea alle intestazioni di sezione (`SPACE_6`).
-            .pl(dp(if numbered { SPACE_3 } else { SPACE_6 }))
+            .pl(dp(self.inset.unwrap_or(if numbered { SPACE_3 } else { SPACE_6 })))
             .pr(dp(SPACE_3));
         if numbered {
             let index: AnyElement = match (self.playing, v.hovered) {
@@ -222,7 +231,7 @@ impl RenderOnce for ListRow {
         }
         let detail_color = if self.detail_error { TEXT_ERROR } else { TEXT_SECONDARY };
         if self.art != RowArt::None {
-            row = row.child(row_art(self.art, COVER_XS));
+            row = row.child(row_art(self.art, ART_ROW));
         }
         row = row.child(
             div()
@@ -253,16 +262,26 @@ impl RenderOnce for ListRow {
         if let Some(progress) = self.steps {
             row = row.child(div().flex_none().child(DownloadSteps::new(progress)));
         }
-        let hovered = v.hovered;
+        // Hover actions slide in 2 AP from the right and fade with the hover; the space stays.
+        let t = v.hover_t;
         let hover_actions = self.hover_actions.into_iter().map(|button| {
-            if hovered { stop_propagation(button) } else { div().size(dp(ICON_BUTTON)).into_any_element() }
+            if t > 0.0 {
+                div()
+                    .relative()
+                    .left(ap.n(ap_round((1.0 - t) * 2.0)))
+                    .opacity(t)
+                    .child(stop_propagation(button))
+                    .into_any_element()
+            } else {
+                div().size(dp(ICON_BUTTON)).into_any_element()
+            }
         });
         let actions = self.actions.into_iter().map(stop_propagation);
         row = row
             .child(div().flex().flex_none().items_center().children(actions).children(hover_actions))
             .child(inset_ring(col(PURE_WHITE), wired.focus.clone(), v.force_ring));
         if let Some(color) = fill {
-            row = row.bg(col(color));
+            row = row.bg(color);
         }
         with_click(row, self.on_click)
     }

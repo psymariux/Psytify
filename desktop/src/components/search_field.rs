@@ -832,6 +832,15 @@ impl gpui::Element for TextElement {
             vec![run]
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
+        // A placeholder wider than the field ends in an ellipsis instead of a clipped glyph.
+        let (display_text, runs) = if content.is_empty() {
+            let mut wrapper = window.text_system().line_wrapper(style.font(), font_size);
+            let (text, runs) =
+                wrapper.truncate_line(display_text, bounds.size.width, "…", &runs, gpui::TruncateFrom::End);
+            (text, runs.into_owned())
+        } else {
+            (display_text, runs)
+        };
         let line = window.text_system().shape_line(display_text, font_size, &runs, None);
         let cursor_pos = line.x_for_index(cursor);
         let ap = Ap::of(window);

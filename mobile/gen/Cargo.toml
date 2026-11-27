@@ -1,0 +1,27 @@
+[package]
+name = "psytify-mobile-gen"
+version = "0.1.0"
+description = "Build-time generators for the Kotlin app: the UniFFI bindings and the design tokens"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+# `uniffi-bindgen generate --library libpsytify_mobile.so --language kotlin`: kept apart from
+# `psytify-mobile` so the host never builds the core just to run the generator.
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[[bin]]
+# Writes `PsytifyTokens.kt` from the `psytify-design` constants.
+name = "kotlin-tokens"
+path = "src/bin/kotlin-tokens.rs"
+
+[dependencies]
+# Same pinned version as `psytify-mobile`: bindings and scaffolding must come from one release.
+uniffi = { version = "=0.32.2", default-features = false, features = ["cli", "cargo-metadata"] }
+psytify-design = { path = "../../design" }
+
+[lints]
+workspace = true

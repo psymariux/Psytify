@@ -30,6 +30,7 @@ macro_rules! embedded_sprites {
 embedded_sprites! {
     ICON_PLAY => "icon_play",
     ICON_PAUSE => "icon_pause",
+    ICON_PLAY_PAUSE => "icon_play_pause",
     ICON_NEXT => "icon_next",
     ICON_PREVIOUS => "icon_previous",
     ICON_SHUFFLE => "icon_shuffle",
@@ -37,6 +38,7 @@ embedded_sprites! {
     ICON_REPEAT_ONE => "icon_repeat_one",
     ICON_HEART => "icon_heart",
     ICON_HEART_FILL => "icon_heart_fill",
+    ICON_HEART_HALF => "icon_heart_half",
     ICON_DOWNLOAD => "icon_download",
     ICON_DOWNLOADED => "icon_downloaded",
     ICON_QUEUE => "icon_queue",

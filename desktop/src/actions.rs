@@ -2,7 +2,7 @@
 //!
 //! Tab e Maiusc+Tab scorrono i controlli (l'ordine segue la lettura), Ctrl+K porta il focus sulla
 //! ricerca, Ctrl+Q chiude, Alt+← e Alt+→ scorrono la cronologia delle pagine, Ctrl+, apre le impostazioni
-//! (come nel client Iced). I comandi di trasporto valgono nel contesto `Shell` (la radice dell'app) e,
+//! (come nel client Iced), Ctrl+= / Ctrl+- / Ctrl+0 the UI zoom, Ctrl+B the sidebar. I comandi di trasporto valgono nel contesto `Shell` (la radice dell'app) e,
 //! quando il tasto è un carattere (Spazio, Q, T, V, F), non mentre si scrive in un campo di testo. Q e T
 //! aprono il pannello sulla coda o sul testo, F la vista immersiva, V (con la feature `video`) la vista
 //! immersiva sul videoclip (come nel client Iced).
@@ -26,7 +26,11 @@ actions!(
         ToggleFocus,
         GoBack,
         GoForward,
-        OpenSettings
+        OpenSettings,
+        ZoomIn,
+        ZoomOut,
+        ZoomReset,
+        ToggleSidebar
     ]
 );
 
@@ -62,6 +66,12 @@ pub fn bind_shell(cx: &mut App) {
         KeyBinding::new("alt-left", GoBack, Some(SHELL_CONTEXT)),
         KeyBinding::new("alt-right", GoForward, Some(SHELL_CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(SHELL_CONTEXT)),
+        // Ctrl+= and Ctrl++ (with or without Shift on most layouts), Ctrl+- and Ctrl+0: the UI zoom.
+        KeyBinding::new("ctrl-=", ZoomIn, Some(SHELL_CONTEXT)),
+        KeyBinding::new("ctrl-+", ZoomIn, Some(SHELL_CONTEXT)),
+        KeyBinding::new("ctrl--", ZoomOut, Some(SHELL_CONTEXT)),
+        KeyBinding::new("ctrl-0", ZoomReset, Some(SHELL_CONTEXT)),
+        KeyBinding::new("ctrl-b", ToggleSidebar, Some(SHELL_CONTEXT)),
     ]);
     #[cfg(feature = "video")]
     cx.bind_keys([KeyBinding::new("v", ToggleVideoFocus, Some(plain.as_str()))]);

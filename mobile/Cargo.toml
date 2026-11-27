@@ -1,0 +1,64 @@
+[package]
+name = "psytify-mobile"
+version = "0.1.0"
+description = "The Psytify core for the Kotlin Android app: a UniFFI bridge with commands in and per-domain snapshots out"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "psytify_mobile"
+# `cdylib` is `libpsytify_mobile.so`, loaded by the Kotlin app (JNA, via the UniFFI bindings); `lib`
+# is what the host tests link.
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+# `video`: the clip domain (`VideoCmd`, `VideoView`) and its pure alignment rules; ExoPlayer plays the
+# clip in the app, the core still chooses the address.
+psytify-core = { path = "../core", default-features = false, features = ["video"] }
+# The pixel scale rule (`art_px`), so the app does not reimplement it.
+psytify-design = { path = "../design" }
+# The Kotlin bridge. Pinned to one release because the generated Kotlin must match the scaffolding of
+# the same version exactly (`mobile/gen` pins the same number). 0.32.2 is the newest release older
+# than two weeks (0.33.0 is from 2026-11-25). Proc-macro mode: no UDL file, no build script.
+uniffi = { version = "=0.32.2", default-features = false }
+# The pump waits on the core's `watch` and resolves cover requests on a small runtime of its own;
+# already in the graph through the core.
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+uuid = "1"
+bytes = "1"
+# The motion preference is a frontend key of `config.json` (`SettingsCmd::SaveUiPrefs`); already in
+# the graph through the core.
+serde_json = "1"
+
+[features]
+default = []
+# Fake social and jam views for screenshots without an account (`src/fixtures.rs`). Debug builds
+# only: `scripts/android-kotlin.sh` turns it on with `FIXTURES=1`, and a release must never.
+fixtures = []
+
+# The free space of the downloads folder for «Scaricati» (`statvfs`, safe). rustix 1 with `fs` is
+# already in the graph through tempfile; one syscall when the page is built, never on a hot path.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
+# Android only: cpal (AAudio) reads the JavaVM and the app context from `ndk-context` when it opens
+# the audio stream. A NativeActivity sets it up by itself; a Kotlin app must do it from JNI
+# (`src/android.rs`). Both crates are already in the graph (cpal depends on them).
+[target.'cfg(target_os = "android")'.dependencies]
+ndk-context = "0.1"
+jni-sys = "0.4"
+
+[dev-dependencies]
+# The synchronous core (`LocalCore`) drives the snapshot mapping tests without a backend.
+psytify-core = { path = "../core", default-features = false, features = ["test-support", "video"] }
+tokio = { version = "1", features = ["macros", "rt", "net", "io-util", "time"] }
+
+# Not `[lints] workspace = true`: UniFFI's scaffolding macros expand to `unsafe` FFI code, which the
+# workspace's `unsafe_code = "forbid"` would reject, and `src/android.rs` needs two JNI calls. The
+# clippy denies of the workspace stay; every `unsafe` block written here is in `src/android.rs`.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

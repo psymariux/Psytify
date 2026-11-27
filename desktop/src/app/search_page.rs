@@ -1,22 +1,20 @@
-//! La pagina «Cerca»: i risultati di `CatalogView::search` in una sola lista di righe da 48 dp. Si
-//! scrive nel campo della barra del titolo, che manda `CatalogCmd::SearchInput` a ogni tasto: l'attesa
-//! di 300 ms e il «vince l'ultima ricerca» sono del core, qui non c'è nessun timer.
+//! «Cerca»: the results of `CatalogView::search` in one list of 48 dp rows. Typing happens in the title
+//! bar field, which sends `CatalogCmd::SearchInput` on every key: the 300 ms wait and «the last search wins»
+//! belong to the core, there is no timer here.
 //!
-//! Tre gruppi, nell'ordine del client Iced: il catalogo ufficiale (gli artisti di `search.artists`, che
-//! un clic porta sul server e apre; i brani di `search.sources`, che il server importa quando si preme
-//! play; gli album e le playlist di `search.playlists`, che aprono `source_page`), ciò che il server ha già
-//! (`search.results`: brani, poi artisti e album che aprono le loro pagine) e Internet Archive
-//! (`search.discover`). Artisti, album e playlist sono righe di `ListRow` alte come le altre, al più
-//! [`CARDS`] per sezione. Le prime e le ultime sono `SourceRow`: un play è un solo comando al core
-//! (`ExternalCmd::PlaySource` o `PlayArchive`, che importa e suona) e mentre il core importa
-//! (`ExternalView::importing`) la riga mostra «Apro…» e non risponde. I brani del server sono
-//! `TrackRow`: doppio clic o Invio avviano `PlaybackCmd::Play` (la coda diventa i risultati); «Altro» apre
-//! il menu del brano (di `Shell`).
+//! Three groups, in the Iced client's order: the official catalogue (the artists of `search.artists`, which a
+//! click brings to the server and opens; the tracks of `search.sources`, which the server imports on play;
+//! the albums and playlists of `search.playlists`, which open `source_page`), what the server already has
+//! (`search.results`: tracks, then artists and albums that open their pages) and Internet Archive
+//! (`search.discover`). Artists, albums and playlists are `ListRow`s, at most [`CARDS`] per section, and
+//! flow into columns (desktop v2 §2: they are not an ordered list); the track sections keep one column.
+//! Official and Archive tracks are `SourceRow`s: play is one core command (`ExternalCmd::PlaySource` or
+//! `PlayArchive`) and while the core imports the row says «Apro…». Server tracks are `TrackRow`s: double
+//! click or Enter sends `PlaybackCmd::Play`; «Altro» opens `Shell`'s track menu.
 //!
-//! Il piano della lista (quali righe, in che ordine) è una funzione pura dei tre caricamenti (`plan`), e
-//! si rifà solo quando uno dei tre cambia; i testi di ogni riga si formattano allora, non a ogni disegno.
-//! Di Internet Archive restano fuori le librerie dei netlabel (`libraries`, `open_library`): sono una
-//! schermata, non una riga.
+//! The list plan is a pure function of the three loads (`plan`), flowed into lines for the page's column
+//! count (`flow_rows`), and rebuilt only when a load or the column count changes. Internet Archive's netlabel
+//! libraries stay out: they are a screen, not a row.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -33,19 +31,22 @@ use psytify_core::catalog::Load;
 use psytify_core::command::{CatalogCmd, ExternalCmd, LibraryCmd, PlaybackCmd};
 use psytify_core::snapshot::{CatalogView, DownloadsView, ExternalView, SearchView};
 use psytify_design::tokens::color::{SURFACE_CANVAS, TEXT_ERROR};
+use psytify_design::tokens::size::TRACK_ROW_H;
 use psytify_design::tokens::space::{SPACE_3, SPACE_5};
 use psytify_design::tokens::type_::TYPE_BODY;
 use uuid::Uuid;
 
+use super::page_frame::PageFrame;
 use super::track_list::{download_command, download_state, with_links};
 use super::track_menu::TrackMenu;
 use super::{Page, PageEvent, play_state};
 use crate::components::button::Button;
+use crate::components::frame::{Flow, Frame};
 use crate::components::indicators::{LoadingIndicator, PlayState};
 use crate::components::list_row::{ListRow, RowArt};
 use crate::components::overlay::EmptyState;
 use crate::components::playing_spot::PlayingSpot;
-use crate::components::section::{note, section_heading};
+use crate::components::section::{note_at, section_heading_at};
 use crate::components::source_row::{SourceData, SourceRow};
 use crate::components::track_row::{TrackData, TrackRow};
 use crate::core_model::{Changed, CoreModel};
@@ -121,6 +122,59 @@ enum Row {
     OfficialPlaylist(usize),
     ServerArtist(usize),
     ServerAlbum(usize),
+    /// A line of cards in flowing columns (artists, albums, playlists of one section).
+    Line(Vec<Row>),
+}
+
+impl Row {
+    fn is_card(&self) -> bool {
+        matches!(
+            self,
+            Self::OfficialArtist(_)
+                | Self::OfficialAlbum(_)
+                | Self::OfficialPlaylist(_)
+                | Self::ServerArtist(_)
+                | Self::ServerAlbum(_)
+        )
+    }
+
+    /// A stable number for a card's element id.
+    fn card_key(&self) -> usize {
+        match *self {
+            Self::OfficialArtist(ix) => ix,
+            Self::OfficialAlbum(ix) => 100 + ix,
+            Self::OfficialPlaylist(ix) => 200 + ix,
+            Self::ServerArtist(ix) => 300 + ix,
+            Self::ServerAlbum(ix) => 400 + ix,
+            _ => usize::MAX,
+        }
+    }
+}
+
+/// The card runs of `rows` flowed into lines of `flow.columns`, filled column by column; other rows stay.
+fn flow_rows(rows: Vec<Row>, flow: Flow) -> Vec<Row> {
+    if flow.columns <= 1 {
+        return rows;
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    let mut run: Vec<Row> = Vec::new();
+    let flush = |run: &mut Vec<Row>, out: &mut Vec<Row>| {
+        let count = run.len();
+        for line in 0..flow.rows(count) {
+            out.push(Row::Line(flow.cells(line, count).filter_map(|ix| run.get(ix).cloned()).collect()));
+        }
+        run.clear();
+    };
+    for row in rows {
+        if row.is_card() {
+            run.push(row);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(row);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
 }
 
 /// Quanti artisti, album e playlist ci sono oltre ai brani (già tagliati a [`CARDS`] da chi li conta).
@@ -377,6 +431,9 @@ pub struct SearchPage {
     official_playlists: Vec<SourcePlaylist>,
     cards: Vec<(Row, Card)>,
     scroll: UniformListScrollHandle,
+    frame: PageFrame,
+    /// The enter step of each row (a heading starts one).
+    sections: Vec<usize>,
     /// `--play-first-official`: suona il primo brano del catalogo ufficiale appena c'è, una volta sola.
     autoplay_first: bool,
     /// Il posto dell'equalizzatore del brano in corso: lo dipinge `Shell` (BACKLOG 23).
@@ -413,6 +470,8 @@ impl SearchPage {
             official_playlists: Vec::new(),
             cards: Vec::new(),
             scroll: UniformListScrollHandle::new(),
+            frame: PageFrame::default(),
+            sections: Vec::new(),
             autoplay_first,
             core,
             spot: PlayingSpot::new(),
@@ -421,6 +480,25 @@ impl SearchPage {
         page.rebuild_rows();
         page.autoplay(cx);
         page
+    }
+
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    /// A new width: a new column count flows the cards again.
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame == self.frame.frame {
+            return;
+        }
+        let reflow = frame.flow != self.frame.frame.flow;
+        self.frame.frame = frame;
+        if reflow {
+            self.rebuild_rows();
+        }
+        cx.notify();
     }
 
     fn refresh(&mut self, core: &Entity<CoreModel>, changed: Changed, cx: &mut Context<Self>) {
@@ -525,7 +603,16 @@ impl SearchPage {
             extra,
         );
         self.screen = screen;
-        self.rows = rows;
+        self.rows = flow_rows(rows, self.frame.frame.flow);
+        let mut section = 0;
+        self.sections = self
+            .rows
+            .iter()
+            .map(|row| {
+                section += usize::from(matches!(row, Row::Heading(..)));
+                section
+            })
+            .collect();
         self.tracks =
             search.results.ready().map_or_else(Vec::new, |r| r.tracks.iter().map(RowText::of).collect());
         self.sources = search.sources.ready().map_or_else(Vec::new, |items| {
@@ -571,54 +658,71 @@ impl SearchPage {
         self.core.read(cx).external(ExternalCmd::PlayArchive { identifier: item.identifier.clone() });
     }
 
-    /// La riga `ix` della lista.
-    fn row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// List row `ix`, in its enter move.
+    fn row(&self, ix: usize, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let row = self.row_at(ix, cx)?;
+        // A fixed height: the uniform list measures only the first row.
+        let row = div().h(dp(TRACK_ROW_H)).w_full().child(row).into_any_element();
+        Some(self.frame.wrap(row, self.sections.get(ix).copied().unwrap_or(0), window))
+    }
+
+    fn row_at(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let margin = self.frame.margin();
         Some(match self.rows.get(ix)? {
             Row::Heading(section, _) => {
-                section_heading(section.title().into(), self.labels.get(ix)?.clone()).into_any_element()
+                section_heading_at(section.title().into(), self.labels.get(ix)?.clone(), margin)
+                    .into_any_element()
             }
             Row::Waiting(section) => {
-                note(LoadingIndicator::new().caption(section.waiting())).into_any_element()
+                note_at(LoadingIndicator::new().caption(section.waiting()), margin).into_any_element()
             }
-            Row::Problem(section, text) => note(
+            Row::Problem(section, text) => note_at(
                 div()
                     .type_role(TYPE_BODY)
                     .text_color(col(TEXT_ERROR))
                     .child(format!("{}: {text}", section.title())),
+                margin,
             )
             .into_any_element(),
+            Row::Line(cells) => {
+                let flow = self.frame.frame.flow;
+                let cells = cells.iter().filter_map(|card| self.card_row(card, cx));
+                flow.row(margin - SPACE_3, cells).into_any_element()
+            }
             Row::Source(position) => {
                 let position = *position;
                 let item = self.catalog.search.sources.ready()?.get(position)?;
                 let busy = self.external.importing(item.source, &item.id);
-                SourceRow::new(("source-row", position), self.sources.get(position)?.clone())
-                    .busy(busy)
-                    .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                        // Come per i brani: un clic non fa niente; doppio clic o Invio suonano.
-                        if event.click_count() >= 2 || matches!(event, ClickEvent::Keyboard(_)) {
-                            this.play_source(position, cx);
-                        }
-                    }))
-                    .into_any_element()
+                self.frame.row(
+                    SourceRow::new(("source-row", position), self.sources.get(position)?.clone())
+                        .busy(busy)
+                        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                            // As for tracks: a click does nothing; double click or Enter plays.
+                            if event.click_count() >= 2 || matches!(event, ClickEvent::Keyboard(_)) {
+                                this.play_source(position, cx);
+                            }
+                        })),
+                )
             }
             Row::Archive(position) => {
                 let position = *position;
                 let item = self.catalog.search.discover.ready()?.get(position)?;
                 let busy = self.external.importing_archive(&item.identifier);
-                SourceRow::new(("archive-row", position), self.archive.get(position)?.clone())
-                    .busy(busy)
-                    .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                        if event.click_count() >= 2 || matches!(event, ClickEvent::Keyboard(_)) {
-                            this.play_archive(position, cx);
-                        }
-                    }))
-                    .into_any_element()
+                self.frame.row(
+                    SourceRow::new(("archive-row", position), self.archive.get(position)?.clone())
+                        .busy(busy)
+                        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                            if event.click_count() >= 2 || matches!(event, ClickEvent::Keyboard(_)) {
+                                this.play_archive(position, cx);
+                            }
+                        })),
+                )
             }
             card @ (Row::OfficialArtist(_)
             | Row::OfficialAlbum(_)
             | Row::OfficialPlaylist(_)
             | Row::ServerArtist(_)
-            | Row::ServerAlbum(_)) => self.card_row(card, ix, cx)?,
+            | Row::ServerAlbum(_)) => self.frame.row(self.card_row(card, cx)?),
             Row::Track(position) => {
                 let position = *position;
                 let track = self.results()?.tracks.get(position)?;
@@ -647,7 +751,7 @@ impl SearchPage {
                         })));
                     }))
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                        // Un clic non fa niente; doppio clic o Invio suonano.
+                        // A click does nothing; double click or Enter plays.
                         if event.click_count() >= 2 || matches!(event, ClickEvent::Keyboard(_)) {
                             this.play(position, cx);
                         }
@@ -664,27 +768,29 @@ impl SearchPage {
                 {
                     row = row.playing_at(state, &self.spot);
                 }
-                row.into_any_element()
+                self.frame.row(row)
             }
         })
     }
 }
 
 impl SearchPage {
-    /// Una riga di artista, album o playlist: un clic apre la sua pagina.
-    fn card_row(&self, row: &Row, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// An artist, album or playlist row: a click opens its page.
+    fn card_row(&self, row: &Row, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let ix = row.card_key();
         let card = &self.cards.iter().find(|(known, _)| known == row)?.1;
         let round = matches!(row, Row::OfficialArtist(_) | Row::ServerArtist(_));
         let art =
             if round { RowArt::Round(card.cover_url.clone()) } else { RowArt::Cover(card.cover_url.clone()) };
         let event = match *row {
             Row::OfficialArtist(position) => {
-                // L'artista del catalogo ufficiale va prima portato sul server: il core lo fa e, quando
-                // c'è, `Shell` apre la sua pagina (`CatalogEvent::MetaArtistOpened`).
+                // An official artist must first be brought to the server: the core does it and `Shell`
+                // opens the page when it is there (`CatalogEvent::MetaArtistOpened`).
                 let id = self.catalog.search.artists.get(position)?.id;
                 let core = self.core.clone();
                 return Some(
                     ListRow::new(("search-card", ix), art, card.title.clone())
+                        .inset(SPACE_3)
                         .detail(card.detail.clone())
                         .on_click(move |_, _, cx| core.read(cx).catalog(CatalogCmd::OpenMetaArtist(id)))
                         .into_any_element(),
@@ -706,6 +812,7 @@ impl SearchPage {
         };
         Some(
             ListRow::new(("search-card", ix), art, card.title.clone())
+                .inset(SPACE_3)
                 .detail(card.detail.clone())
                 .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| cx.emit(event.clone())))
                 .into_any_element(),
@@ -734,9 +841,10 @@ fn same_load<T: ?Sized>(a: &Load<Arc<T>>, b: &Load<Arc<T>>) -> bool {
 }
 
 impl Render for SearchPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Il posto si segna di nuovo nel paint di questo fotogramma, se la riga in corso è visibile.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The spot is marked again in this frame's paint, if the playing row is visible.
         self.spot.clear();
+        self.frame.begin(window, None);
         let content: AnyElement = match &self.screen {
             Screen::Idle => centered(EmptyState::crate_(
                 "Cerca nel catalogo",
@@ -771,8 +879,8 @@ impl Render for SearchPage {
                 let list = uniform_list(
                     "search-results",
                     self.rows.len(),
-                    cx.processor(|this: &mut Self, range: std::ops::Range<usize>, _window, cx| {
-                        range.filter_map(|ix| this.row(ix, cx)).collect::<Vec<_>>()
+                    cx.processor(|this: &mut Self, range: std::ops::Range<usize>, window, cx| {
+                        range.filter_map(|ix| this.row(ix, window, cx)).collect::<Vec<_>>()
                     }),
                 )
                 .track_scroll(&self.scroll)
@@ -780,11 +888,16 @@ impl Render for SearchPage {
                 div().size_full().pt(dp(SPACE_3)).child(list).into_any_element()
             }
         };
-        div().size_full().bg(col(SURFACE_CANVAS)).child(content)
+        div()
+            .relative()
+            .size_full()
+            .bg(col(SURFACE_CANVAS))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame))
+            .child(content)
     }
 }
 
-/// Un contenuto al centro, a un terzo dall'alto, come gli stati vuoti delle linee guida.
+/// Content in the middle, a third from the top, like the guidelines' empty states.
 fn centered(content: impl IntoElement) -> gpui::Div {
     div().size_full().flex().justify_center().pt(dp(96.0)).child(content)
 }
@@ -859,6 +972,30 @@ mod tests {
         assert!(!headings(&waiting.rows).contains(&Section::OfficialArtists));
         assert_eq!(Section::ServerArtists.count(1), "1 artista");
         assert_eq!(Section::OfficialAlbums.count(3), "3 album");
+    }
+
+    #[test]
+    fn cards_flow_into_lines_and_tracks_keep_one_column() {
+        let rows = vec![
+            Row::Heading(Section::OfficialArtists, 3),
+            Row::OfficialArtist(0),
+            Row::OfficialArtist(1),
+            Row::OfficialArtist(2),
+            Row::Heading(Section::Official, 1),
+            Row::Source(0),
+        ];
+        let flowed = flow_rows(rows.clone(), Flow { columns: 2 });
+        assert_eq!(
+            flowed,
+            vec![
+                Row::Heading(Section::OfficialArtists, 3),
+                Row::Line(vec![Row::OfficialArtist(0), Row::OfficialArtist(2)]),
+                Row::Line(vec![Row::OfficialArtist(1)]),
+                Row::Heading(Section::Official, 1),
+                Row::Source(0),
+            ]
+        );
+        assert_eq!(flow_rows(rows.clone(), Flow { columns: 1 }), rows);
     }
 
     #[test]

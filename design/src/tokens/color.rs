@@ -84,6 +84,8 @@ pub const CONTROL_BORDER_HOVER: Rgba = SOFT_GREY;
 pub const FOCUS_RING: Rgba = PURE_WHITE;
 pub const LEDGE_PRIMARY: Rgba = STONE;
 pub const SHADOW_FLOAT: Rgba = DEEP_BLACK;
+/// The hard ledge under a hovered tile (desktop v2 §3): on the black canvas it reads as a step.
+pub const SHADOW_HARD: Rgba = IRON;
 pub const TEXT_PRIMARY: Rgba = WARM_WHITE;
 pub const TEXT_SECONDARY: Rgba = SOFT_GREY;
 pub const TEXT_TERTIARY: Rgba = MEDIUM_GREY;

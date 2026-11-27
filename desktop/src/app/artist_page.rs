@@ -1,21 +1,22 @@
-//! La pagina di un artista, come da `PSYTIFY_ART_DIRECTION.md` (Artist) e con le stesse sezioni, nello
-//! stesso ordine, del client Iced (`client/src/ui/pages/artist.rs`): la testa con la foto nel cerchio
-//! pixel, il nome, album, singoli e fan; Riproduci, Segui / Segui già e Radio. Poi, dal catalogo
-//! ufficiale («Altro di …», `ArtistExtras`): *Popolari* (5, «Mostra altri» li mostra tutti) e
-//! *Discografia* (schede Tutto, Album, Singoli quando ci sono entrambi; una copertina apre l'album);
-//! poi i brani già nel catalogo del server, *Altri artisti nel catalogo*, *Informazioni* e i *Crediti*.
+//! The page of an artist (`PSYTIFY_ART_DIRECTION.md`, Artist), with the Iced client's sections in its
+//! order (`client/src/ui/pages/artist.rs`): the head with the 200 dp photo in the pixel circle, the name,
+//! albums, singles and fans; the 56 dp play button, Segui / Segui già and Radio. Then, from the official
+//! catalogue («Altro di …», `ArtistExtras`): *Popolari* (5, or two columns of five above 1500 dp; «Mostra
+//! altri» shows them all) and *Discografia* (tabs Tutto, Album, Singoli when both kinds exist; a cover opens
+//! the album) on the fluid `TileGrid`; then the tracks already in the server catalogue, *Altri artisti nel
+//! catalogo* (one row of photos), *Informazioni* and the *Crediti*. The page fills the frame (desktop v2 §2)
+//! and enters with the page-enter move.
 //!
-//! La pagina la tiene il catalogo del core (`CatalogView::artist`, LRU di 40, riletta in silenzio dopo
-//! 90 s) e «Altro di …» il dominio esterno (`ExternalView::artists`, chiesto dal core da sé quando la
-//! pagina è pronta). Tutto sta in una sola lista virtualizzata: la griglia della discografia è fatta di
-//! righe di copertine, quante ne stanno nella larghezza, e si costruiscono solo quelle visibili.
+//! The core's catalogue keeps the page (`CatalogView::artist`, LRU of 40, quietly reread after 90 s) and the
+//! external domain «Altro di …» (`ExternalView::artists`). Everything is one virtual list: the discography
+//! grid is rows of tiles, as many as the width takes, and only the visible ones are built.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use gpui::{
     AnyElement, ClickEvent, Context, Entity, EventEmitter, IntoElement, ListState, ParentElement, Render,
-    SharedString, Styled, Subscription, Window, canvas, div, list,
+    SharedString, Styled, Subscription, Window, div, list,
 };
 use psytify_core::api::{ArtistPage as Artist, SourceItem, SourcePlaylist, Track};
 use psytify_core::catalog::{Load, portrait_url};
@@ -25,13 +26,13 @@ use psytify_core::feed::{self, ArtistCard};
 use psytify_core::snapshot::{ArtistExtras, CatalogView, DownloadsView, ExternalView, LibraryView};
 use psytify_design::sprite;
 use psytify_design::tokens::color::{SURFACE_CANVAS, TEXT_ERROR, TEXT_PRIMARY, TEXT_SECONDARY};
-use psytify_design::tokens::size::cover::COVER_XS;
-use psytify_design::tokens::size::{TRACK_INDEX_W, TRACK_ROW_H};
+use psytify_design::tokens::size::{BP_FLOW_3, TILE_GAP};
 use psytify_design::tokens::space::{SPACE_3, SPACE_5, SPACE_6};
 use psytify_design::tokens::type_::{TYPE_BODY, TYPE_META, TYPE_NUMERIC};
 use uuid::Uuid;
 
-use super::album_page::{credit_line, credits, failure, skeleton_page};
+use super::album_page::{credit_line, credits, failure, skeleton_page, skeleton_row};
+use super::page_frame::PageFrame;
 use super::page_list::{new_list, remeasure_header, set_rows, to_top};
 use super::search_page::source_data;
 use super::track_list::{
@@ -41,12 +42,13 @@ use super::track_list::{
 use super::track_menu::TrackMenu;
 use super::{Page, PageEvent};
 use crate::components::button::Button;
+use crate::components::frame::{Flow, Frame, TileGrid, measure};
 use crate::components::icon_button::IconButton;
-use crate::components::indicators::{PlayState, Skeleton};
+use crate::components::indicators::PlayState;
 use crate::components::navigation::{Tab, Tabs};
 use crate::components::page_header::{HeaderArt, PageHeader};
 use crate::components::playing_spot::PlayingSpot;
-use crate::components::section::{note, section_heading};
+use crate::components::section::{note_at, section_heading_at};
 use crate::components::source_row::{SourceData, SourceRow};
 use crate::components::tile::AlbumTile;
 use crate::components::track_row::{TrackData, TrackRow};
@@ -54,18 +56,19 @@ use crate::core_model::{Changed, CoreModel};
 use crate::format;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Brani in *Popolari*; «Mostra altri» li mostra tutti.
+/// Tracks per column of *Popolari*; «Mostra altri» shows them all.
 const POPULAR: usize = 5;
-/// Altri artisti proposti in fondo (al più, e solo quelli che stanno in una riga).
+/// Other artists offered at the bottom (at most, and only those that fit one row).
 const RELATED: usize = 12;
-/// Il lato delle copertine della griglia e dei ritratti degli altri artisti.
-const TILE: f32 = 160.0;
-/// Lo spazio fra due copertine della griglia e fra due righe.
-const TILE_GAP: f32 = SPACE_5;
-/// Righe dello scheletro mentre «Altro di …» arriva.
+/// Skeleton rows while «Altro di …» arrives.
 const EXTRAS_SKELETON: usize = 6;
 
-/// Come si filtra la discografia (lo stesso del client Iced, `client/src/app/artists.rs`).
+/// Columns of *Popolari* for an inner width: two above `BP_FLOW_3`.
+fn popular_columns(inner: f32) -> usize {
+    if inner >= BP_FLOW_3 { 2 } else { 1 }
+}
+
+/// How the discography is filtered (as in the Iced client, `client/src/app/artists.rs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Discography {
     #[default]
@@ -94,31 +97,32 @@ impl Discography {
     }
 }
 
-/// Le sezioni della pagina, nell'ordine del client Iced.
+/// The page's sections, in the Iced client's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Section {
     Popular,
     Discography,
-    /// I brani del server: «Già nel catalogo del server» se c'è anche il catalogo ufficiale, «Brani» se no.
+    /// The server's tracks: «Già nel catalogo del server» next to the official catalogue, «Brani» alone.
     Server,
     Related,
     About,
     Credits,
 }
 
-/// Una riga dopo la testa.
+/// A row after the head.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Heading(Section),
-    /// Le schede della discografia (solo con album e singoli insieme).
+    /// The discography tabs (only with albums and singles together).
     Tabs,
+    /// A line of *Popolari*: one cell per column.
     Popular(usize),
-    /// Una riga della griglia: le uscite da `start`, al più `columns`.
+    /// A grid row: the releases from `start`, at most `columns`.
     Releases(usize),
-    /// «Altro di …» sta arrivando: righe vuote alla misura vera.
+    /// «Altro di …» is on its way: empty rows at their real size.
     ExtrasLoading,
     ExtrasFailed,
-    /// Né catalogo ufficiale né brani del server.
+    /// Neither the official catalogue nor server tracks.
     Empty,
     Track(usize),
     Related,
@@ -126,10 +130,10 @@ enum Row {
     Credit(usize),
 }
 
-/// Che cosa c'è da mostrare: i conteggi, già calcolati. Puro, perché `plan` si possa provare.
+/// What there is to show: the counts, already computed. Pure, so `plan` can be tested.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Shape {
-    /// `None` finché «Altro di …» non è pronto o è fallito.
+    /// `None` until «Altro di …» is ready, or when it failed.
     extras: Option<ExtrasShape>,
     extras_failed: bool,
     tracks: usize,
@@ -140,15 +144,15 @@ struct Shape {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct ExtrasShape {
-    /// Le righe di *Popolari* da mostrare (5 o tutte).
+    /// The lines of *Popolari* to show (the tracks over the columns).
     popular: usize,
-    /// Le uscite dopo il filtro.
+    /// The releases after the filter.
     releases: usize,
-    /// Le schede servono (ci sono album e singoli).
+    /// The tabs are needed (there are albums and singles).
     tabs: bool,
 }
 
-/// Le righe della pagina. Pura.
+/// The page's rows. Pure.
 fn plan(shape: Shape) -> Vec<Row> {
     let mut rows = Vec::new();
     match shape.extras {
@@ -195,16 +199,7 @@ fn plan(shape: Shape) -> Vec<Row> {
     rows
 }
 
-/// Quante copertine di lato `TILE` stanno in una riga larga `width` (con i margini della pagina).
-fn columns(width: f32) -> usize {
-    let inner = (width - 2.0 * SPACE_6).max(TILE);
-    // Il conto è su numeri piccoli e positivi: il troncamento è voluto.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let fit = ((inner + TILE_GAP) / (TILE + TILE_GAP)).floor() as usize;
-    fit.max(1)
-}
-
-/// «4 album · 6 singoli ed EP · 12.400 fan» dal catalogo ufficiale; «N brani» finché non c'è.
+/// «4 album · 6 singoli ed EP · 12.400 fan» from the official catalogue; «N brani» until it arrives.
 fn meta(extras: Option<&ArtistExtras>, tracks: usize) -> String {
     let Some(extras) = extras else { return format::tracks(tracks) };
     let mut parts = Vec::new();
@@ -222,7 +217,7 @@ fn meta(extras: Option<&ArtistExtras>, tracks: usize) -> String {
     if parts.is_empty() { format::tracks(tracks) } else { parts.join(" · ") }
 }
 
-/// «2024 · Album» sotto una copertina della discografia.
+/// «2024 · Album» under a discography cover.
 fn release_subtitle(release: &SourcePlaylist) -> SharedString {
     match release.released_on.as_deref().and_then(|date| date.get(..4)) {
         Some(year) => format!("{year} · {}", release.kind_label()).into(),
@@ -230,7 +225,7 @@ fn release_subtitle(release: &SourcePlaylist) -> SharedString {
     }
 }
 
-/// Cosa mostra la pagina.
+/// What the page shows.
 #[derive(Clone, Debug, PartialEq)]
 enum Shown {
     Loading,
@@ -238,7 +233,7 @@ enum Shown {
     Ready,
 }
 
-/// Una copertina della discografia, con i testi pronti.
+/// A discography cover, with its texts ready.
 struct Release {
     playlist: SourcePlaylist,
     subtitle: SharedString,
@@ -260,14 +255,15 @@ pub struct ArtistPage {
     about: Vec<SharedString>,
     filter: Discography,
     more_popular: bool,
-    columns: usize,
+    /// The columns the rows were planned for: tile grid and *Popolari*.
+    columns: (usize, usize),
     rows: Vec<Row>,
     meta: SharedString,
     portrait: Option<SharedString>,
     following: bool,
     radio: Option<Track>,
-    /// «Scarica tutto» dei brani del server, solo quando il catalogo ufficiale non dà i Popolari (come la
-    /// barra del client Iced, che allora suona i brani del server); e il conteggio del lotto in corso.
+    /// «Scarica tutto» of the server's tracks, only when the official catalogue gives no *Popolari* (as in
+    /// the Iced client, which then plays the server's tracks); and the running batch's count.
     download_label: Option<&'static str>,
     batch: Option<SharedString>,
     liked: Arc<HashSet<Uuid>>,
@@ -276,7 +272,8 @@ pub struct ArtistPage {
     external: Arc<ExternalView>,
     now: Option<(Uuid, PlayState)>,
     list: ListState,
-    /// Il posto dell'equalizzatore del brano in corso: lo dipinge `Shell` (BACKLOG 23).
+    frame: PageFrame,
+    /// Where the playing track's equalizer goes: `Shell` paints it (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
@@ -284,7 +281,7 @@ pub struct ArtistPage {
 impl EventEmitter<PageEvent> for ArtistPage {}
 
 impl ArtistPage {
-    /// Il posto dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// This view's equalizer spot, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -308,7 +305,7 @@ impl ArtistPage {
             about: Vec::new(),
             filter: Discography::All,
             more_popular: false,
-            columns: 4,
+            columns: (0, 0),
             rows: Vec::new(),
             meta: SharedString::default(),
             portrait: None,
@@ -322,14 +319,38 @@ impl ArtistPage {
             external: Arc::clone(&snapshot.external),
             now: now_playing(&snapshot.playback),
             list: new_list(0),
+            frame: PageFrame::default(),
             core,
             spot: PlayingSpot::new(),
             _changes: changes,
         }
     }
 
-    /// Mostra l'artista `id`: il core lo serve dalla cache se c'è, altrimenti lo carica. Un altro artista
-    /// rimette a posto il filtro e «Mostra altri», come nel client Iced.
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    /// The grid and *Popolari* columns for the frame now.
+    fn plan_columns(&self) -> (usize, usize) {
+        (self.frame.frame.grid.columns, popular_columns(self.frame.frame.inner))
+    }
+
+    /// A new width: new column counts rebuild the rows, a new tile size only redraws.
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame == self.frame.frame {
+            return;
+        }
+        self.frame.frame = frame;
+        if self.plan_columns() != self.columns {
+            self.rebuild();
+        }
+        cx.notify();
+    }
+
+    /// Shows artist `id`: the core serves it from its cache or loads it. Another artist resets the filter
+    /// and «Mostra altri», as in the Iced client.
     pub fn show(&mut self, id: Uuid, cx: &mut Context<Self>) {
         self.core.read(cx).catalog(CatalogCmd::Ensure(Resource::Artist(id)));
         if self.id == Some(id) {
@@ -359,7 +380,7 @@ impl ArtistPage {
         if changed.external && !Arc::ptr_eq(&snapshot.external, &self.external) {
             self.external = Arc::clone(&snapshot.external);
             rebuild |= self.take_extras(&snapshot.external);
-            // «Apro…» sulle righe di *Popolari* mentre il core importa.
+            // «Apro…» on the *Popolari* rows while the core imports.
             dirty = true;
         }
         if changed.library && !Arc::ptr_eq(&snapshot.library, &self.library) {
@@ -403,7 +424,7 @@ impl ArtistPage {
         self.id.is_some_and(|id| self.library.followed.iter().any(|artist| artist.id == id))
     }
 
-    /// Prende dal catalogo la pagina di questo artista; `true` se è cambiata.
+    /// Takes this artist's page from the catalogue; `true` if it changed.
     fn take(&mut self, catalog: &CatalogView) -> bool {
         let Some(id) = self.id else { return false };
         let (shown, artist) = match &catalog.artist {
@@ -426,7 +447,7 @@ impl ArtistPage {
         true
     }
 
-    /// Prende «Altro di …» di questo artista; `true` se è cambiato.
+    /// Takes this artist's «Altro di …»; `true` if it changed.
     fn take_extras(&mut self, external: &ExternalView) -> bool {
         let Some(id) = self.id else { return false };
         let (extras, failed) = match external.artist(id) {
@@ -449,8 +470,10 @@ impl ArtistPage {
         true
     }
 
-    /// Rifà testi e righe: quando cambiano la pagina, «Altro di …», il filtro, le colonne o il feed.
+    /// Rebuilds texts and rows: when the page, «Altro di …», the filter, the columns or the feed change.
     fn rebuild(&mut self) {
+        self.columns = self.plan_columns();
+        let (grid_columns, popular_cols) = self.columns;
         let Some(artist) = self.artist.clone() else {
             self.rows.clear();
             set_rows(&self.list, 0);
@@ -463,7 +486,7 @@ impl ArtistPage {
             .map(|url| SharedString::from(url.to_owned()));
         self.meta = meta(self.extras.as_ref(), self.tracks.len()).into();
         self.following = self.is_following();
-        // La radio parte dal brano più ascoltato di questo artista già nel catalogo del server.
+        // The radio starts from this artist's most played track already in the server catalogue.
         self.radio = feed::popular(&self.tracks, self.library.stats.as_slice(), 1).into_iter().next();
         let has_top = self.extras.as_ref().is_some_and(|extras| !extras.top.is_empty());
         self.download_label = if has_top { None } else { download_all_label(&self.tracks) };
@@ -471,14 +494,14 @@ impl ArtistPage {
             self.popular = extras
                 .top
                 .iter()
-                .take(if self.more_popular { extras.top.len() } else { POPULAR })
+                .take(if self.more_popular { extras.top.len() } else { POPULAR * popular_cols })
                 .enumerate()
                 .map(|(position, item)| source_data(position, item))
                 .collect();
             let albums = extras.albums.iter().filter(|a| a.kind == "album").count();
             let singles = extras.albums.len() - albums;
             let tabs = albums > 0 && singles > 0;
-            // Con una sola specie di uscite le schede non servono e il filtro non conta.
+            // With one kind of release the tabs are not needed and the filter does not count.
             let filter = if tabs { self.filter } else { Discography::All };
             self.releases = extras
                 .albums
@@ -486,7 +509,8 @@ impl ArtistPage {
                 .filter(|release| filter.keeps(release))
                 .map(|release| Release { playlist: release.clone(), subtitle: release_subtitle(release) })
                 .collect();
-            ExtrasShape { popular: self.popular.len(), releases: self.releases.len(), tabs }
+            let lines = Flow { columns: popular_cols }.rows(self.popular.len());
+            ExtrasShape { popular: lines, releases: self.releases.len(), tabs }
         });
         if extras_shape.is_none() {
             self.popular.clear();
@@ -498,7 +522,7 @@ impl ArtistPage {
             .artists
             .iter()
             .filter(|card| card.artist.id != artist.id)
-            .take(RELATED.min(self.columns))
+            .take(RELATED.min(grid_columns))
             .cloned()
             .collect();
         self.credits = credits(&self.tracks);
@@ -509,13 +533,13 @@ impl ArtistPage {
             tracks: self.tracks.len(),
             related: self.related.len(),
             credits: self.credits.len(),
-            columns: self.columns,
+            columns: grid_columns,
         });
         set_rows(&self.list, self.rows.len());
         remeasure_header(&self.list);
     }
 
-    /// Le righe di *Informazioni*: brani e durata, i tuoi ascolti, le licenze.
+    /// The lines of *Informazioni*: tracks and duration, your plays, the licences.
     fn about_lines(&self, artist: &Artist) -> Vec<SharedString> {
         let total: u64 = self.tracks.iter().map(|t| t.duration_ms).sum();
         let mut lines = vec![SharedString::from(format!(
@@ -538,15 +562,6 @@ impl ArtistPage {
         lines
     }
 
-    /// La larghezza della lista è cambiata: se cambia il numero di copertine per riga si rifà la griglia.
-    fn set_columns(&mut self, columns: usize, cx: &mut Context<Self>) {
-        if columns != self.columns {
-            self.columns = columns;
-            self.rebuild();
-            cx.notify();
-        }
-    }
-
     fn set_filter(&mut self, filter: Discography, cx: &mut Context<Self>) {
         if filter != self.filter {
             self.filter = filter;
@@ -555,8 +570,8 @@ impl ArtistPage {
         }
     }
 
-    /// Riproduci: i brani più ascoltati dal catalogo ufficiale (li importa il server, uno alla volta);
-    /// finché non arrivano, i brani del server.
+    /// Play: the most played tracks of the official catalogue (the server imports them one at a time);
+    /// until they arrive, the server's tracks.
     fn play(&self, start: usize, cx: &gpui::App) {
         let Some(id) = self.id else { return };
         let core = self.core.read(cx);
@@ -575,27 +590,30 @@ impl ArtistPage {
         }
     }
 
-    fn item(&mut self, ix: usize, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let element = match ix.checked_sub(1) {
             None => self.artist.clone().map(|artist| self.header(&artist, cx).into_any_element()),
             Some(row) => self.row(row, cx),
         };
-        element.unwrap_or_else(|| div().into_any_element())
+        let element = element.unwrap_or_else(|| div().into_any_element());
+        self.frame.wrap(element, self.section(ix), window)
+    }
+
+    /// The enter step of list item `ix`: the head, then one per section heading.
+    fn section(&self, ix: usize) -> usize {
+        let Some(row) = ix.checked_sub(1) else { return 0 };
+        1 + self.rows.iter().take(row + 1).filter(|row| matches!(row, Row::Heading(_))).count()
     }
 
     fn header(&self, artist: &Artist, cx: &mut Context<Self>) -> PageHeader {
         let mut header =
             PageHeader::new(HeaderArt::Round(self.portrait.clone()), "Artista", artist.name.clone())
+                .margin(self.frame.margin())
                 .meta(self.meta.clone());
         let can_play =
             self.extras.as_ref().is_some_and(|extras| !extras.top.is_empty()) || !self.tracks.is_empty();
         if can_play {
-            header = header.action(
-                Button::new("artist-play", "Riproduci")
-                    .primary()
-                    .icon(sprite::ICON_PLAY)
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.play(0, cx))),
-            );
+            header = header.play("artist-play", cx.listener(|this, _: &ClickEvent, _, cx| this.play(0, cx)));
         }
         let followed = FollowedArtist {
             id: artist.id,
@@ -621,7 +639,7 @@ impl ArtistPage {
             );
         }
         match (&self.batch, self.download_label) {
-            // Mentre il lotto scarica, al posto dell'icona c'è il conteggio.
+            // While the batch downloads, the count replaces the icon.
             (Some(count), Some(_)) => {
                 header = header
                     .action(div().type_role(TYPE_NUMERIC).text_color(col(TEXT_PRIMARY)).child(count.clone()))
@@ -650,7 +668,7 @@ impl ArtistPage {
             Section::About => "Informazioni".into(),
             Section::Credits => "Crediti".into(),
         };
-        let heading = section_heading(title, SharedString::default());
+        let heading = section_heading_at(title, SharedString::default(), self.frame.margin());
         let more = self.extras.as_ref().is_some_and(|extras| extras.top.len() > POPULAR);
         if section == Section::Popular && more {
             let label = if self.more_popular { "Mostra meno" } else { "Mostra altri" };
@@ -669,6 +687,7 @@ impl ArtistPage {
     }
 
     fn row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let margin = self.frame.margin();
         Some(match *self.rows.get(ix)? {
             Row::Heading(section) => self.heading(section, cx),
             Row::Tabs => {
@@ -681,7 +700,7 @@ impl ArtistPage {
                     .collect();
                 let entity = cx.entity().downgrade();
                 div()
-                    .px(dp(SPACE_6))
+                    .px(dp(margin))
                     .pb(dp(SPACE_5))
                     .child(Tabs::new(tabs, selected).on_select(move |ix, _, cx| {
                         let filter = Discography::ALL.get(ix).copied().unwrap_or_default();
@@ -689,8 +708,42 @@ impl ArtistPage {
                     }))
                     .into_any_element()
             }
-            Row::Popular(position) => {
-                let item = self.extras.as_ref()?.top.get(position)?;
+            Row::Popular(line) => self.popular_line(line, cx),
+            Row::Releases(start) => self.releases_row(start, cx),
+            Row::ExtrasLoading => skeleton_row(margin).into_any_element(),
+            Row::ExtrasFailed => note_at(
+                div()
+                    .type_role(TYPE_BODY)
+                    .text_color(col(TEXT_ERROR))
+                    .child("Il catalogo ufficiale non risponde: riprova più tardi."),
+                margin,
+            )
+            .into_any_element(),
+            Row::Empty => note_at(
+                div()
+                    .type_role(TYPE_BODY)
+                    .text_color(col(TEXT_SECONDARY))
+                    .child("Il catalogo non ha brani di questo artista."),
+                margin,
+            )
+            .into_any_element(),
+            Row::Track(position) => self.frame.row(self.track_row(position, cx)?),
+            Row::Related => self.related_row(cx),
+            Row::About => self.about_card(cx),
+            Row::Credit(position) => {
+                credit_line(self.credits.get(position)?.clone(), position + 1 == self.credits.len(), margin)
+                    .into_any_element()
+            }
+        })
+    }
+
+    /// A line of *Popolari*: one track per column, the columns read top to bottom.
+    fn popular_line(&self, line: usize, cx: &mut Context<Self>) -> AnyElement {
+        let flow = Flow { columns: self.columns.1 };
+        let extras = self.extras.as_ref();
+        let cells = flow.cells(line, self.popular.len()).filter_map(|position| {
+            let item = extras?.top.get(position)?;
+            Some(
                 SourceRow::new(("artist-popular", position), self.popular.get(position)?.clone())
                     .busy(self.importing(item))
                     .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
@@ -698,50 +751,20 @@ impl ArtistPage {
                             this.play(position, cx);
                         }
                     }))
-                    .into_any_element()
-            }
-            Row::Releases(start) => self.releases_row(start, cx),
-            Row::ExtrasLoading => div()
-                .h(dp(TRACK_ROW_H))
-                .flex()
-                .items_center()
-                .gap(dp(SPACE_3))
-                .px(dp(SPACE_3))
-                .child(div().w(dp(TRACK_INDEX_W)).flex_none())
-                .child(Skeleton::new(COVER_XS, COVER_XS))
-                .child(Skeleton::new(240.0, 12.0))
-                .into_any_element(),
-            Row::ExtrasFailed => note(
-                div()
-                    .type_role(TYPE_BODY)
-                    .text_color(col(TEXT_ERROR))
-                    .child("Il catalogo ufficiale non risponde: riprova più tardi."),
+                    .into_any_element(),
             )
-            .into_any_element(),
-            Row::Empty => note(
-                div()
-                    .type_role(TYPE_BODY)
-                    .text_color(col(TEXT_SECONDARY))
-                    .child("Il catalogo non ha brani di questo artista."),
-            )
-            .into_any_element(),
-            Row::Track(position) => self.track_row(position, cx)?.into_any_element(),
-            Row::Related => self.related_row(cx),
-            Row::About => self.about_card(cx),
-            Row::Credit(position) => {
-                credit_line(self.credits.get(position)?.clone(), position + 1 == self.credits.len())
-                    .into_any_element()
-            }
-        })
+        });
+        flow.row(self.frame.margin() - SPACE_3, cells).into_any_element()
     }
 
     fn importing(&self, item: &SourceItem) -> bool {
         self.external.importing(item.source, &item.id)
     }
 
-    /// Una riga di copertine della discografia: un clic apre l'album (la pagina della fonte).
+    /// A row of discography tiles: a click opens the album (the source page).
     fn releases_row(&self, start: usize, cx: &mut Context<Self>) -> AnyElement {
-        let end = (start + self.columns.max(1)).min(self.releases.len());
+        let tile = self.frame.frame.grid.tile;
+        let end = (start + self.columns.0.max(1)).min(self.releases.len());
         let tiles = (start..end).filter_map(|position| {
             let release = self.releases.get(position)?;
             let playlist = release.playlist.clone();
@@ -751,32 +774,35 @@ impl ArtistPage {
                     release.playlist.title.clone(),
                     release.subtitle.clone(),
                 )
-                .side(TILE)
+                .side(tile)
                 .cover_url(release.playlist.cover_url.clone().map(SharedString::from))
                 .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
                     cx.emit(PageEvent::OpenSource(Box::new(playlist.clone())));
-                })),
+                }))
+                .into_any_element(),
             )
         });
-        div().flex().gap(dp(TILE_GAP)).px(dp(SPACE_6)).pb(dp(TILE_GAP)).children(tiles).into_any_element()
+        TileGrid::row(self.frame.margin(), tiles).pb(dp(TILE_GAP)).into_any_element()
     }
 
-    /// Una riga di altri artisti del catalogo: un clic apre il loro profilo.
+    /// A row of other artists of the catalogue: a click opens their page.
     fn related_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tile = self.frame.frame.grid.tile;
         let tiles = self.related.iter().enumerate().map(|(position, card)| {
             let id = card.artist.id;
             AlbumTile::new(("artist-related", position), card.artist.name.clone(), "Artista")
-                .side(TILE)
+                .side(tile)
                 .round()
                 .cover_url(card.cover_url.clone().map(SharedString::from))
                 .on_click(
                     cx.listener(move |_, _: &ClickEvent, _, cx| cx.emit(PageEvent::Open(Page::Artist(id)))),
                 )
+                .into_any_element()
         });
-        div().flex().gap(dp(TILE_GAP)).px(dp(SPACE_6)).pb(dp(TILE_GAP)).children(tiles).into_any_element()
+        TileGrid::row(self.frame.margin(), tiles).pb(dp(TILE_GAP)).into_any_element()
     }
 
-    /// *Informazioni*: i dati e «Cerca altro di …», sulla tela (niente schede, come da direzione artistica).
+    /// *Informazioni*: the data and «Cerca altro di …», on the canvas (no cards, per the art direction).
     fn about_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let name = self.artist.as_ref().map(|artist| artist.name.clone()).unwrap_or_default();
         let lines = self.about.iter().enumerate().map(|(ix, line)| {
@@ -786,10 +812,10 @@ impl ArtistPage {
                 .child(line.clone())
         });
         div()
-            .px(dp(SPACE_6))
+            .px(dp(self.frame.margin()))
             .pb(dp(SPACE_6))
             .child(
-                div().flex().flex_col().gap(dp(SPACE_3)).children(lines).child(
+                div().max_w(measure(TYPE_META)).flex().flex_col().gap(dp(SPACE_3)).children(lines).child(
                     div().pt(dp(SPACE_3)).flex().child(
                         Button::new("artist-search", format!("Cerca altro di {name}"))
                             .secondary()
@@ -856,43 +882,29 @@ impl ArtistPage {
 }
 
 impl Render for ArtistPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Il posto si segna di nuovo nel paint di questo fotogramma, se la riga in corso è visibile.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The spot is marked again in this frame's paint, if the playing row is visible.
         self.spot.clear();
-        let page = div().relative().size_full().bg(col(SURFACE_CANVAS));
+        self.frame.begin(window, Some(&self.list));
+        let page = div()
+            .relative()
+            .size_full()
+            .bg(col(SURFACE_CANVAS))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame));
         match &self.shown {
-            Shown::Loading => page.child(skeleton_page(true)),
+            Shown::Loading => page.child(skeleton_page(true, self.frame.margin())),
             Shown::Failed(error) => page.child(failure(
                 "artist-retry",
                 error.clone(),
                 cx.listener(|this, _: &ClickEvent, _, cx| this.retry(cx)),
             )),
-            Shown::Ready => {
-                // Quante copertine stanno in una riga lo dice la larghezza vera, letta a ogni disegno:
-                // se cambia, la griglia si rifà al giro dopo (un solo fotogramma).
-                let entity = cx.entity().downgrade();
-                let current = self.columns;
-                let measure = canvas(
-                    move |bounds, _, cx| {
-                        let fit = columns(f32::from(bounds.size.width));
-                        if fit != current {
-                            cx.defer(move |cx| {
-                                entity.update(cx, |this, cx| this.set_columns(fit, cx)).ok();
-                            });
-                        }
-                    },
-                    |_, _, _, _| {},
+            Shown::Ready => page.child(
+                list(
+                    self.list.clone(),
+                    cx.processor(|this: &mut Self, ix: usize, window, cx| this.item(ix, window, cx)),
                 )
-                .absolute()
-                .size_full();
-                page.child(measure).child(
-                    list(
-                        self.list.clone(),
-                        cx.processor(|this: &mut Self, ix: usize, window, cx| this.item(ix, window, cx)),
-                    )
-                    .size_full(),
-                )
-            }
+                .size_full(),
+            ),
         }
     }
 }
@@ -957,11 +969,13 @@ mod tests {
     }
 
     #[test]
-    fn the_grid_fits_whole_tiles_in_the_width() {
-        assert_eq!(columns(2.0 * SPACE_6 + TILE), 1);
-        assert_eq!(columns(2.0 * SPACE_6 + 4.0 * TILE + 3.0 * TILE_GAP), 4);
-        assert_eq!(columns(2.0 * SPACE_6 + 4.0 * TILE + 3.0 * TILE_GAP - 1.0), 3);
-        assert_eq!(columns(10.0), 1);
+    fn popular_takes_two_columns_above_1500_dp() {
+        assert_eq!(popular_columns(1499.0), 1);
+        assert_eq!(popular_columns(1500.0), 2);
+        // Ten tracks in two columns: five lines, the first column 0..5, the second 5..10.
+        let flow = Flow { columns: 2 };
+        assert_eq!(flow.rows(10), 5);
+        assert_eq!(flow.cells(0, 10).collect::<Vec<_>>(), vec![0, 5]);
     }
 
     #[test]

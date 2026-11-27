@@ -171,6 +171,9 @@ pub struct CoreConfig {
     pub legacy_api: Option<String>,
     pub volume: f32,
     pub queue: Arc<Queue>,
+    /// Where the current queue entry was at the last save, in milliseconds: a restart resumes it
+    /// from there.
+    pub position_ms: u64,
     pub playlists: Shared<Playlist>,
     /// Brani a cui si è messo "mi piace", il più recente in testa. Il backend non ha utenti per
     /// questo: come le playlist, stanno solo su questo computer.
@@ -221,6 +224,7 @@ impl Default for CoreConfig {
             legacy_api: None,
             volume: 0.8,
             queue: Arc::default(),
+            position_ms: 0,
             playlists: Shared::default(),
             liked: Shared::default(),
             recent: Shared::default(),
@@ -266,6 +270,7 @@ pub(crate) struct LibraryFields {
 pub(crate) struct PlaybackFields {
     pub(crate) volume: f32,
     pub(crate) queue: Arc<Queue>,
+    pub(crate) position_ms: u64,
     pub(crate) quality: Quality,
     pub(crate) equalizer: eq::Settings,
     pub(crate) autoplay: bool,
@@ -295,6 +300,7 @@ impl CoreConfig {
         PlaybackFields {
             volume: self.volume,
             queue: Arc::clone(&self.queue),
+            position_ms: self.position_ms,
             quality: self.quality,
             equalizer: self.equalizer,
             autoplay: self.autoplay,
@@ -305,6 +311,7 @@ impl CoreConfig {
     pub(crate) fn set_playback(&mut self, fields: PlaybackFields) {
         self.volume = fields.volume;
         self.queue = fields.queue;
+        self.position_ms = fields.position_ms;
         self.quality = fields.quality;
         self.equalizer = fields.equalizer;
         self.autoplay = fields.autoplay;
@@ -631,6 +638,7 @@ mod tests {
             server: Some("https://backend.example.test".into()),
             legacy_api: None,
             volume: 0.5,
+            position_ms: 42_000,
             last_query: "daft punk".into(),
             quality: Quality::Standard,
             download_quality: DownloadQuality::High,

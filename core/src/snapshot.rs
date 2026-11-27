@@ -14,8 +14,8 @@ pub use crate::state::{
         UpdateStatus, UpdateView,
     },
     external::{
-        ArtistExtras, ExternalEvent, ExternalRaised, ExternalView, ImportTarget, Importing, ImportsView,
-        OpenPlaylist,
+        ArtistExtras, ExternalEvent, ExternalRaised, ExternalView, ImportLinks, ImportTarget, Importing,
+        ImportsView, OpenPlaylist,
     },
     jam::{JamEvent, JamPhase, JamRaised, JamView},
     library::LibraryView,

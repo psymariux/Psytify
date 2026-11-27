@@ -20,11 +20,11 @@ fn colors_of(rgba: &[u8]) -> BTreeSet<[u8; 4]> {
 }
 
 #[test]
-fn loads_all_72_sprites_with_the_frame_counts_of_sprites_json() {
+fn loads_all_74_sprites_with_the_frame_counts_of_sprites_json() {
     let sheet = loaded();
     let expected = manifest_values();
-    assert_eq!(expected.len(), 72);
-    assert_eq!(sheet.len(), 72);
+    assert_eq!(expected.len(), 74);
+    assert_eq!(sheet.len(), 74);
     for value in &expected {
         let name = value["name"].as_str().unwrap();
         let sprite = sheet.get(name).unwrap_or_else(|| panic!("missing sprite {name}"));
@@ -71,14 +71,14 @@ fn sprite_sheet_is_decoded_once() {
 #[test]
 fn decoded_memory_cost_is_pinned() {
     // Documented in `mod.rs`: update the module comment when it changes.
-    assert_eq!(loaded().decoded_bytes(), 159_744);
+    assert_eq!(loaded().decoded_bytes(), 160_896);
 }
 
 #[test]
 fn groups_kinds_and_animation_rules() {
     let sheet = loaded();
     let masks = sheet.iter().filter(|s| s.kind() == SpriteKind::Mask).count();
-    assert_eq!(masks, 64); // 59 icons + eq, eq_rest, mark, mark_play, liked_cover
+    assert_eq!(masks, 66); // 61 icons + eq, eq_rest, mark, mark_play, liked_cover
     for sprite in sheet.iter() {
         if sprite.group() == "icons" {
             assert_eq!(sprite.kind(), SpriteKind::Mask, "{}", sprite.name());

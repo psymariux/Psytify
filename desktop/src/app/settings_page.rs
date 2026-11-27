@@ -36,14 +36,16 @@ use psytify_design::tokens::space::{SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7}
 use psytify_design::tokens::type_::{TYPE_BODY, TYPE_META};
 use serde_json::{Map, Value};
 
+use super::page_frame::PageFrame;
 use super::page_list::{new_list, set_rows, to_top};
 use super::update_banner::{Place, UpdateControl, update_line};
 use super::{Page, PageEvent};
 use crate::components::button::Button;
+use crate::components::frame::Frame;
 use crate::components::indicators::DownloadSteps;
 use crate::components::navigation::{Tab as TabItem, Tabs};
 use crate::components::search_field::SearchField;
-use crate::components::section::{PageTitle, section_heading};
+use crate::components::section::{PageTitle, section_heading_at};
 use crate::components::select::Select;
 use crate::components::setting_row::{SettingRow, setting_gap, shortcut_row};
 use crate::components::slider::SliderBank;
@@ -52,7 +54,8 @@ use crate::core_model::{Changed, CoreModel};
 use crate::format;
 use crate::notices::Notice;
 use crate::pixel::{PixelSprite, SpriteStore};
-use crate::theme::{Ap, TypeStyle, col, dp};
+use crate::theme::{TypeStyle, col, dp};
+use crate::zoom::ZoomPref;
 
 /// La chiave della preferenza «Riduci il movimento» in `config.json` (fra quelle dei frontend):
 /// `"system"`, `"reduce"` o `"full"`.
@@ -143,7 +146,7 @@ fn motion_detail(pref: MotionPref, system: SystemMotion) -> &'static str {
 const BAND_LABELS: [&str; eq::BANDS] = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
 
 /// Le scorciatoie del desktop, nell'ordine in cui si imparano (`actions.rs`).
-const SHORTCUTS: [(&str, &[&str]); 11] = [
+const SHORTCUTS: [(&str, &[&str]); 13] = [
     ("Riproduci o metti in pausa", &["Spazio"]),
     ("Brano successivo e precedente", &["Ctrl →", "Ctrl ←"]),
     ("Cerca", &["Ctrl K"]),
@@ -152,6 +155,8 @@ const SHORTCUTS: [(&str, &[&str]); 11] = [
     ("Indietro e avanti fra le pagine", &["Alt ←", "Alt →"]),
     ("Riproduzione casuale e ripetizione", &["Ctrl S", "Ctrl R"]),
     ("Impostazioni", &["Ctrl ,"]),
+    ("Ingrandisci, riduci, dimensione automatica", &["Ctrl =", "Ctrl -", "Ctrl 0"]),
+    ("Barra laterale aperta o compatta", &["Ctrl B"]),
     ("Passa da un controllo all'altro", &["Tab", "Maiusc Tab"]),
     ("Chiude menu, finestre e la vista immersiva", &["Esc"]),
     ("Esci da Psytify", &["Ctrl Q"]),
@@ -174,18 +179,21 @@ pub enum Tab {
     Playback,
     Sound,
     Downloads,
+    Appearance,
     Account,
     About,
 }
 
 impl Tab {
-    const ALL: [Self; 5] = [Self::Playback, Self::Sound, Self::Downloads, Self::Account, Self::About];
+    const ALL: [Self; 6] =
+        [Self::Playback, Self::Sound, Self::Downloads, Self::Appearance, Self::Account, Self::About];
 
     fn label(self) -> &'static str {
         match self {
             Self::Playback => "Riproduzione",
             Self::Sound => "Suono",
             Self::Downloads => "Download",
+            Self::Appearance => "Aspetto",
             Self::Account => "Account",
             Self::About => "Informazioni",
         }
@@ -201,6 +209,7 @@ enum Row {
     Quality,
     Autoplay,
     Sleep,
+    Zoom,
     ReduceMotion,
     EqEnabled,
     EqPreset,
@@ -233,10 +242,16 @@ fn plan(tab: Tab, discord: bool, profile: ProfileForm) -> Vec<Row> {
             Row::Heading("Riproduzione"),
             Row::Autoplay,
             Row::Sleep,
-            Row::Gap,
-            Row::Heading("Interfaccia"),
-            Row::ReduceMotion,
         ],
+        Tab::Appearance => {
+            vec![
+                Row::Heading("Dimensioni"),
+                Row::Zoom,
+                Row::Gap,
+                Row::Heading("Movimento"),
+                Row::ReduceMotion,
+            ]
+        }
         Tab::Sound => vec![Row::Heading("Equalizzatore"), Row::EqEnabled, Row::EqPreset, Row::EqBands],
         Tab::Downloads => {
             vec![Row::Heading("Download"), Row::DownloadQuality, Row::Folder, Row::Space]
@@ -337,6 +352,7 @@ struct Mirror {
     discord_available: bool,
     motion: MotionPref,
     system_motion: SystemMotion,
+    zoom: ZoomPref,
 }
 
 impl Mirror {
@@ -371,6 +387,7 @@ impl Mirror {
             discord_available: discord_available(config),
             motion: MotionPref::read(&snapshot.settings.ui),
             system_motion: snapshot.settings.system_motion,
+            zoom: ZoomPref::read(&snapshot.settings.ui),
         }
     }
 }
@@ -497,6 +514,7 @@ pub struct SettingsPage {
     texts: Texts,
     rows: Vec<Row>,
     list: ListState,
+    frame: PageFrame,
     /// Il campo dell'indirizzo del server.
     server: Entity<SearchField>,
     /// I campi del profilo: nome utente e nome.
@@ -507,6 +525,7 @@ pub struct SettingsPage {
     sleep_options: Vec<SharedString>,
     preset_options: Vec<SharedString>,
     motion_options: Vec<SharedString>,
+    zoom_options: Vec<SharedString>,
     version: SharedString,
     _changes: Subscription,
 }
@@ -570,6 +589,7 @@ impl SettingsPage {
             texts,
             mirror,
             list,
+            frame: PageFrame::default(),
             rows,
             server,
             handle,
@@ -582,6 +602,10 @@ impl SettingsPage {
             sleep_options: sleep_options(),
             preset_options: PRESETS.iter().map(|(name, _)| SharedString::from(*name)).collect(),
             motion_options: MotionPref::ALL.iter().map(|pref| SharedString::from(pref.label())).collect(),
+            zoom_options: ZoomPref::options()
+                .into_iter()
+                .map(|pref| SharedString::from(pref.label()))
+                .collect(),
             version: format!(
                 "Versione {}",
                 psytify_core::api::update::BUILD_TAG.unwrap_or(env!("CARGO_PKG_VERSION"))
@@ -695,6 +719,13 @@ impl SettingsPage {
         self.take(mirror, cx);
     }
 
+    /// The UI zoom: saved with the frontend preferences; the window applies it when the core publishes.
+    fn set_zoom(&mut self, pref: ZoomPref, cx: &mut Context<Self>) {
+        if pref != self.mirror.zoom {
+            self.core.read(cx).settings(SettingsCmd::SaveUiPrefs(pref.prefs()));
+        }
+    }
+
     /// «Usa» o Invio nel campo del server: come il client Iced, un indirizzo vuoto o uguale al predefinito
     /// torna al predefinito; uno non valido dà un avviso e non cambia niente.
     fn apply_server(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -733,25 +764,50 @@ impl SettingsPage {
             .w_full()
             .flex()
             .flex_col()
-            .child(PageTitle::screen("Impostazioni"))
-            .child(div().px(dp(SPACE_6)).pt(dp(SPACE_3)).child(tabs))
+            .child(PageTitle::screen("Impostazioni").margin(self.frame.margin()))
+            .child(div().px(dp(self.frame.margin())).pt(dp(SPACE_3)).child(tabs))
             .into_any_element()
+    }
+
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame != self.frame.frame {
+            self.frame.frame = frame;
+            cx.notify();
+        }
     }
 
     fn item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if ix == 0 {
-            return self.header(cx);
+            let header = self.header(cx);
+            return self.frame.wrap(header, 0, window);
         }
-        match self.rows.get(ix - 1).copied() {
-            Some(row) => self.row(row, window, cx),
+        let element = match self.rows.get(ix - 1).copied() {
+            // Rows carry `SPACE_6` each side: the rest of the frame margin goes around them.
+            Some(row @ Row::Heading(_)) => self.row(row, window, cx),
+            Some(row) => div()
+                .w_full()
+                .px(dp((self.frame.margin() - SPACE_6).max(0.0)))
+                .child(self.row(row, window, cx))
+                .into_any_element(),
             None => div().into_any_element(),
-        }
+        };
+        let section = 1 + self.rows.iter().take(ix).filter(|row| matches!(row, Row::Heading(_))).count();
+        self.frame.wrap(element, section, window)
     }
 
     fn row(&mut self, row: Row, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let margin = self.frame.margin();
         let m = &self.mirror;
         match row {
-            Row::Heading(title) => section_heading(title.into(), SharedString::default()).into_any_element(),
+            Row::Heading(title) => {
+                section_heading_at(title.into(), SharedString::default(), margin).into_any_element()
+            }
             Row::Gap => setting_gap().into_any_element(),
             Row::Quality => {
                 let current = usize::from(m.quality == Quality::Standard);
@@ -791,6 +847,23 @@ impl SettingsPage {
                         }, cx)),
                 )
                 .into_any_element(),
+            Row::Zoom => {
+                let current = ZoomPref::options().iter().position(|pref| *pref == m.zoom);
+                SettingRow::new("Dimensione dell'interfaccia")
+                    .description(
+                        "Automatica segue la larghezza della finestra. Ctrl = e Ctrl - cambiano, Ctrl 0 torna ad automatica.",
+                    )
+                    .control(
+                        Select::new("set-zoom", self.zoom_options.clone(), current)
+                            .min_width(MENU_W / 2.0)
+                            .on_select(self.select(|this, ix, cx| {
+                                if let Some(pref) = ZoomPref::options().get(ix) {
+                                    this.set_zoom(*pref, cx);
+                                }
+                            }, cx)),
+                    )
+                    .into_any_element()
+            }
             Row::ReduceMotion => {
                 let current = MotionPref::ALL.iter().position(|pref| *pref == m.motion);
                 SettingRow::new("Riduci il movimento")
@@ -991,8 +1064,7 @@ impl SettingsPage {
     }
 
     /// Nastro, il nome in tipo pixel e la versione.
-    fn about(&self, window: &mut Window) -> AnyElement {
-        let ap = Ap::of(window);
+    fn about(&self, _window: &mut Window) -> AnyElement {
         div()
             .w_full()
             .flex()
@@ -1007,13 +1079,8 @@ impl SettingsPage {
                     .flex()
                     .flex_col()
                     .gap(dp(SPACE_3))
-                    .child(div().text_color(col(TEXT_PRIMARY)).child("Psytify").pixel_type(ap, false))
-                    .child(
-                        div()
-                            .text_color(col(TEXT_SECONDARY))
-                            .child(self.version.clone())
-                            .pixel_type(ap, true),
-                    )
+                    .child(div().text_color(col(TEXT_PRIMARY)).child("Psytify").pixel_type(false))
+                    .child(div().text_color(col(TEXT_SECONDARY)).child(self.version.clone()).pixel_type(true))
                     .child(
                         div()
                             .type_role(TYPE_BODY)
@@ -1121,14 +1188,21 @@ pub fn apply_reduce_motion(on: bool, cx: &mut App) {
 }
 
 impl Render for SettingsPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().bg(col(SURFACE_CANVAS)).pb(dp(SPACE_7)).child(
-            list(
-                self.list.clone(),
-                cx.processor(|this: &mut Self, ix: usize, window, cx| this.item(ix, window, cx)),
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.frame.begin(window, Some(&self.list));
+        div()
+            .relative()
+            .size_full()
+            .bg(col(SURFACE_CANVAS))
+            .pb(dp(SPACE_7))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame))
+            .child(
+                list(
+                    self.list.clone(),
+                    cx.processor(|this: &mut Self, ix: usize, window, cx| this.item(ix, window, cx)),
+                )
+                .size_full(),
             )
-            .size_full(),
-        )
     }
 }
 
@@ -1147,9 +1221,16 @@ mod tests {
                 Row::Heading("Riproduzione"),
                 Row::Autoplay,
                 Row::Sleep,
+            ]
+        );
+        assert_eq!(
+            plan(Tab::Appearance, false, ProfileForm::None),
+            vec![
+                Row::Heading("Dimensioni"),
+                Row::Zoom,
                 Row::Gap,
-                Row::Heading("Interfaccia"),
-                Row::ReduceMotion,
+                Row::Heading("Movimento"),
+                Row::ReduceMotion
             ]
         );
         assert_eq!(plan(Tab::Sound, false, ProfileForm::None).last(), Some(&Row::EqBands));

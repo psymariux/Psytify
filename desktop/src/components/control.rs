@@ -1,16 +1,20 @@
-//! Infrastruttura comune dei controlli: stato di interazione (hover, premuto, focus da tastiera) e
-//! sovrascrittura per la galleria.
+//! Shared control plumbing: interaction state (hover, press, keyboard focus) and the gallery override.
 //!
-//! Ogni controllo interattivo tiene un piccolo stato per id (`use_keyed_state`): vive finché il
-//! controllo viene disegnato frame dopo frame. Cambiarlo ridisegna la finestra (come l'hover di
-//! GPUI), ma solo quando cambia davvero.
+//! Every interactive control keeps a small state per id (`use_keyed_state`): it lives while the control is
+//! drawn frame after frame. A change redraws the view that draws it, only when it really changes. The hover
+//! is also a tween (`MOTION_HOVER`): [`Visual::hover_t`] eases 0 to 1, and the view asks for frames only
+//! while it runs (`motion`).
 
 use std::rc::Rc;
+use std::time::Instant;
 
 use gpui::{
     App, ClickEvent, Context, CursorStyle, Div, ElementId, FocusHandle, InteractiveElement, IntoElement,
     MouseButton, ParentElement, Stateful, StatefulInteractiveElement, Styled, Window, div,
 };
+use psytify_design::tokens::motion::MOTION_HOVER;
+
+use crate::motion::{Tween, duration, keep_running};
 
 /// Callback di un click (mouse o tastiera: Invio/Spazio sul controllo con il focus).
 pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
@@ -28,17 +32,20 @@ pub enum Preview {
 }
 
 /// Cosa disegnare in questo frame.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Visual {
     pub hovered: bool,
     pub pressed: bool,
     /// Solo per `Preview::Focused`: l'anello va mostrato anche senza tastiera.
     pub force_ring: bool,
+    /// The hover move, eased from 0 (rest) to 1 (hovered) in `MOTION_HOVER`.
+    pub hover_t: f32,
 }
 
 struct ControlState {
     hovered: bool,
     pressed: bool,
+    hover: Tween,
     focus: FocusHandle,
 }
 
@@ -57,12 +64,15 @@ pub fn wire(id: &ElementId, disabled: bool, preview: Preview, window: &mut Windo
     let state = window.use_keyed_state(id.clone(), cx, |_, cx: &mut Context<ControlState>| ControlState {
         hovered: false,
         pressed: false,
+        hover: Tween::at(0.0),
         focus: cx.focus_handle(),
     });
-    let (hovered, pressed, focus) = {
+    let now = Instant::now();
+    let (hovered, pressed, focus, hover) = {
         let s = state.read(cx);
-        (s.hovered, s.pressed, s.focus.clone())
+        (s.hovered, s.pressed, s.focus.clone(), s.hover)
     };
+    keep_running(window, hover.running(now));
     let mut element = div().id(id.clone());
     if !disabled {
         let hover_state = state.clone();
@@ -74,9 +84,11 @@ pub fn wire(id: &ElementId, disabled: bool, preview: Preview, window: &mut Windo
             .tab_stop(true)
             .cursor(CursorStyle::PointingHand)
             .on_hover(move |hovering, _, cx| {
+                let ms = duration(MOTION_HOVER, cx);
                 hover_state.update(cx, |s, cx| {
                     if s.hovered != *hovering {
                         s.hovered = *hovering;
+                        s.hover.set(if *hovering { 1.0 } else { 0.0 }, ms, Instant::now());
                         cx.notify();
                     }
                 });
@@ -110,10 +122,10 @@ pub fn wire(id: &ElementId, disabled: bool, preview: Preview, window: &mut Windo
         Visual::default()
     } else {
         match preview {
-            Preview::Live => Visual { hovered, pressed, force_ring: false },
+            Preview::Live => Visual { hovered, pressed, force_ring: false, hover_t: hover.value(now) },
             Preview::Rest => Visual::default(),
-            Preview::Hover => Visual { hovered: true, ..Visual::default() },
-            Preview::Pressed => Visual { hovered: true, pressed: true, force_ring: false },
+            Preview::Hover => Visual { hovered: true, hover_t: 1.0, ..Visual::default() },
+            Preview::Pressed => Visual { hovered: true, pressed: true, force_ring: false, hover_t: 1.0 },
             Preview::Focused => Visual { force_ring: true, ..Visual::default() },
         }
     };

@@ -74,8 +74,9 @@ mod linux {
     use tokio::sync::mpsc;
     use zbus::fdo::PropertiesProxy;
     use zbus::names::InterfaceName;
-    use zbus::zvariant::{OwnedValue, Value};
-    use zbus::{CacheProperties, Connection, Proxy, ProxyBuilder};
+    use zbus::proxy::{CacheProperties, SignalStream};
+    use zbus::{Connection, Proxy, proxy::Builder as ProxyBuilder};
+    use zbus::{OwnedVariant, Variant};
 
     use super::SystemMotion;
 
@@ -106,7 +107,7 @@ mod linux {
     impl Sources {
         /// A portal setting; those of other keys do not count. A value of an unexpected type is
         /// "no preference".
-        pub(super) fn set(&mut self, namespace: &str, key: &str, value: &Value<'_>) {
+        pub(super) fn set(&mut self, namespace: &str, key: &str, value: &Variant<'_>) {
             let value = unwrap_variant(value);
             match (namespace, key) {
                 APPEARANCE => self.appearance = reduced_from_appearance(value),
@@ -116,7 +117,7 @@ mod linux {
             }
         }
 
-        pub(super) fn set_profile(&mut self, value: Option<&Value<'_>>) {
+        pub(super) fn set_profile(&mut self, value: Option<&Variant<'_>>) {
             self.power_saver = value.and_then(|value| power_saver(unwrap_variant(value)));
         }
 
@@ -129,43 +130,43 @@ mod linux {
     }
 
     /// The portal's old `Read` method puts the answer in one variant too many.
-    fn unwrap_variant<'v>(value: &'v Value<'v>) -> &'v Value<'v> {
+    fn unwrap_variant<'v>(value: &'v Variant<'v>) -> &'v Variant<'v> {
         match value {
-            Value::Value(inner) => unwrap_variant(inner),
+            Variant::Variant(inner) => unwrap_variant(inner),
             value => value,
         }
     }
 
     /// `reduced-motion`: 0 no preference, 1 reduced motion.
-    fn reduced_from_appearance(value: &Value<'_>) -> Option<bool> {
+    fn reduced_from_appearance(value: &Variant<'_>) -> Option<bool> {
         match value {
-            Value::U32(value) => Some(*value == 1),
+            Variant::U32(value) => Some(*value == 1),
             _ => None,
         }
     }
 
     /// `enable-animations`: animations off means reduced motion.
-    fn reduced_from_gnome(value: &Value<'_>) -> Option<bool> {
+    fn reduced_from_gnome(value: &Variant<'_>) -> Option<bool> {
         match value {
-            Value::Bool(enabled) => Some(!enabled),
+            Variant::Bool(enabled) => Some(!enabled),
             _ => None,
         }
     }
 
     /// `AnimationDurationFactor`: 0 means instant animations. KDE's portal gives it as a
     /// number or as text, depending on the version.
-    fn reduced_from_kde(value: &Value<'_>) -> Option<bool> {
+    fn reduced_from_kde(value: &Variant<'_>) -> Option<bool> {
         let factor = match value {
-            Value::F64(factor) => *factor,
-            Value::Str(text) => text.as_str().trim().parse().ok()?,
+            Variant::F64(factor) => *factor,
+            Variant::Str(text) => text.as_str().trim().parse().ok()?,
             _ => return None,
         };
         Some(factor <= 0.0)
     }
 
-    fn power_saver(value: &Value<'_>) -> Option<bool> {
+    fn power_saver(value: &Variant<'_>) -> Option<bool> {
         match value {
-            Value::Str(profile) => Some(profile.as_str() == POWER_SAVER),
+            Variant::Str(profile) => Some(profile.as_str() == POWER_SAVER),
             _ => None,
         }
     }
@@ -228,7 +229,7 @@ mod linux {
         loop {
             tokio::select! {
                 Some(message) = next(&mut settings) => {
-                    if let Ok((namespace, key, value)) = message.body::<(String, String, OwnedValue)>() {
+                    if let Ok((namespace, key, value)) = message.body().deserialize::<(String, String, OwnedVariant)>() {
                         sources.set(&namespace, &key, &value);
                     }
                 }
@@ -259,10 +260,10 @@ mod linux {
         }
     }
 
-    type ProfileStream = zbus::fdo::PropertiesChangedStream<'static>;
+    type ProfileStream = zbus::fdo::PropertiesChangedStream;
 
     /// The next signal of a stream; a finished stream is removed and no longer waited for.
-    async fn next(stream: &mut Option<zbus::SignalStream<'static>>) -> Option<std::sync::Arc<zbus::Message>> {
+    async fn next(stream: &mut Option<SignalStream<'static>>) -> Option<zbus::Message> {
         let Some(inner) = stream else { return std::future::pending().await };
         let item = inner.next().await;
         if item.is_none() {
@@ -289,13 +290,10 @@ mod linux {
         path: &'static str,
         interface: &'static str,
     ) -> Option<Proxy<'static>> {
-        ProxyBuilder::new_bare(connection)
+        ProxyBuilder::<Proxy<'static>>::new(connection)
             .destination(name)
-            .ok()?
             .path(path)
-            .ok()?
             .interface(interface)
-            .ok()?
             .cache_properties(CacheProperties::No)
             .build()
             .await
@@ -303,13 +301,13 @@ mod linux {
     }
 
     /// A portal setting: `ReadOne` (portal 2) or, if it is missing, the old `Read`.
-    async fn read_setting(portal: &Proxy<'_>, namespace: &str, key: &str) -> Option<OwnedValue> {
-        match portal.call::<_, _, OwnedValue>("ReadOne", &(namespace, key)).await {
+    async fn read_setting(portal: &Proxy<'_>, namespace: &str, key: &str) -> Option<OwnedVariant> {
+        match portal.call::<_, _, OwnedVariant>("ReadOne", &(namespace, key)).await {
             Ok(value) => Some(value),
             Err(zbus::Error::MethodError(name, _, _))
                 if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod" =>
             {
-                portal.call::<_, _, OwnedValue>("Read", &(namespace, key)).await.ok()
+                portal.call::<_, _, OwnedVariant>("Read", &(namespace, key)).await.ok()
             }
             Err(_) => None,
         }
@@ -322,8 +320,7 @@ mod linux {
         sources: &mut Sources,
     ) -> Option<(PropertiesProxy<'static>, InterfaceName<'static>, ProfileStream)> {
         for (name, path) in POWER {
-            let Ok(builder) = PropertiesProxy::builder(connection).destination(name) else { continue };
-            let Ok(builder) = builder.path(path) else { continue };
+            let builder = PropertiesProxy::builder(connection).destination(name).path(path);
             let Ok(proxy) = builder.cache_properties(CacheProperties::No).build().await else { continue };
             let Ok(interface) = InterfaceName::try_from(name) else { continue };
             let Ok(stream) = proxy.receive_properties_changed().await else { continue };
@@ -338,7 +335,7 @@ mod linux {
     mod tests {
         use super::*;
 
-        fn set(sources: &mut Sources, (namespace, key): (&str, &str), value: Value<'_>) {
+        fn set(sources: &mut Sources, (namespace, key): (&str, &str), value: Variant<'_>) {
             sources.set(namespace, key, &value);
         }
 
@@ -346,21 +343,21 @@ mod linux {
         fn each_desktop_source_is_read_with_its_own_meaning() {
             let mut sources = Sources::default();
             assert_eq!(sources.motion(), SystemMotion::default(), "nessuna fonte, nessuna preferenza");
-            set(&mut sources, APPEARANCE, Value::U32(0));
+            set(&mut sources, APPEARANCE, Variant::U32(0));
             assert_eq!(sources.motion().reduced_motion, Some(false));
-            set(&mut sources, APPEARANCE, Value::Value(Box::new(Value::U32(1))));
+            set(&mut sources, APPEARANCE, Variant::Variant(Box::new(Variant::U32(1))));
             assert_eq!(sources.motion().reduced_motion, Some(true), "la variante doppia di `Read`");
-            set(&mut sources, APPEARANCE, Value::Str("1".into()));
+            set(&mut sources, APPEARANCE, Variant::Str("1".into()));
             assert_eq!(sources.motion().reduced_motion, None, "un tipo inatteso non è una risposta");
 
-            set(&mut sources, GNOME, Value::Bool(false));
+            set(&mut sources, GNOME, Variant::Bool(false));
             assert_eq!(sources.motion().reduced_motion, Some(true), "animazioni spente su GNOME");
-            set(&mut sources, GNOME, Value::Bool(true));
-            set(&mut sources, KDE, Value::F64(0.0));
+            set(&mut sources, GNOME, Variant::Bool(true));
+            set(&mut sources, KDE, Variant::F64(0.0));
             assert_eq!(sources.motion().reduced_motion, Some(true), "fattore 0 su KDE");
-            set(&mut sources, KDE, Value::Str("1.0".into()));
+            set(&mut sources, KDE, Variant::Str("1.0".into()));
             assert_eq!(sources.motion().reduced_motion, Some(false));
-            set(&mut sources, ("org.example", "reduced-motion"), Value::U32(1));
+            set(&mut sources, ("org.example", "reduced-motion"), Variant::U32(1));
             assert_eq!(sources.motion().reduced_motion, Some(false), "un'altra chiave non conta");
         }
 
@@ -368,7 +365,7 @@ mod linux {
         fn only_the_power_saver_profile_asks_for_less_motion() {
             let mut sources = Sources::default();
             for (profile, saver) in [("power-saver", true), ("balanced", false), ("performance", false)] {
-                sources.set_profile(Some(&Value::Str(profile.into())));
+                sources.set_profile(Some(&Variant::Str(profile.into())));
                 assert_eq!(sources.motion().power_saver, Some(saver), "{profile}");
             }
             sources.set_profile(None);
@@ -402,30 +399,31 @@ mod tests {
         use std::time::Duration;
 
         use futures_util::StreamExt;
-        use zbus::zvariant::{OwnedValue, Value};
-        use zbus::{ConnectionBuilder, SignalContext, dbus_interface};
+        use zbus::object_server::SignalEmitter;
+        use zbus::{OwnedVariant, Variant};
+        use zbus::{connection::Builder, interface};
 
         struct FakeSettings {
             reduced: u32,
         }
 
-        #[dbus_interface(name = "org.freedesktop.portal.Settings")]
+        #[interface(name = "org.freedesktop.portal.Settings")]
         impl FakeSettings {
-            #[dbus_interface(name = "ReadOne")]
-            fn read_one(&self, namespace: &str, key: &str) -> zbus::fdo::Result<OwnedValue> {
+            #[zbus(name = "ReadOne")]
+            fn read_one(&self, namespace: &str, key: &str) -> zbus::fdo::Result<OwnedVariant> {
                 if (namespace, key) == linux::APPEARANCE {
-                    Ok(Value::U32(self.reduced).into())
+                    Ok(OwnedVariant::from(self.reduced))
                 } else {
                     Err(zbus::fdo::Error::Failed("not found".into()))
                 }
             }
 
-            #[dbus_interface(signal, name = "SettingChanged")]
+            #[zbus(signal, name = "SettingChanged")]
             async fn setting_changed(
-                ctxt: &SignalContext<'_>,
+                ctxt: &SignalEmitter<'_>,
                 namespace: &str,
                 key: &str,
-                value: Value<'_>,
+                value: Variant<'_>,
             ) -> zbus::Result<()>;
         }
 
@@ -433,9 +431,9 @@ mod tests {
             active: String,
         }
 
-        #[dbus_interface(name = "org.freedesktop.UPower.PowerProfiles")]
+        #[interface(name = "org.freedesktop.UPower.PowerProfiles")]
         impl FakeProfiles {
-            #[dbus_interface(property, name = "ActiveProfile")]
+            #[zbus(property, name = "ActiveProfile")]
             fn active_profile(&self) -> String {
                 self.active.clone()
             }
@@ -487,19 +485,14 @@ mod tests {
         let (power_name, power_path) = linux::POWER[0];
         // A bus that does not answer does not block the test: each step has its own deadline.
         let within = Duration::from_secs(10);
-        let service = ConnectionBuilder::address(address.as_str())
-            .unwrap()
+        let service = Builder::address(address.as_str())
             .name(PORTAL_NAME)
-            .unwrap()
             .name(power_name)
-            .unwrap()
             .serve_at(PORTAL_PATH_FOR_TEST, FakeSettings { reduced: 0 })
-            .unwrap()
             .serve_at(power_path, FakeProfiles { active: "performance".into() })
-            .unwrap()
             .build();
         let service = tokio::time::timeout(within, service).await.expect("il servizio finto").unwrap();
-        let client = ConnectionBuilder::address(address.as_str()).unwrap().build();
+        let client = Builder::address(address.as_str()).build();
         let client = tokio::time::timeout(within, client).await.expect("il client").unwrap();
         let mut readings = Box::pin(watch(client));
         let mut next = async || {
@@ -515,23 +508,23 @@ mod tests {
         // Power saving, live.
         let profiles = service.object_server().interface::<_, FakeProfiles>(power_path).await.unwrap();
         profiles.get_mut().await.active = "power-saver".into();
-        profiles.get().await.active_profile_changed(profiles.signal_context()).await.unwrap();
+        profiles.get().await.active_profile_changed(profiles.signal_emitter()).await.unwrap();
         assert_eq!(next().await, SystemMotion { power_saver: Some(true), ..full });
 
         // The desktop's reduced motion, live; a signal of another key sends nothing.
         let settings =
             service.object_server().interface::<_, FakeSettings>(PORTAL_PATH_FOR_TEST).await.unwrap();
-        let ctxt = settings.signal_context();
-        FakeSettings::setting_changed(ctxt, "org.example", "other", Value::U32(1)).await.unwrap();
-        FakeSettings::setting_changed(ctxt, linux::APPEARANCE.0, linux::APPEARANCE.1, Value::U32(1))
+        let ctxt = settings.signal_emitter();
+        FakeSettings::setting_changed(ctxt, "org.example", "other", Variant::U32(1)).await.unwrap();
+        FakeSettings::setting_changed(ctxt, linux::APPEARANCE.0, linux::APPEARANCE.1, Variant::U32(1))
             .await
             .unwrap();
         assert_eq!(next().await, SystemMotion { reduced_motion: Some(true), power_saver: Some(true) });
 
         // And back to full motion.
         profiles.get_mut().await.active = "balanced".into();
-        profiles.get().await.active_profile_changed(profiles.signal_context()).await.unwrap();
-        FakeSettings::setting_changed(ctxt, linux::APPEARANCE.0, linux::APPEARANCE.1, Value::U32(0))
+        profiles.get().await.active_profile_changed(profiles.signal_emitter()).await.unwrap();
+        FakeSettings::setting_changed(ctxt, linux::APPEARANCE.0, linux::APPEARANCE.1, Variant::U32(0))
             .await
             .unwrap();
         assert_eq!(next().await, SystemMotion { reduced_motion: Some(true), power_saver: Some(false) });

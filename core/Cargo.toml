@@ -62,8 +62,11 @@ open = "5"
 # (`system_motion`: the settings portal and power-profiles-daemon). The MPRIS service is ours
 # since QA 1: souvlaki 0.8, which did it before with this same zbus, polled its channel
 # every 10 ms and woke the process 100 times a second even at rest (docs/PERFORMANCE.md, «QA 1»).
+# zbus 6 (zvariant merged into it, `Variant` instead of `Value`): default features, i.e. its own small
+# executor thread as with zbus 3, no tokio feature; it is the same zbus the desktop already has through
+# GPUI's notify-rust, so the lock drops the old 3.x tree.
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = "3"
+zbus = "6"
 
 [dev-dependencies]
 # `test-util`: the host tests pause the tokio clock (`start_paused`) and fast-forward fake seconds

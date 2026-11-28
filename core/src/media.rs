@@ -117,8 +117,9 @@ mod linux {
 
     use futures_util::Stream;
     use tokio::sync::mpsc::{self, UnboundedSender, unbounded_channel};
-    use zbus::zvariant::{ObjectPath, Value};
-    use zbus::{ConnectionBuilder, InterfaceRef, dbus_interface};
+    use zbus::object_server::InterfaceRef;
+    use zbus::{ObjectPath, Variant};
+    use zbus::{connection::Builder, interface};
 
     use super::{Event, NowPlaying};
 
@@ -220,7 +221,7 @@ mod linux {
         commands: UnboundedSender<Event>,
     }
 
-    #[dbus_interface(name = "org.mpris.MediaPlayer2")]
+    #[interface(name = "org.mpris.MediaPlayer2")]
     impl Root {
         fn raise(&self) {
             let _ = self.commands.send(Event::Raise);
@@ -229,32 +230,32 @@ mod linux {
         /// Closing the app from the widget did not exist even before: closing goes through the window's save.
         fn quit(&self) {}
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn can_quit(&self) -> bool {
             true
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn can_raise(&self) -> bool {
             true
         }
 
-        #[dbus_interface(property, name = "HasTrackList")]
+        #[zbus(property, name = "HasTrackList")]
         fn has_track_list(&self) -> bool {
             false
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn identity(&self) -> &'static str {
             "Psytify"
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn supported_uri_schemes(&self) -> Vec<String> {
             Vec::new()
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn supported_mime_types(&self) -> Vec<String> {
             Vec::new()
         }
@@ -275,7 +276,7 @@ mod linux {
         }
     }
 
-    #[dbus_interface(name = "org.mpris.MediaPlayer2.Player")]
+    #[interface(name = "org.mpris.MediaPlayer2.Player")]
     impl Player {
         fn next(&self) {
             self.send(Event::Next);
@@ -314,7 +315,7 @@ mod linux {
         /// Psytify does not open addresses from the system.
         fn open_uri(&self, _uri: String) {}
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn playback_status(&self) -> &'static str {
             match self.status {
                 Status::Playing => "Playing",
@@ -323,83 +324,83 @@ mod linux {
             }
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn rate(&self) -> f64 {
             1.0
         }
 
-        #[dbus_interface(property)]
-        fn metadata(&self) -> HashMap<&'static str, Value<'static>> {
+        #[zbus(property)]
+        fn metadata(&self) -> HashMap<&'static str, Variant<'static>> {
             let mut dict = HashMap::new();
             // A track id is needed so the system can ask for `SetPosition`.
             if let Ok(id) = ObjectPath::try_from("/") {
-                dict.insert("mpris:trackid", Value::new(id));
+                dict.insert("mpris:trackid", Variant::new(id));
             }
             if let Some(metadata) = &self.metadata {
-                dict.insert("mpris:length", Value::new(metadata.length));
-                dict.insert("xesam:title", Value::new(metadata.title.clone()));
-                dict.insert("xesam:artist", Value::new(vec![metadata.artist.clone()]));
+                dict.insert("mpris:length", Variant::new(metadata.length));
+                dict.insert("xesam:title", Variant::new(metadata.title.clone()));
+                dict.insert("xesam:artist", Variant::new(vec![metadata.artist.clone()]));
                 if let Some(album) = &metadata.album {
-                    dict.insert("xesam:album", Value::new(album.clone()));
+                    dict.insert("xesam:album", Variant::new(album.clone()));
                 }
                 if let Some(cover) = &metadata.cover_url {
-                    dict.insert("mpris:artUrl", Value::new(cover.clone()));
+                    dict.insert("mpris:artUrl", Variant::new(cover.clone()));
                 }
             }
             dict
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn volume(&self) -> f64 {
             self.volume
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn set_volume(&self, volume: f64) {
             self.send(Event::SetVolume(volume.clamp(0.0, 1.0) as f32));
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn position(&self) -> i64 {
             if self.status == Status::Stopped { 0 } else { micros(self.position) }
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn minimum_rate(&self) -> f64 {
             1.0
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn maximum_rate(&self) -> f64 {
             1.0
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn can_go_next(&self) -> bool {
             true
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn can_go_previous(&self) -> bool {
             true
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn can_play(&self) -> bool {
             true
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn can_pause(&self) -> bool {
             true
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn can_seek(&self) -> bool {
             true
         }
 
-        #[dbus_interface(property)]
+        #[zbus(property)]
         fn can_control(&self) -> bool {
             true
         }
@@ -412,14 +413,12 @@ mod linux {
             // One name per process, as MPRIS asks with several instances: with a fixed name the second
             // window would not have its own. `playerctl -p psytify` finds them all.
             let name = format!("org.mpris.MediaPlayer2.psytify.instance{}", std::process::id());
-            if let Ok(builder) = ConnectionBuilder::session() {
-                serve(builder, &name, output).await;
-            }
+            serve(Builder::session(), &name, output).await;
         })
     }
 
     /// The service on `builder` with the name `name`, as long as whoever reads `output` is there.
-    async fn serve(builder: ConnectionBuilder<'_>, name: &str, output: mpsc::Sender<Event>) {
+    async fn serve(builder: Builder<'_>, name: &str, output: mpsc::Sender<Event>) {
         let (commands, mut called) = unbounded_channel();
         let (changes, mut changed) = unbounded_channel();
         let root = Root { commands: commands.clone() };
@@ -430,8 +429,10 @@ mod linux {
             metadata: None,
             volume: 1.0,
         };
-        let built = async { builder.serve_at(PATH, root)?.serve_at(PATH, player)?.name(name)?.build().await };
-        let Ok(connection) = built.await else { return };
+        let Ok(connection) = builder.serve_at(PATH, root).serve_at(PATH, player).name(name).build().await
+        else {
+            return;
+        };
         let Ok(player) = connection.object_server().interface::<_, Player>(PATH).await else { return };
         // The sender stays here too: the channel of changes does not close while the service lives.
         if output.send(Event::Ready(Handle(changes.clone()))).await.is_err() {
@@ -453,7 +454,7 @@ mod linux {
     /// the position is not announced (the specification wants the system to read it when needed).
     async fn apply(player: &InterfaceRef<Player>, change: Change) {
         let mut iface = player.get_mut().await;
-        let context = player.signal_context();
+        let context = player.signal_emitter();
         let _ = match change {
             Change::Metadata(metadata) => {
                 iface.metadata = Some(metadata);
@@ -479,7 +480,7 @@ mod linux {
         use std::time::Duration;
 
         use futures_util::StreamExt;
-        use zbus::zvariant::OwnedValue;
+        use zbus::OwnedVariant;
 
         use super::*;
 
@@ -550,7 +551,7 @@ mod linux {
 
             // The stream runs in a task of its own, as in the core's host that always waits for it: the changes of
             // what is shown reach the service only while someone makes it advance.
-            let builder = ConnectionBuilder::address(address.as_str()).unwrap();
+            let builder = Builder::address(address.as_str());
             let mut service = Box::pin(crate::media::channel(32, |output| async move {
                 serve(builder, NAME, output).await;
             }));
@@ -567,21 +568,17 @@ mod linux {
             };
             let Event::Ready(handle) = next().await else { panic!("prima il collegamento") };
 
-            let client =
-                tokio::time::timeout(within, ConnectionBuilder::address(address.as_str()).unwrap().build())
-                    .await
-                    .expect("il client")
-                    .unwrap();
+            let client = tokio::time::timeout(within, Builder::address(address.as_str()).build())
+                .await
+                .expect("il client")
+                .unwrap();
             // Without the properties cache: `Position` is not announced, the system reads it when needed.
             let proxy = async |interface: &'static str| -> zbus::Proxy<'static> {
-                zbus::ProxyBuilder::new_bare(&client)
+                zbus::proxy::Builder::<zbus::Proxy<'static>>::new(&client)
                     .destination(NAME)
-                    .unwrap()
                     .path(PATH)
-                    .unwrap()
                     .interface(interface)
-                    .unwrap()
-                    .cache_properties(zbus::CacheProperties::No)
+                    .cache_properties(zbus::proxy::CacheProperties::No)
                     .build()
                     .await
                     .unwrap()
@@ -648,11 +645,11 @@ mod linux {
             handle.show(Some(&now));
             handle.set_volume(0.5);
             // The changes reach the service over a channel: it waits for the system to read them.
-            let read = async || -> (String, i64, f64, HashMap<String, OwnedValue>) {
+            let read = async || -> (String, i64, f64, HashMap<String, OwnedVariant>) {
                 let status: String = player.get_property("PlaybackStatus").await.unwrap();
                 let position: i64 = player.get_property("Position").await.unwrap();
                 let volume: f64 = player.get_property("Volume").await.unwrap();
-                let metadata: HashMap<String, OwnedValue> = player.get_property("Metadata").await.unwrap();
+                let metadata: HashMap<String, OwnedVariant> = player.get_property("Metadata").await.unwrap();
                 (status, position, volume, metadata)
             };
             let mut shown = read().await;

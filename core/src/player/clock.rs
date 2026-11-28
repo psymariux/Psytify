@@ -1,16 +1,16 @@
-//! L'orologio della riproduzione: il punto in cui si trovava il brano a un certo istante e se sta
-//! scorrendo. Il core lo riancora a ogni transizione (avvio, pausa, seek, fine) e quando il suo
-//! battito sente che la posizione vera si è allontanata di più di [`DRIFT`]; fra un'ancora e
-//! l'altra la posizione non si pubblica: ogni frontend la calcola da sé con [`Clock::at`], come la
-//! barra di avanzamento e il testo sincronizzato fanno a ogni Tick.
+//! The playback clock: the point where the track was at a given instant and whether it is
+//! running. The core re-anchors it at each transition (start, pause, seek, end) and when its
+//! tick senses that the real position has drifted more than [`DRIFT`]; between one anchor and
+//! the next the position is not published: each frontend computes it itself with [`Clock::at`], as the
+//! progress bar and the synced lyrics do at each Tick.
 
 use std::time::{Duration, Instant};
 
-/// Di quanto può scostarsi la posizione vera da quella calcolata prima che il core riancori
-/// l'orologio e lo pubblichi.
+/// How far the real position may drift from the computed one before the core re-anchors
+/// the clock and publishes it.
 pub const DRIFT: Duration = Duration::from_millis(250);
 
-/// Dove si trovava il brano a `at`, e se da allora scorre.
+/// Where the track was at `at`, and whether it has been running since then.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Clock {
     pub position: Duration,
@@ -19,17 +19,17 @@ pub struct Clock {
 }
 
 impl Clock {
-    /// Un orologio fermo a `position`.
+    /// A clock stopped at `position`.
     pub fn paused(position: Duration, at: Instant) -> Self {
         Self { position, at, playing: false }
     }
 
-    /// Un orologio che scorre da `position` a partire da `at`.
+    /// A clock running from `position` starting at `at`.
     pub fn running(position: Duration, at: Instant) -> Self {
         Self { position, at, playing: true }
     }
 
-    /// La posizione a `now`: quella ancorata, più il tempo passato se scorre.
+    /// The position at `now`: the anchored one, plus the time passed if it is running.
     pub fn at(&self, now: Instant) -> Duration {
         if self.playing {
             self.position.saturating_add(now.saturating_duration_since(self.at))
@@ -38,14 +38,14 @@ impl Clock {
         }
     }
 
-    /// `true` se la posizione vera `real` è oltre [`DRIFT`] da quella calcolata a `now`.
+    /// `true` if the real position `real` is beyond [`DRIFT`] from the one computed at `now`.
     pub fn drifted(&self, real: Duration, now: Instant) -> bool {
         real.abs_diff(self.at(now)) > DRIFT
     }
 }
 
 impl Default for Clock {
-    /// Fermo all'inizio. L'istante non conta finché l'orologio non scorre.
+    /// Stopped at the start. The instant does not count until the clock runs.
     fn default() -> Self {
         Self::paused(Duration::ZERO, Instant::now())
     }

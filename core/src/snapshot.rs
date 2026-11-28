@@ -1,6 +1,6 @@
-//! Ciò che un frontend legge del core: un'istantanea immutabile con un `Arc` per dominio. Un dominio
-//! che non cambia tiene lo stesso `Arc` da un'istantanea all'altra, così un frontend salta il suo
-//! lavoro con `Arc::ptr_eq` (o confrontando le versioni, per chi sta oltre un FFI).
+//! What a frontend reads from the core: an immutable snapshot with one `Arc` per domain. A domain
+//! that does not change keeps the same `Arc` from one snapshot to the next, so a frontend skips its
+//! work with `Arc::ptr_eq` (or by comparing the versions, for those across an FFI).
 
 use std::sync::Arc;
 
@@ -14,8 +14,8 @@ pub use crate::state::{
         UpdateStatus, UpdateView,
     },
     external::{
-        ArtistExtras, ExternalEvent, ExternalRaised, ExternalView, ImportTarget, Importing, ImportsView,
-        OpenPlaylist,
+        ArtistExtras, ExternalEvent, ExternalRaised, ExternalView, ImportLinks, ImportTarget, Importing,
+        ImportsView, OpenPlaylist,
     },
     jam::{JamEvent, JamPhase, JamRaised, JamView},
     library::LibraryView,
@@ -24,10 +24,10 @@ pub use crate::state::{
     social::{Account, AuthView, CodeHint, MAX_FOUND, OpenProfile, SocialEvent, SocialRaised, SocialView},
 };
 
-/// Lo stato del core visto da fuori, in un certo istante.
+/// The state of the core seen from outside, at a given instant.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
-    /// Cresce di uno a ogni pubblicazione.
+    /// Grows by one at each publish.
     pub version: u64,
     pub versions: DomainVersions,
     pub settings: Arc<SettingsView>,
@@ -42,7 +42,7 @@ pub struct Snapshot {
     pub video: Arc<VideoView>,
 }
 
-/// Una versione per dominio: cresce quando la sua vista cambia.
+/// One version per domain: it grows when its view changes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DomainVersions {
     pub settings: u64,

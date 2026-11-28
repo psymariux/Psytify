@@ -1,14 +1,14 @@
 //! Slider verticale e banco di slider (le bande dell'equalizzatore nelle impostazioni): la stessa
-//! anatomia dello slider del volume (`progress.rs`) messa in piedi. Binario largo 2 AP e alto
-//! [`BAND_TRACK_AP`] AP dentro un'area sensibile di `ICON_BUTTON`; dal basso il valore in `WARM_WHITE`
-//! (`PURE_WHITE` al passaggio del mouse e trascinando), sopra il dither di `CHARCOAL`/`GRAPHITE`; il
-//! pomello 6 x 2 AP sulla testa solo al passaggio del mouse e trascinando. Sotto ogni slider il valore
-//! (`TYPE_NUMERIC`) e il nome (`TYPE_META`); una linea di 1 AP `LINE_STRONG` attraversa tutto il banco
-//! all'altezza di `tick` (lo 0 dB).
+//! the anatomy of the volume slider (`progress.rs`) set up. A track 2 AP wide and high
+//! [`BAND_TRACK_AP`] AP inside a hit area of `ICON_BUTTON`; from the bottom the value in `WARM_WHITE`
+//! (`PURE_WHITE` on mouse hover and while dragging), above the `CHARCOAL`/`GRAPHITE` dither; the
+//! 6 x 2 AP knob on the head only on mouse hover and while dragging. Under each slider the value
+//! (`TYPE_NUMERIC`) and the name (`TYPE_META`); a 1 AP `LINE_STRONG` line crosses the whole bank
+//! at the height of `tick` (0 dB).
 //!
-//! Il valore è 0..=1 e arriva dal chiamante; durante il trascinamento si mostra quello locale.
-//! `on_change` scatta a ogni movimento, `on_commit` al rilascio (e a ogni passo di rotella o freccia, che
-//! non hanno un rilascio): l'equalizzatore si sente subito e si salva una volta sola.
+//! The value is 0..=1 and comes from the caller; while dragging the local one is shown.
+//! `on_change` fires at every movement, `on_commit` on release (and at every wheel or arrow step, which
+//! have no release): the equaliser is heard at once and saved only once.
 
 use std::rc::Rc;
 
@@ -28,10 +28,10 @@ use super::control::Preview;
 use crate::pixel::shape::{focus_ring, static_ring};
 use crate::theme::{Ap, TypeStyle, col, dp};
 
-/// Altezza del binario di una banda, in AP (le linee guida: 64 AP).
+/// Track height of a band, in AP (the guidelines: 64 AP).
 pub const BAND_TRACK_AP: u32 = 64;
 
-/// Callback con la banda e il nuovo valore (0..=1).
+/// Callback with the band and the new value (0..=1).
 pub type OnBand = Rc<dyn Fn(usize, f32, &mut Window, &mut App)>;
 
 struct SliderState {
@@ -41,13 +41,13 @@ struct SliderState {
     focus: FocusHandle,
 }
 
-/// Il valore sotto il puntatore: 1 in cima, 0 in fondo.
+/// The value under the pointer: 1 at the top, 0 at the bottom.
 fn frac_at(bounds: Bounds<Pixels>, y: Pixels) -> f32 {
     let h = f32::from(bounds.size.height);
     if h <= 0.0 { 0.0 } else { (1.0 - f32::from(y - bounds.origin.y) / h).clamp(0.0, 1.0) }
 }
 
-/// Il banco: un valore, un'etichetta del valore e un nome per slider.
+/// The bank: a value, a value label and a name per slider.
 #[derive(IntoElement)]
 pub struct SliderBank {
     id: ElementId,
@@ -76,19 +76,19 @@ impl SliderBank {
         }
     }
 
-    /// Il testo del valore sotto ogni slider («+3», «0»), già pronto.
+    /// The value text under each slider («+3», «0»), already ready.
     pub fn values_text(mut self, texts: Vec<SharedString>) -> Self {
         self.values_text = texts;
         self
     }
 
-    /// Il nome sotto il valore («31», «1k»).
+    /// The name under the value («31», «1k»).
     pub fn names(mut self, names: Vec<SharedString>) -> Self {
         self.names = names;
         self
     }
 
-    /// La linea di riferimento (lo 0 dB) attraverso tutto il banco.
+    /// The reference line (0 dB) across the whole bank.
     pub fn tick(mut self, at: f32) -> Self {
         self.tick = Some(at.clamp(0.0, 1.0));
         self
@@ -100,7 +100,7 @@ impl SliderBank {
         self
     }
 
-    /// Solo per la galleria: lo stato di uno slider.
+    /// Gallery only: the state of a slider.
     pub fn preview(mut self, band: usize, preview: Preview) -> Self {
         self.previews.push((band, preview));
         self
@@ -117,7 +117,7 @@ impl SliderBank {
     }
 }
 
-/// Dipinge il binario verticale sulla griglia dei pixel fisici.
+/// Paints the vertical track on the grid of physical pixels.
 fn paint_track(window: &mut Window, bounds: Bounds<Pixels>, ap: Ap, value: f32, lit: bool) {
     let scale = ap.scale;
     let d = ap.device as f32;
@@ -132,7 +132,7 @@ fn paint_track(window: &mut Window, bounds: Bounds<Pixels>, ap: Ap, value: f32, 
             window.paint_quad(fill(b, col(color)));
         }
     };
-    // Il valore si arrotonda a AP interi: il binario non sfuma mai.
+    // The value is rounded to whole APs: the track never fades.
     let filled = ((h * value) / d).round() * d;
     let head = if lit { PURE_WHITE } else { WARM_WHITE };
     rect(window, x0, y0 + h - filled, track_w, filled, head);
@@ -198,7 +198,7 @@ fn band(
     .top(px(0.0))
     .left(px(0.0))
     .size_full();
-    // Gli ascoltatori globali del trascinamento esistono solo mentre si trascina.
+    // The global drag listeners exist only while dragging.
     let drag_listeners = {
         let state = state.clone();
         let on_change = on_change.clone();
@@ -321,7 +321,7 @@ impl RenderOnce for SliderBank {
         let track_h = f32::from(ap.n(BAND_TRACK_AP));
         let mut columns = div().relative().flex().items_start().gap(dp(SPACE_3));
         if let Some(tick) = self.tick {
-            // La linea dello 0 sta dietro i binari, sulla griglia dei pixel d'arte.
+            // The 0 line sits behind the tracks, on the art-pixel grid.
             let top = ((1.0 - tick) * track_h / f32::from(ap.one())).round() * f32::from(ap.one());
             columns = columns.child(
                 div().absolute().left(px(0.0)).right(px(0.0)).top(px(top)).h(ap.one()).bg(col(LINE_STRONG)),

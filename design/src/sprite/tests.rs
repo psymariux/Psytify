@@ -9,7 +9,7 @@ fn loaded() -> &'static SpriteSheet {
     sheet().expect("embedded sprite sheet must decode")
 }
 
-/// Il manifest riletto come JSON generico: indipendente dal parser del crate.
+/// The manifest re-read as generic JSON: independent of the crate's parser.
 fn manifest_values() -> Vec<serde_json::Value> {
     let json: serde_json::Value = serde_json::from_slice(MANIFEST_JSON).unwrap();
     json["sprites"].as_array().unwrap().clone()
@@ -20,11 +20,11 @@ fn colors_of(rgba: &[u8]) -> BTreeSet<[u8; 4]> {
 }
 
 #[test]
-fn loads_all_72_sprites_with_the_frame_counts_of_sprites_json() {
+fn loads_all_74_sprites_with_the_frame_counts_of_sprites_json() {
     let sheet = loaded();
     let expected = manifest_values();
-    assert_eq!(expected.len(), 72);
-    assert_eq!(sheet.len(), 72);
+    assert_eq!(expected.len(), 74);
+    assert_eq!(sheet.len(), 74);
     for value in &expected {
         let name = value["name"].as_str().unwrap();
         let sprite = sheet.get(name).unwrap_or_else(|| panic!("missing sprite {name}"));
@@ -71,14 +71,14 @@ fn sprite_sheet_is_decoded_once() {
 #[test]
 fn decoded_memory_cost_is_pinned() {
     // Documented in `mod.rs`: update the module comment when it changes.
-    assert_eq!(loaded().decoded_bytes(), 159_744);
+    assert_eq!(loaded().decoded_bytes(), 160_896);
 }
 
 #[test]
 fn groups_kinds_and_animation_rules() {
     let sheet = loaded();
     let masks = sheet.iter().filter(|s| s.kind() == SpriteKind::Mask).count();
-    assert_eq!(masks, 64); // 59 icons + eq, eq_rest, mark, mark_play, liked_cover
+    assert_eq!(masks, 66); // 61 icons + eq, eq_rest, mark, mark_play, liked_cover
     for sprite in sheet.iter() {
         if sprite.group() == "icons" {
             assert_eq!(sprite.kind(), SpriteKind::Mask, "{}", sprite.name());
@@ -129,7 +129,7 @@ fn upscale_keeps_the_exact_color_set_and_makes_flat_blocks() {
                 assert_eq!((up.width, up.height), (frame.width * k, frame.height * k));
                 assert_eq!(up.rgba.len(), (up.width * up.height * 4) as usize);
                 assert_eq!(colors_of(&up.rgba), colors_of(&frame.rgba), "{} #{index} x{k}", sprite.name());
-                // Ogni pixel dell'uscita è il pixel sorgente (x / k, y / k): blocchi k x k piatti.
+                // Every output pixel is the source pixel (x / k, y / k): flat k x k blocks.
                 let stride = (up.width * 4) as usize;
                 for y in 0..up.height as usize {
                     for x in 0..up.width as usize {
@@ -162,7 +162,7 @@ fn tinting_replaces_only_opaque_pixels() {
     let colors = colors_of(&up.rgba);
     assert!(colors.contains(&tint.bytes()));
     assert!(colors.iter().all(|px| *px == tint.bytes() || px[3] == 0));
-    // La forma (maschera alfa) non cambia rispetto all'ingrandimento semplice.
+    // The shape (alpha mask) does not change compared with the simple upscale.
     let plain = upscale_nearest(frame, 3);
     let alpha = |p: &Pixels| p.rgba.as_chunks::<4>().0.iter().map(|px| px[3] != 0).collect::<Vec<_>>();
     assert_eq!(alpha(&up), alpha(&plain));
@@ -225,32 +225,32 @@ fn cache_evicts_least_recently_used_by_entry_count() {
     let mut cache = UpscaleCache::with_capacity(2, usize::MAX);
     let first = cache.get_or_upscale(sprite, 0, 1, None).unwrap();
     cache.get_or_upscale(sprite, 0, 2, None).unwrap();
-    cache.get_or_upscale(sprite, 0, 1, None).unwrap(); // rinfresca il fattore 1
-    cache.get_or_upscale(sprite, 0, 3, None).unwrap(); // scarta il fattore 2
+    cache.get_or_upscale(sprite, 0, 1, None).unwrap(); // refreshes factor 1
+    cache.get_or_upscale(sprite, 0, 3, None).unwrap(); // evicts factor 2
     assert_eq!(cache.len(), 2);
     assert!(Arc::ptr_eq(&first, &cache.get_or_upscale(sprite, 0, 1, None).unwrap()));
     let before = cache.len();
-    cache.get_or_upscale(sprite, 0, 2, None).unwrap(); // ricalcolato: scarta il fattore 3
+    cache.get_or_upscale(sprite, 0, 2, None).unwrap(); // recomputed: evicts factor 3
     assert_eq!(cache.len(), before);
 }
 
 #[test]
 fn cache_respects_the_byte_budget() {
-    let sprite = loaded().get(ICON_PLAY).unwrap(); // 12 x 12 AP, 4 byte a pixel
+    let sprite = loaded().get(ICON_PLAY).unwrap(); // 12 x 12 AP, 4 bytes per pixel
     let at = |k: usize| 12 * k * 12 * k * 4;
     let mut cache = UpscaleCache::with_capacity(100, at(4) + 1000);
     cache.get_or_upscale(sprite, 0, 2, None).unwrap();
     cache.get_or_upscale(sprite, 0, 3, None).unwrap();
     assert_eq!((cache.len(), cache.bytes()), (2, at(2) + at(3)));
-    cache.get_or_upscale(sprite, 0, 4, None).unwrap(); // non ci sta: sloggia il più vecchio finché serve
+    cache.get_or_upscale(sprite, 0, 4, None).unwrap(); // does not fit: evicts the oldest until there is room
     assert!(cache.bytes() <= cache.max_bytes());
     assert_eq!((cache.len(), cache.bytes()), (1, at(4)));
-    // Una voce da sola oltre il budget si restituisce ma non si conserva.
+    // A single entry above the budget is returned but not kept.
     let mut tiny = UpscaleCache::with_capacity(8, at(1));
     let out = tiny.get_or_upscale(sprite, 0, 2, None).unwrap();
     assert_eq!(out.width, 24);
     assert!(tiny.is_empty());
-    // Capacità zero: mai nulla in cache.
+    // Zero capacity: nothing is ever cached.
     let mut none = UpscaleCache::with_capacity(0, usize::MAX);
     assert!(none.get_or_upscale(sprite, 0, 2, None).is_some());
     assert!(none.is_empty());
@@ -261,7 +261,7 @@ fn default_cache_is_bounded_under_the_declared_budget() {
     let cache = UpscaleCache::new();
     assert_eq!(cache.max_entries(), 128);
     assert_eq!(cache.max_bytes(), 8 * 1024 * 1024);
-    // Il caso peggiore documentato: mascotte a ap_device 8 = 256 KiB, quindi 32 voci riempiono il budget.
+    // The documented worst case: mascot at ap_device 8 = 256 KiB, so 32 entries fill the budget.
     let mut cache = UpscaleCache::new();
     let sheet = loaded();
     for sprite in sheet.iter().filter(|s| s.frame_size() == (32, 32)) {

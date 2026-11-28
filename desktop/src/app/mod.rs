@@ -1,33 +1,35 @@
-//! L'app desktop su GPUI: la finestra con barra del titolo lato client, barra laterale, pagina,
-//! pannello laterale (la coda o il testo) e barra «in riproduzione», o al loro posto la vista immersiva
-//! (`focus_view`). Ogni pezzo è una vista (entità) che si abbona al
-//! `CoreModel` e si ridisegna solo quando cambia il suo dominio; la radice tiene la pagina corrente,
-//! il pannello aperto, gli avvisi (un solo sistema per gli eventi di tutti i domini, vedi `notices`) e la
-//! chiusura.
+//! The desktop app on GPUI: the window with a client-side title bar, sidebar, page,
+//! side panel (In riproduzione, Testo, Coda) and the «in riproduzione» bar, or the stage in their place
+//! (`stage_view`). Each piece is a view (entity) that subscribes to the
+//! `CoreModel` and redraws only when its domain changes; the root keeps the current page,
+//! the open panel, the notices (one system for the events of all domains, see `notices`) and the
+//! shutdown.
 //!
-//! Pagine (`nav::Page`, con la cronologia indietro/avanti di `nav::History`): Cerca, Libreria, «Brani che
-//! ti piacciono» e una playlist (`collection_page`), Scaricati, un album (`album_page`), un artista
-//! (`artist_page`), un album o una playlist del catalogo ufficiale o di un'altra fonte (`source_page`),
-//! la Home (`home_page`, la pagina d'avvio come nel client Iced), l'accesso e gli Amici con i profili, e la
-//! Jam (`jam_page`, l'ascolto insieme). Sopra tutto `Shell` tiene il dialogo delle playlist
-//! (`playlist_dialog`, anche la conferma per togliere un amico) e il menu «Altro» di un brano
-//! (`track_menu`), che le pagine chiedono con un `PageEvent`. Tutto ciò che si può fare passa da un
-//! comando al core: la finestra non tiene copie dello stato, solo gli `Arc` delle viste e i testi
-//! già pronti.
+//! Pages (`nav::Page`, with the back/forward history of `nav::History`): Cerca, Libreria, «Brani che
+//! ti piacciono» and a playlist (`collection_page`), Scaricati, an album (`album_page`), an artist
+//! (`artist_page`), an album or a playlist from the official catalogue or another source (`source_page`),
+//! the Home (`home_page`, the start page), sign-in and Amici with the profiles, and
+//! Jam (`jam_page`, listening together). Above everything, `Shell` holds the playlist dialog
+//! (`playlist_dialog`, also the confirmation to remove a friend) and the «Altro» menu of a track
+//! (`track_menu`), which the pages request with a `PageEvent`. Everything that can be done goes through a
+//! command to the core: the window keeps no copies of the state, only the `Arc`s of the views and the
+//! texts already ready.
 
 mod album_page;
 mod artist_page;
 mod chrome;
 mod collection_page;
 mod downloads_page;
-mod focus_view;
 mod friends_page;
 mod home_page;
 mod jam_page;
 mod library_page;
 mod lyrics_view;
+mod media;
 mod nav;
 mod news_page;
+mod now_panel;
+mod page_frame;
 mod page_list;
 mod people;
 mod player_bar;
@@ -36,17 +38,19 @@ mod profile_page;
 mod queue_panel;
 mod search_page;
 pub mod settings_page;
+pub mod sidebar;
 mod sign_in_page;
 mod source_page;
+mod stage_view;
 mod track_list;
 mod track_menu;
 mod update_banner;
-#[cfg(feature = "video")]
-mod video_panel;
 
 pub use nav::{Page, PageArg};
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,95 +65,112 @@ use psytify_core::config::{FollowedArtist, SavedAlbum};
 use psytify_core::player::PlaybackState;
 use psytify_core::snapshot::{Account, PlaybackView, SocialView};
 use psytify_design::sprite;
-use psytify_design::tokens::color::SURFACE_CANVAS;
-use psytify_design::tokens::color::SURFACE_CHROME;
-use psytify_design::tokens::motion::TOAST_HOLD_MS;
+use psytify_design::tokens::color::{SHADOW_HARD, SURFACE_CANVAS, SURFACE_CHROME};
+use psytify_design::tokens::motion::{MOTION_PANEL, TOAST_HOLD_MS};
 use psytify_design::tokens::size::{
-    BP_PANEL_DOCK, BP_RAIL, CONTENT_MAX_W, PLAYER_BAR_H, SIDE_PANEL_W, SIDEBAR_RAIL_W, SIDEBAR_W, TITLE_BAR_H,
+    BP_PANEL_DOCK, BP_RAIL, PLAYER_BAR_H, SIDE_PANEL_W, SIDEBAR_GRIP_W, TITLE_BAR_H,
 };
 use psytify_design::tokens::space::{SPACE_3, SPACE_5};
 
 use crate::actions::{
     CycleRepeat, FocusNext, FocusPrev, FocusSearch, GoBack, GoForward, NextTrack, OpenSettings,
     PreviousTrack, Quit, SHELL_CONTEXT, ToggleFocus as ToggleFocusAction, ToggleLyrics as ToggleLyricsAction,
-    TogglePlay, ToggleQueue as ToggleQueueAction, ToggleShuffle,
+    TogglePlay, ToggleQueue as ToggleQueueAction, ToggleShuffle, ToggleSidebar, ZoomIn, ZoomOut, ZoomReset,
 };
 use crate::components::indicators::PlayState;
 use crate::components::menu::{MenuItem, MenuPanel, popup};
-use crate::components::navigation::NavigationItem;
+use crate::components::navigation::Tabs;
 use crate::components::overlay::{Toast, scrim};
 use crate::components::playing_spot::{PlayingSpot, overlay as spot_overlay};
 use crate::components::search_field::SearchField;
 use crate::components::separator::Separator;
 use crate::core_model::{Changed, CoreModel};
+use crate::motion::{Tween, ap_round};
 use crate::notices::{Notice, Pushed, Seen, Toasts};
-use crate::theme::{col, dp};
+use crate::pixel::shape::hard_shadow;
+use crate::theme::{Ap, col, dp, to_dp};
 use crate::titlebar::{AccountChip, HistoryButtons, OnClose, TitleBarState, title_row, window_frame};
+use crate::zoom::ZoomPref;
 use album_page::AlbumPage;
 use artist_page::ArtistPage;
 use chrome::{Chrome, Key as ChromeKey, Part};
 use collection_page::{Collection, CollectionPage};
 use downloads_page::DownloadsPage;
-use focus_view::{FocusEvent, FocusView};
 use friends_page::FriendsPage;
 use home_page::HomePage;
 use jam_page::JamPage;
 use library_page::LibraryPage;
 use lyrics_view::{Look, LyricsView};
-use nav::{History, Nav, PersonKey, SourceKey};
+use nav::{History, PersonKey, SourceKey};
 use news_page::NewsPage;
+use now_panel::{NowEvent, NowPanel};
 use player_bar::{BarEvent, PlayerBar};
 use playlist_dialog::{DialogEvent, DialogRequest, PlaylistDialog};
 use profile_page::ProfilePage;
 use queue_panel::QueuePanel;
 use search_page::SearchPage;
 use settings_page::SettingsPage;
+use sidebar::{Layout as SidebarLayout, Mode as SidebarMode, Prefs as SidebarPrefs, Sidebar};
 use sign_in_page::SignInPage;
 use source_page::SourcePage;
+use stage_view::{StageView, StageViewEvent};
 use track_menu::{
     DownloadItems, MenuChoice, MenuLevel, TrackMenu, choice_notice, copy_text, download_label, follow_item,
     playlist_items, quality_items,
 };
 use update_banner::{BANNER_H, Place, UpdateBanner, update_line};
-#[cfg(feature = "video")]
-use video_panel::{PanelEvent, VideoPanel};
 
 #[cfg(feature = "video")]
 use crate::actions::ToggleVideoFocus;
 #[cfg(feature = "video")]
 use crate::video::stage::{StageEvent, Surface, VideoStage};
 
-/// Quanto si aspetta il salvataggio del core prima di uscire comunque.
+/// How long the window waits for the core to save before quitting anyway.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
-/// Il pannello laterale: la coda, il testo o (con la feature `video`) il videoclip, mai insieme (come le
-/// schede del pannello del client Iced).
+/// The side panel's tabs (desktop v2 §5): the record, the words, the queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidePanel {
-    Queue,
+    Now,
     Lyrics,
-    #[cfg(feature = "video")]
-    Video,
+    Queue,
 }
 
-/// Dove si vede il videoclip: nella vista immersiva aperta sul videoclip, o nel pannello sul videoclip
-/// quando la vista immersiva non lo copre. Puro.
-#[cfg(feature = "video")]
-pub fn video_surface(panel: Option<SidePanel>, focus_open: bool, focus_video: bool) -> Option<Surface> {
-    if focus_open {
-        focus_video.then_some(Surface::Focus)
-    } else {
-        (panel == Some(SidePanel::Video)).then_some(Surface::Panel)
+impl SidePanel {
+    pub const ALL: [SidePanel; 3] = [SidePanel::Now, SidePanel::Lyrics, SidePanel::Queue];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SidePanel::Now => "In riproduzione",
+            SidePanel::Lyrics => "Testo",
+            SidePanel::Queue => "Coda",
+        }
+    }
+
+    fn ix(self) -> usize {
+        Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0)
     }
 }
 
-/// Il pannello dopo il tasto di `kind`: si apre su quella scheda, o si chiude se era già lei (come
-/// `Message::OpenPanel` del client Iced).
+/// Where the clip shows: the stage's media slot while the stage is open, else the side panel's on
+/// *In riproduzione*; only with the clip on and a track that has one. Pure.
+#[cfg(feature = "video")]
+pub fn video_surface(panel: Option<SidePanel>, stage_open: bool, video_on: bool) -> Option<Surface> {
+    if !video_on {
+        None
+    } else if stage_open {
+        Some(Surface::Stage)
+    } else {
+        (panel == Some(SidePanel::Now)).then_some(Surface::Panel)
+    }
+}
+
+/// The panel after the button of `kind`: it opens on that tab, or closes if it was that one.
 pub fn toggled(open: Option<SidePanel>, kind: SidePanel) -> Option<SidePanel> {
     if open == Some(kind) { None } else { Some(kind) }
 }
 
-/// Come mostrare il brano in corso nelle liste: lime e animato solo se suona.
+/// How to show the playing track in lists: lime and animated only while it plays.
 pub fn play_state(view: &PlaybackView) -> Option<PlayState> {
     match view.state {
         PlaybackState::Playing => Some(PlayState::Playing),
@@ -159,38 +180,38 @@ pub fn play_state(view: &PlaybackView) -> Option<PlayState> {
     }
 }
 
-/// Ciò che una pagina chiede a `Shell`: aprire un'altra pagina o un dialogo (che sta sopra tutta la
-/// finestra, non dentro la pagina), e i gesti che danno un avviso (gli avvisi li fa solo `Shell`).
+/// What a page asks of `Shell`: open another page or a dialog (which sits above the whole
+/// window, not inside the page), and the gestures that give a notice (only `Shell` shows notices).
 #[derive(Clone, Debug, PartialEq)]
 pub enum PageEvent {
     Open(Page),
     Dialog(DialogRequest),
-    /// Il menu «Altro» di un brano.
+    /// The «Altro» menu of a track.
     TrackMenu(Box<TrackMenu>),
-    /// Apre la pagina di un album o di una playlist di una fonte esterna.
+    /// Opens the page of an album or a playlist from an external source.
     OpenSource(Box<SourcePlaylist>),
-    /// Salva nella libreria la playlist esterna aperta (la si apre quando il core la pubblica).
+    /// Saves the open external playlist to the library (it is opened when the core publishes it).
     SaveSource,
-    /// Salva un album nella libreria o lo toglie.
+    /// Saves an album to the library or removes it.
     ToggleSaveAlbum(Box<SavedAlbum>),
-    /// Segue un artista o smette.
+    /// Follows an artist or stops.
     ToggleFollow(Box<FollowedArtist>),
-    /// Apre le impostazioni sulla scheda Account (il modulo del profilo).
+    /// Opens the settings on the Account tab (the profile form).
     OpenAccountSettings,
-    /// Apre il profilo di una persona (il suo nome utente).
+    /// Opens the profile of a person (their username).
     OpenProfile(String),
-    /// Apre la playlist pubblica `id` di una persona.
+    /// Opens the public playlist `id` of a person.
     OpenFriendPlaylist {
         handle: String,
         id: uuid::Uuid,
     },
-    /// Cerca questo testo (lo mette nel campo e apre Cerca).
+    /// Searches for this text (puts it in the field and opens Cerca).
     Search(gpui::SharedString),
-    /// Un avviso (gli avvisi li mostra solo `Shell`).
+    /// A notice (only `Shell` shows notices).
     Notice(Notice),
 }
 
-/// I posti dell'equalizzatore di ogni vista che lo mostra (vedi `components::playing_spot`).
+/// The equaliser spots of each view that shows it (see `components::playing_spot`).
 struct Spots {
     home: PlayingSpot,
     search: PlayingSpot,
@@ -202,42 +223,44 @@ struct Spots {
     queue: PlayingSpot,
 }
 
-/// Le schede delle pagine esterne che la cronologia può ancora riaprire: oltre, si scartano quelle che
-/// nessuna pagina della cronologia nomina.
+/// The external pages' tabs that the history can still reopen: beyond that, the ones that
+/// no page in the history names are dropped.
 const SOURCE_PAGES: usize = 64;
 
-/// Il menu «Altro» aperto.
+/// The open «Altro» menu.
 struct OpenMenu {
     menu: TrackMenu,
     level: MenuLevel,
     playlists: Vec<(uuid::Uuid, gpui::SharedString)>,
-    /// Segui già l'artista del brano (all'apertura del menu).
+    /// Already follows the track's artist (when the menu opens).
     following: bool,
-    /// Le voci di download (all'apertura del menu).
+    /// The download entries (when the menu opens).
     downloads: DownloadItems,
 }
 
-/// L'elenco delle playlist nel menu scorre oltre dieci voci.
+/// The playlist list in the menu scrolls beyond ten entries.
 const MENU_LIST_MAX_H: f32 = 10.0 * psytify_design::tokens::size::MENU_ITEM_H;
 
-/// Come aprire l'app (dalla riga di comando): una ricerca già lanciata e il pannello della coda aperto.
+/// How to open the app (from the command line): a search already launched and the queue panel open.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Launch {
     pub search: Option<String>,
     pub queue: bool,
-    /// Il pannello laterale aperto sul testo (`--lyrics`).
+    /// The side panel open on the lyrics (`--lyrics`).
     pub lyrics: bool,
-    /// La vista immersiva aperta (`--focus`), se c'è un brano in coda.
+    /// The stage open (`--focus`), if a track is queued.
     pub focus: bool,
-    /// Suona il primo risultato del catalogo ufficiale appena arriva (per provare l'importazione senza
-    /// toccare niente: la riga mostra «Apro…» finché il server lavora).
+    /// The side panel open on *In riproduzione* (`--now`).
+    pub now: bool,
+    /// Plays the first result of the official catalogue as soon as it arrives (to test the import without
+    /// touching anything: the row shows «Apro…» while the server works).
     pub play_first_official: bool,
-    /// La pagina da aprire (`--page`): per le schermate e le misure, dove non si tocca niente.
+    /// The page to open (`--page`): for screenshots and measurements, where nothing is touched.
     pub page: Option<PageArg>,
-    /// I dati sociali di prova (`--fixture`, solo con la feature `fixtures`).
+    /// The social test data (`--fixture`, only with the `fixtures` feature).
     #[cfg(feature = "fixtures")]
     pub fixture: Option<String>,
-    /// Il pannello sul videoclip (`--video`); con `--focus`, la vista immersiva sul videoclip.
+    /// The clip on in the media slot (`--video`): the panel's, or with `--focus` the stage's.
     #[cfg(feature = "video")]
     pub video: bool,
 }
@@ -247,24 +270,27 @@ pub struct Shell {
     focus: FocusHandle,
     search: Entity<SearchField>,
     bar: Entity<PlayerBar>,
-    /// La fascia dell'aggiornamento sotto la barra del titolo, e se c'è (solo allora entra nella finestra).
+    /// The update banner under the title bar, and whether there is one (only then it enters the window).
     banner: Entity<UpdateBanner>,
     banner_shown: bool,
     queue: Entity<QueuePanel>,
-    /// Il testo nel pannello laterale.
+    /// *Testo* and *In riproduzione* in the side panel.
     lyrics: Entity<LyricsView>,
-    /// La vista immersiva (con il suo testo): al posto di pagina, pannello e barra quando è aperta.
-    focus_view: Entity<FocusView>,
-    focus_open: bool,
-    /// Il palco del videoclip (uno per finestra), il pannello che lo mostra e la faccia della vista immersiva
-    /// (videoclip o testo).
+    now_panel: Entity<NowPanel>,
+    /// The stage: in place of page, panel and bar when open; over them while it moves.
+    stage_view: Entity<StageView>,
+    stage_open: bool,
+    /// The reveal (0 bar, 1 stage) eased in `MOTION_PANEL` and shared with the stage view.
+    stage_t: Tween,
+    stage_reveal: stage_view::Reveal,
+    /// The stage was moving at the last draw (its end notifies the cached view once).
+    stage_moving: bool,
+    /// The window's single clip stage.
     #[cfg(feature = "video")]
     video: Entity<VideoStage>,
-    #[cfg(feature = "video")]
-    video_panel: Entity<VideoPanel>,
-    #[cfg(feature = "video")]
-    focus_video: bool,
-    /// Il core sa che qualcuno mostra il testo (`PlaybackCmd::Lyrics`).
+    /// The clip is on in the media slot (panel or stage).
+    video_on: bool,
+    /// The core knows that someone shows the lyrics (`PlaybackCmd::Lyrics`).
     lyrics_wanted: bool,
     search_page: Entity<SearchPage>,
     home_page: Entity<HomePage>,
@@ -276,55 +302,62 @@ pub struct Shell {
     profile_page: Entity<ProfilePage>,
     jam_page: Entity<JamPage>,
     library_page: Entity<LibraryPage>,
-    /// «Brani che ti piacciono» e le playlist: una vista sola che cambia raccolta.
+    /// «Brani che ti piacciono» and the playlists: one view that changes the collection.
     collection_page: Entity<CollectionPage>,
-    /// Una vista per specie di pagina d'oggetto: cambia l'album, l'artista o la scheda che mostra.
+    /// One view per kind of object page: changes the album, the artist or the tab it shows.
     album_page: Entity<AlbumPage>,
     artist_page: Entity<ArtistPage>,
     source_page: Entity<SourcePage>,
-    /// Le schede delle pagine esterne della cronologia (`Page::Source` ne tiene solo l'impronta).
+    /// The external pages' tabs of the history (`Page::Source` keeps only their fingerprint).
     sources: HashMap<SourceKey, SourcePlaylist>,
-    /// I nomi utente delle pagine di persone della cronologia (`Page::Profile` ne tiene l'impronta).
+    /// The usernames of the people's pages in the history (`Page::Profile` keeps only the fingerprint).
     people: HashMap<PersonKey, String>,
-    /// L'account nella barra del titolo, e il proprio nome utente (per aprire il proprio profilo).
+    /// The account in the title bar, and one's own username (to open one's own profile).
     account: AccountChip,
     own_handle: Option<String>,
-    /// Le richieste di amicizia arrivate: il numero sulla voce «Amici».
+    /// Incoming friend requests: the number on the «Amici» entry.
     incoming: usize,
-    /// Gli inviti alle jam arrivati: il numero sulla voce «Jam».
+    /// Incoming jam invitations: the number on the «Jam» entry.
     invites: usize,
-    /// I posti dell'equalizzatore delle viste con righe di brani: `Shell` lo dipinge sopra la vista
-    /// (BACKLOG 23), così lo scatto dello sprite non rifà la pagina in cache.
+    /// The equaliser spots of the views with track rows: `Shell` paints it over the view
+    /// (BACKLOG 23), so the sprite's frame does not redo the cached page.
     spots: Spots,
-    /// La barra del titolo e la barra laterale in cache (`chrome.rs`), con ciò che mostravano all'ultimo
-    /// confronto: si ridisegnano solo quando cambia.
+    /// The title bar and the sidebar in cache (`chrome.rs`), with what they showed at the last
+    /// comparison: they redraw only when it changes.
     title_view: Entity<Chrome>,
     sidebar_view: Entity<Chrome>,
     chrome_keys: Option<(ChromeKey, ChromeKey)>,
-    /// Il dialogo delle playlist, sopra tutto, se è aperto; con chi aveva il focus prima.
+    /// The playlist dialog, above everything, if it is open; with whoever had the focus before.
     dialog: Option<(Entity<PlaylistDialog>, Option<FocusHandle>, Subscription)>,
-    /// La playlist appena creata: si apre quando il core la pubblica.
+    /// The playlist just created: it opens when the core publishes it.
     pending_playlist: Option<uuid::Uuid>,
-    /// Il menu «Altro» aperto: il brano, il pannello e le playlist (id e nome) prese all'apertura.
+    /// The open «Altro» menu: the track, the panel and the playlists (id and name) taken on opening.
     menu: Option<OpenMenu>,
-    /// I download in coda o in corso: il numero sulla voce «Scaricati» della barra laterale.
+    /// Downloads queued or in progress: the number on the «Scaricati» entry of the sidebar.
     busy_downloads: usize,
-    /// Le uscite dei tuoi artisti non ancora viste: il numero sulla voce «Novità».
+    /// Releases from your artists not yet seen: the number on the «Novità» entry.
     unread_news: usize,
-    /// La pagina mostrata per ultima: uscendo da «Novità» ciò che c'era si considera visto.
+    /// The last page shown: leaving «Novità» counts what was there as seen.
     shown: Page,
-    /// La pagina corrente e quelle dietro e davanti (Indietro e Avanti).
+    /// The current page and the ones behind and in front of it (Indietro and Avanti).
     history: History,
-    /// Il pannello laterale aperto.
+    /// The side panel open, and the tab it showed last (drawn while it slides shut).
     panel: Option<SidePanel>,
-    /// Il marchio nella barra del titolo è lime solo mentre suona.
+    panel_last: SidePanel,
+    /// The mark in the title bar is lime only while it plays.
     playing: bool,
-    /// L'avviso sul display e quelli che aspettano; il timer c'è solo mentre un avviso è mostrato.
+    /// The notice on the display and the ones waiting; the timer runs only while a notice is shown.
     toasts: Toasts,
-    /// L'ultimo evento di ogni dominio già mostrato (per numero d'ordine).
+    /// The last event of each domain already shown (by sequence number).
     seen: Seen,
-    /// La chiusura è partita: si aspetta che il core salvi.
+    /// Closing has started: it waits for the core to save.
     closing: bool,
+    /// The UI zoom preference (`Auto` or pinned); the zoom in effect lives in `theme::zoom`.
+    zoom_pref: ZoomPref,
+    /// The sidebar: mode, width, library tabs and filter, the jam card.
+    sidebar: Sidebar,
+    /// The sidebar showed the rail at the last draw (for `ChromeKey::Sidebar`).
+    sidebar_rail: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -339,7 +372,7 @@ impl Shell {
                     let core = core.clone();
                     let shell = this.clone();
                     move |text, _, cx| {
-                        // Ogni tasto va al core, che aspetta 300 ms dall'ultimo prima di cercare.
+                        // Every key goes to the core, which waits 300 ms after the last one before searching.
                         core.read(cx).catalog(CatalogCmd::SearchInput(text.to_owned()));
                         shell.update(cx, |shell, cx| shell.show(Page::Search, cx)).ok();
                     }
@@ -349,6 +382,20 @@ impl Shell {
                     move |text, _, cx| core.read(cx).catalog(CatalogCmd::Search(text.trim().to_owned()))
                 })
         });
+        let filter = cx.new(|cx| {
+            SearchField::new("sidebar-filter", "Filtra", cx).without_hint().on_change({
+                let shell = this.clone();
+                move |text, _, cx| {
+                    shell
+                        .update(cx, |shell, cx| {
+                            if shell.sidebar.set_filter(text) {
+                                cx.notify();
+                            }
+                        })
+                        .ok();
+                }
+            })
+        });
         let bar = cx.new(|cx| PlayerBar::new(core.clone(), cx));
         let banner_line = update_line(core.read(cx).update_view(), Place::Banner);
         let banner = cx.new(|_| UpdateBanner::new(core.clone()));
@@ -357,11 +404,19 @@ impl Shell {
         let lyrics = cx.new(|cx| LyricsView::new(core.clone(), Look::Panel, cx));
         #[cfg(feature = "video")]
         let video = cx.new(|cx| VideoStage::new(core.clone(), cx));
-        #[cfg(feature = "video")]
-        let video_panel = cx.new(|cx| VideoPanel::new(core.clone(), video.clone(), cx));
-        let focus_view = cx.new(|cx| {
-            FocusView::new(
+        let now_panel = cx.new(|cx| {
+            NowPanel::new(
                 core.clone(),
+                #[cfg(feature = "video")]
+                video.clone(),
+                cx,
+            )
+        });
+        let stage_reveal: stage_view::Reveal = Rc::new(Cell::new(0.0));
+        let stage_view = cx.new(|cx| {
+            StageView::new(
+                core.clone(),
+                Rc::clone(&stage_reveal),
                 #[cfg(feature = "video")]
                 video.clone(),
                 cx,
@@ -409,14 +464,15 @@ impl Shell {
             banner_shown,
             queue,
             lyrics,
-            focus_view,
-            focus_open: false,
+            now_panel,
+            stage_view,
+            stage_open: false,
+            stage_t: Tween::at(0.0),
+            stage_reveal,
+            stage_moving: false,
             #[cfg(feature = "video")]
             video,
-            #[cfg(feature = "video")]
-            video_panel,
-            #[cfg(feature = "video")]
-            focus_video: false,
+            video_on: false,
             lyrics_wanted: false,
             search_page,
             home_page,
@@ -453,20 +509,36 @@ impl Shell {
                 Some(SidePanel::Lyrics)
             } else if launch.queue {
                 Some(SidePanel::Queue)
+            } else if launch.now {
+                Some(SidePanel::Now)
             } else {
                 None
             },
+            panel_last: SidePanel::Now,
             playing: snapshot.playback.is_playing(),
             toasts: Toasts::default(),
             seen: Seen::at_start(&snapshot),
             closing: false,
+            zoom_pref: ZoomPref::read(&snapshot.settings.ui),
+            sidebar: Sidebar::new(
+                SidebarPrefs::read(&snapshot.settings.ui),
+                filter,
+                Arc::clone(&snapshot.library),
+                &core.read(cx).jam_view(),
+            ),
+            sidebar_rail: false,
             _subscriptions: Vec::new(),
             core: core.clone(),
         };
-        // Ogni volta che `Shell` si notifica: la barra del titolo e la barra laterale si rifanno solo se cambia
-        // ciò che mostrano, rispetto a ciò che mostrano adesso.
+        // Every time `Shell` notifies: the title bar and the sidebar redraw only if what they show
+        // changes, compared with what they show now.
         shell.chrome_keys = Some((shell.chrome_key(Part::TitleBar), shell.chrome_key(Part::Sidebar)));
         shell._subscriptions.push(cx.observe_self(|this, cx| this.sync_chrome(cx)));
+        // `Auto` zoom follows the window width.
+        shell
+            ._subscriptions
+            .push(cx.observe_window_bounds(window, |this, window, cx| this.apply_zoom(window, cx)));
+        shell.apply_zoom(window, cx);
         shell._subscriptions.push(cx.subscribe_in(
             &core,
             window,
@@ -477,27 +549,30 @@ impl Shell {
         shell._subscriptions.push(cx.subscribe(&shell.bar, |this, _, event: &BarEvent, cx| match event {
             BarEvent::ToggleQueue => this.toggle_panel(SidePanel::Queue, cx),
             BarEvent::ToggleLyrics => this.toggle_panel(SidePanel::Lyrics, cx),
+            BarEvent::ToggleNow => this.toggle_panel(SidePanel::Now, cx),
             BarEvent::ToggleFocus => this.toggle_focus(cx),
             BarEvent::OpenArtist(id) => this.show(Page::Artist(*id), cx),
             BarEvent::OpenJam => this.show(Page::Jam, cx),
             #[cfg(feature = "video")]
-            BarEvent::ToggleVideo => this.toggle_panel(SidePanel::Video, cx),
+            BarEvent::ToggleVideo => this.toggle_video(cx),
         }));
-        shell._subscriptions.push(cx.subscribe(&shell.focus_view, |this, _, event: &FocusEvent, cx| {
+        shell._subscriptions.push(cx.subscribe(&shell.stage_view, |this, _, event: &StageViewEvent, cx| {
             match event {
-                FocusEvent::Close => this.set_focus(false, cx),
-                #[cfg(feature = "video")]
-                FocusEvent::Video(on) => this.set_focus_video(*on, cx),
+                StageViewEvent::Close => this.set_focus(false, cx),
+                StageViewEvent::Video(on) => this.set_video_on(*on, cx),
             }
         }));
+        shell._subscriptions.push(cx.subscribe(
+            &shell.now_panel,
+            |this, _, event: &NowEvent, cx| match event {
+                NowEvent::OpenLyrics => this.toggle_panel(SidePanel::Lyrics, cx),
+                NowEvent::OpenArtist(id) => this.show(Page::Artist(*id), cx),
+                NowEvent::Video(on) => this.set_video_on(*on, cx),
+            },
+        ));
         #[cfg(feature = "video")]
         {
-            shell._subscriptions.push(cx.subscribe(&shell.video_panel, |this, _, event: &PanelEvent, cx| {
-                match event {
-                    PanelEvent::Fullscreen => this.toggle_video_focus(cx),
-                }
-            }));
-            // Un videoclip che si ferma è un avviso come gli altri.
+            // A clip that stops is a notice like any other.
             shell._subscriptions.push(cx.subscribe(&shell.video, |this, _, event: &StageEvent, cx| {
                 if let StageEvent::Notice(notice) = event {
                     this.notify(notice.clone(), cx);
@@ -574,8 +649,8 @@ impl Shell {
             window,
             |this, _, event: &PageEvent, window, cx| this.page_event(event, window, cx),
         ));
-        // Rete di sicurezza per le uscite che non passano da `request_close` (il sistema che termina l'app):
-        // GPUI aspetta questo futuro per poco (`SHUTDOWN_TIMEOUT`), di solito basta per il salvataggio.
+        // Safety net for the quits that do not go through `request_close` (the system ending the app):
+        // GPUI waits for this future only briefly (`SHUTDOWN_TIMEOUT`), usually enough for the save.
         shell._subscriptions.push(cx.on_app_quit(|this, cx| {
             let done = this.core.update(cx, |core, _| core.begin_shutdown());
             async move {
@@ -584,24 +659,27 @@ impl Shell {
                 }
             }
         }));
-        // La Home si carica sempre, come nel client Iced: è la pagina d'avvio e da lei nasce il feed (gli altri
-        // artisti della pagina artista, BACKLOG 32), qualunque sia la pagina aperta.
+        // The Home always loads: it is the start page and the feed comes from it (the
+        // other artists of the artist page, BACKLOG 32), whatever page is open.
         core.read(cx).catalog(CatalogCmd::Ensure(psytify_core::command::Resource::Home));
         if let Some(text) = launch.search.as_deref() {
             core.read(cx).catalog(CatalogCmd::Search(text.trim().to_owned()));
             shell.history = History::new(Page::Search);
         }
         if launch.focus && snapshot.playback.queue.current().is_some() {
-            shell.focus_open = true;
+            shell.stage_open = true;
+            shell.stage_t = Tween::at(1.0);
+            shell.stage_reveal.set(1.0);
         }
         #[cfg(feature = "video")]
         if launch.video {
-            if shell.focus_open {
-                shell.focus_video = true;
-                shell.focus_view.update(cx, |view, cx| view.set_video(true, cx));
-            } else {
-                shell.panel = Some(SidePanel::Video);
+            shell.video_on = true;
+            if !shell.stage_open && shell.panel.is_none() {
+                shell.panel = Some(SidePanel::Now);
             }
+        }
+        if let Some(tab) = shell.panel {
+            shell.panel_last = tab;
         }
         shell.sync_panels(cx);
         match launch.page {
@@ -622,7 +700,7 @@ impl Shell {
                 }
             }
             Some(PageArg::Profile) => {
-                // Il proprio profilo, o (con i dati di prova) quello che la vista ha aperto.
+                // One's own profile, or (with the test data) the one the view has opened.
                 let handle =
                     social.open.as_ref().map(|(handle, _)| handle.clone()).or(shell.own_handle.clone());
                 if let Some(handle) = handle {
@@ -633,8 +711,8 @@ impl Shell {
             }
             None => {}
         }
-        shell.page_shown(cx);
-        // I dati di prova di un aggiornamento non riuscito portano l'avviso che il core avrebbe dato.
+        shell.page_shown(true, cx);
+        // The test data of a failed update carry the notice the core would give.
         #[cfg(feature = "fixtures")]
         if let Some(notice) = launch.fixture.as_deref().and_then(crate::fixtures::notice) {
             shell.notify(notice, cx);
@@ -648,7 +726,7 @@ impl Shell {
         shell
     }
 
-    /// Cosa fare quando il core pubblica: avvisi e marchio. Le viste si aggiornano da sole.
+    /// What to do when the core publishes: notices and the mark. The views update by themselves.
     fn core_changed(
         &mut self,
         core: &Entity<CoreModel>,
@@ -657,24 +735,40 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let snapshot = core.read(cx).snapshot();
+        if changed.settings {
+            let pref = ZoomPref::read(&snapshot.settings.ui);
+            if pref != self.zoom_pref {
+                self.zoom_pref = pref;
+                self.apply_zoom(window, cx);
+            }
+        }
         if changed.playback {
             let playing = snapshot.playback.is_playing();
             if playing != self.playing {
                 self.playing = playing;
                 cx.notify();
             }
-            if self.focus_open && snapshot.playback.queue.current().is_none() {
-                // Senza brano la vista immersiva non ha niente da mostrare (come nel client Iced).
+            if self.stage_open && snapshot.playback.queue.current().is_none() {
+                // Without a track the stage has nothing to show.
                 self.set_focus(false, cx);
             }
+            // A track with or without a clip moves the clip's place.
+            #[cfg(feature = "video")]
+            self.sync_panels(cx);
         }
         if changed.library
             && let Some(id) = self.pending_playlist
             && snapshot.library.playlists.iter().any(|playlist| playlist.id == id)
         {
-            // La playlist appena creata è nella libreria: la si apre.
+            // The playlist just created is in the library: it is opened.
             self.pending_playlist = None;
             self.show(Page::Playlist(id), cx);
+        }
+        if changed.library && self.sidebar.take_library(Arc::clone(&snapshot.library)) {
+            cx.notify();
+        }
+        if changed.jam && self.sidebar.take_jam(&core.read(cx).jam_view()) {
+            cx.notify();
         }
         if changed.library && snapshot.library.unread_news != self.unread_news {
             self.unread_news = snapshot.library.unread_news;
@@ -686,7 +780,7 @@ impl Shell {
                 self.busy_downloads = busy;
                 cx.notify();
             }
-            // La fascia si ridisegna da sé se la sua riga cambia; `Shell` solo quando compare o sparisce.
+            // The banner redraws itself if its row changes; `Shell` only when it appears or disappears.
             let line = update_line(core.read(cx).update_view(), Place::Banner);
             let shown = self.banner.update(cx, |banner, cx| banner.set(line, cx));
             if shown != self.banner_shown {
@@ -701,7 +795,7 @@ impl Shell {
             let loading = snapshot.catalog.search.results.is_loading();
             self.search.update(cx, |field, cx| field.set_loading(loading, cx));
         }
-        // Gli eventi nuovi di ogni dominio cambiato, in ordine: un solo sistema per tutti.
+        // The new events of each changed domain, in order: one system for all.
         let heard = self.seen.collect(&snapshot, changed);
         if heard.raise {
             window.activate_window();
@@ -710,13 +804,13 @@ impl Shell {
             self.notify(notice, cx);
         }
         if let Some(id) = heard.open_artist {
-            // L'artista del catalogo ufficiale chiesto dalla ricerca è sul server: si apre la sua pagina.
+            // The official catalogue's artist asked for by the search is on the server: its page opens.
             self.show(Page::Artist(id), cx);
         }
     }
 
-    /// La vista sociale è cambiata: l'account nella barra, il numero delle richieste e, ad accesso fatto,
-    /// l'uscita dalla pagina di accesso (come nel client Iced).
+    /// The social view changed: the account in the bar, the number of requests and, once signed in,
+    /// leaving the sign-in page.
     fn social_changed(&mut self, social: &SocialView, cx: &mut Context<Self>) {
         let chip = account_chip(&social.account);
         let handle = own_handle(social);
@@ -744,7 +838,7 @@ impl Shell {
         }
     }
 
-    /// Apre il profilo di `handle` (il suo nome resta in `people` finché la cronologia lo nomina).
+    /// Opens the profile of `handle` (its name stays in `people` while the history names it).
     fn open_person(&mut self, handle: &str, playlist: Option<uuid::Uuid>, cx: &mut Context<Self>) {
         let key = PersonKey::of(handle);
         self.people.insert(key, handle.to_owned());
@@ -766,8 +860,8 @@ impl Shell {
         }
     }
 
-    /// Un clic sull'account nella barra: l'accesso, o il proprio profilo (senza nome utente: gli Amici, che
-    /// chiedono di sceglierne uno).
+    /// A click on the account in the bar: sign-in, or one's own profile (without a username: Amici, which
+    /// asks to choose one).
     fn account_clicked(&mut self, cx: &mut Context<Self>) {
         match (&self.account, self.own_handle.clone()) {
             (AccountChip::SignedOut, _) => self.show(Page::SignIn, cx),
@@ -777,7 +871,7 @@ impl Shell {
         }
     }
 
-    /// Mette un avviso in coda; se il display è vuoto lo mostra subito e arma il timer.
+    /// Queues a notice; if the display is empty it shows it at once and arms the timer.
     fn notify(&mut self, notice: Notice, cx: &mut Context<Self>) {
         if self.toasts.push(notice) == Pushed::Shown {
             self.hold_toast(cx);
@@ -785,8 +879,8 @@ impl Shell {
         }
     }
 
-    /// Il timer dell'avviso sul display: `TOAST_HOLD_MS`, poi passa al prossimo o lascia il display
-    /// vuoto. Ce n'è uno solo per volta e solo mentre un avviso è mostrato.
+    /// The timer of the notice on the display: `TOAST_HOLD_MS`, then it moves to the next or leaves the
+    /// display empty. There is only one at a time, and only while a notice is shown.
     fn hold_toast(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(u64::from(TOAST_HOLD_MS))).await;
@@ -800,35 +894,78 @@ impl Shell {
         .detach();
     }
 
-    /// Apre una pagina (e la mette nella cronologia). Niente se è già quella.
-    /// Una pagina che si apre chiude la vista immersiva, che la coprirebbe.
+    /// Opens a page (and puts it in the history). Nothing if it is already that one.
+    /// A page that opens closes the immersive view, which would cover it.
     fn show(&mut self, page: Page, cx: &mut Context<Self>) {
+        if self.sidebar.overlay {
+            // Choosing a page closes the sidebar laid over the canvas.
+            self.sidebar.overlay = false;
+            cx.notify();
+        }
         if self.history.go(page) {
             self.set_focus(false, cx);
-            self.page_shown(cx);
+            self.page_shown(true, cx);
+        }
+    }
+
+    /// Ctrl+B and the title bar button: expanded or rail; under `BP_RAIL` the expanded sidebar over the canvas.
+    fn toggle_sidebar(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if to_dp(window.viewport_size().width) < BP_RAIL {
+            self.sidebar.overlay = !self.sidebar.overlay;
+        } else {
+            self.sidebar.prefs.mode = match self.sidebar.prefs.mode {
+                SidebarMode::Expanded => SidebarMode::Rail,
+                SidebarMode::Rail => SidebarMode::Expanded,
+            };
+            self.core
+                .read(cx)
+                .settings(psytify_core::command::SettingsCmd::SaveUiPrefs(self.sidebar.prefs.prefs()));
+        }
+        cx.notify();
+    }
+
+    /// The right edge is being dragged to `x` (window dp).
+    fn drag_sidebar(&mut self, x: f32, cx: &mut Context<Self>) {
+        if let Some((start_x, start_w)) = self.sidebar.drag {
+            let width = sidebar::clamp_width(start_w + x - start_x);
+            if width != self.sidebar.prefs.width {
+                self.sidebar.prefs.width = width;
+                cx.notify();
+            }
+        }
+    }
+
+    /// The drag ends: the width is saved.
+    fn end_sidebar_drag(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar.drag.take().is_some() {
+            self.core
+                .read(cx)
+                .settings(psytify_core::command::SettingsCmd::SaveUiPrefs(self.sidebar.prefs.prefs()));
+            cx.notify();
         }
     }
 
     fn go_back(&mut self, cx: &mut Context<Self>) {
         if self.history.back().is_some() {
             self.set_focus(false, cx);
-            self.page_shown(cx);
+            self.page_shown(false, cx);
         }
     }
 
     fn go_forward(&mut self, cx: &mut Context<Self>) {
         if self.history.forward().is_some() {
             self.set_focus(false, cx);
-            self.page_shown(cx);
+            self.page_shown(false, cx);
         }
     }
 
-    /// La pagina corrente è cambiata: la vista di quella specie prende il suo oggetto (e lo chiede al core
-    /// se non c'è), e si ridisegna la radice.
-    fn page_shown(&mut self, cx: &mut Context<Self>) {
+    /// The current page changed: the view of that kind takes its object (and asks the core for it
+    /// if there is none), and the root redraws.
+    /// `rise`: the page enter rises (a new page), not on Back and Forward.
+    fn page_shown(&mut self, rise: bool, cx: &mut Context<Self>) {
         let current = self.history.current();
         if self.shown == Page::News && current != Page::News {
-            // Come il client Iced: uscendo da «Novità» ciò che c'era si considera visto.
+            // Leaving «Novità» counts what was there as seen.
             self.core.read(cx).library(LibraryCmd::MarkNewsSeen);
         }
         self.shown = current;
@@ -838,7 +975,10 @@ impl Shell {
                 self.collection_page.update(cx, |page, cx| page.show(Collection::Playlist(id), cx));
             }
             Page::Album(id) => self.album_page.update(cx, |page, cx| page.show(id, cx)),
-            Page::Home => self.home_page.update(cx, |page, cx| page.show(cx)),
+            Page::Home => self.home_page.update(cx, |page, cx| {
+                page.show(cx);
+                page.enter(rise, cx);
+            }),
             Page::News => self.news_page.update(cx, |page, cx| page.show(cx)),
             Page::Artist(id) => self.artist_page.update(cx, |page, cx| page.show(id, cx)),
             Page::Source(key) => {
@@ -860,10 +1000,33 @@ impl Shell {
             }
             Page::Search | Page::Library | Page::Downloads | Page::Settings | Page::Jam => {}
         }
+        self.enter_page(current, rise, cx);
         cx.notify();
     }
 
-    /// Apre la pagina di una scheda esterna; le schede che la cronologia non nomina più si scartano.
+    /// The page enter (desktop v2 §3) of the view that shows `page` (the Home starts its own above).
+    fn enter_page(&mut self, page: Page, rise: bool, cx: &mut Context<Self>) {
+        match page {
+            Page::Album(_) => self.album_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Liked | Page::Playlist(_) | Page::FriendPlaylist(..) => {
+                self.collection_page.update(cx, |page, cx| page.enter(rise, cx));
+            }
+            Page::Artist(_) => self.artist_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Source(_) => self.source_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::News => self.news_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Search => self.search_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Library => self.library_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Downloads => self.downloads_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Friends => self.friends_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Profile(_) => self.profile_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Jam => self.jam_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Settings => self.settings_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::SignIn => self.sign_in_page.update(cx, |page, cx| page.enter(rise, cx)),
+            Page::Home => {}
+        }
+    }
+
+    /// Opens the page of an external tab; the tabs the history no longer names are dropped.
     fn open_source(&mut self, playlist: SourcePlaylist, cx: &mut Context<Self>) {
         let key = SourceKey::of(playlist.source, &playlist.id);
         self.sources.insert(key, playlist);
@@ -878,7 +1041,7 @@ impl Shell {
         }
     }
 
-    /// Una pagina chiede di aprirne un'altra o un dialogo.
+    /// A page asks to open another one or a dialog.
     fn page_event(&mut self, event: &PageEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             PageEvent::Open(Page::Search) => self.focus_search(window, cx),
@@ -900,8 +1063,8 @@ impl Shell {
             }
             PageEvent::OpenSource(playlist) => self.open_source((**playlist).clone(), cx),
             PageEvent::SaveSource => {
-                // La playlist si apre quando il core la pubblica; se non la crea (vuota, libreria piena)
-                // l'identificatore non compare mai.
+                // The playlist opens when the core publishes it; if it does not create it (empty, library full)
+                // the identifier never appears.
                 let id = uuid::Uuid::new_v4();
                 self.pending_playlist = Some(id);
                 self.core.read(cx).external(ExternalCmd::SavePlaylist { id });
@@ -923,7 +1086,7 @@ impl Shell {
         }
     }
 
-    /// Salva un album o lo toglie, con l'avviso del client Iced.
+    /// Saves an album or removes it, with its notice.
     fn toggle_save_album(&mut self, album: SavedAlbum, cx: &mut Context<Self>) {
         let saved =
             self.core.read(cx).snapshot().library.saved_albums.iter().any(|known| known.id == album.id);
@@ -936,7 +1099,7 @@ impl Shell {
         self.notify(Notice::info(notice), cx);
     }
 
-    /// Segue un artista o smette, con l'avviso del client Iced.
+    /// Follows an artist or stops, with its notice.
     fn toggle_follow(&mut self, artist: FollowedArtist, cx: &mut Context<Self>) {
         let following =
             self.core.read(cx).snapshot().library.followed.iter().any(|known| known.id == artist.id);
@@ -955,7 +1118,7 @@ impl Shell {
         }
     }
 
-    /// Una voce del menu «Altro»: il comando al core, l'avviso dove il client Iced lo dà.
+    /// An entry of the «Altro» menu: the command to the core, the notice where it is given.
     fn menu_choice(&mut self, choice: MenuChoice, window: &mut Window, cx: &mut Context<Self>) {
         let Some(open) = self.menu.as_mut() else { return };
         match choice {
@@ -1016,7 +1179,7 @@ impl Shell {
         }
     }
 
-    /// Il pannello del menu aperto.
+    /// The panel of the open menu.
     fn menu_panel(&self, open: &OpenMenu, cx: &mut Context<Self>) -> MenuPanel {
         let choose = |id: &'static str, label: &'static str, icon: &'static str, choice: MenuChoice| {
             MenuItem::new(id, label).icon(icon).on_click(
@@ -1073,7 +1236,7 @@ impl Shell {
                 panel = panel
                     .item(choose("menu-follow", follow, follow_icon, MenuChoice::ToggleFollow))
                     .item(choose("menu-copy", "Copia titolo e artista", sprite::ICON_COPY, MenuChoice::Copy));
-                // I download dopo «Copia», come nel client Iced.
+                // Downloads after «Copia».
                 if open.downloads.offer {
                     let label = download_label(open.downloads.quality);
                     panel = panel
@@ -1156,7 +1319,7 @@ impl Shell {
         cx.notify();
     }
 
-    /// Il dialogo è finito: si chiude, il focus torna dov'era e si fa ciò che dice l'esito.
+    /// The dialog is over: it closes, focus returns to where it was and what the outcome says is done.
     fn dialog_done(&mut self, event: DialogEvent, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((_, before, _)) = self.dialog.take() {
             let target = before.unwrap_or_else(|| self.focus.clone());
@@ -1171,7 +1334,7 @@ impl Shell {
             self.pending_playlist = open;
         }
         if let Some(id) = deleted {
-            // Si lascia la playlist eliminata, poi la si toglie da tutta la cronologia.
+            // Leaves the deleted playlist, then removes it from the whole history.
             if self.history.current() == Page::Playlist(id) {
                 self.show(Page::Library, cx);
             }
@@ -1179,7 +1342,7 @@ impl Shell {
         }
     }
 
-    /// I tasti della cronologia per la barra del titolo, accesi solo se c'è un passo da fare.
+    /// The history keys for the title bar, lit only when there is a step to take.
     fn history_buttons(&self, cx: &mut Context<Self>) -> HistoryButtons {
         let shell = cx.entity().downgrade();
         let back = self.history.can_back().then(|| {
@@ -1196,80 +1359,108 @@ impl Shell {
         HistoryButtons { on_back: back, on_forward: forward }
     }
 
-    /// Il tasto della coda (Q) o del testo (T): apre il pannello su quella scheda o lo chiude.
+    /// The queue (Q), lyrics (T) or now-playing (the bar cover) button: the panel on that tab, or shut.
     fn toggle_panel(&mut self, kind: SidePanel, cx: &mut Context<Self>) {
         self.panel = toggled(self.panel, kind);
+        if self.panel.is_some() && self.stage_open {
+            // A panel button under the stage leaves it for the panel.
+            self.set_focus(false, cx);
+        }
         self.sync_panels(cx);
         cx.notify();
     }
 
-    /// Il tasto della vista immersiva (F): la apre se c'è un brano, la chiude se è aperta.
-    fn toggle_focus(&mut self, cx: &mut Context<Self>) {
-        let open = !self.focus_open && self.core.read(cx).snapshot().playback.queue.current().is_some();
-        // F apre la faccia del testo (V quella del videoclip).
-        #[cfg(feature = "video")]
-        if open {
-            self.set_focus_video(false, cx);
+    /// A tab of the open panel.
+    fn select_tab(&mut self, tab: SidePanel, cx: &mut Context<Self>) {
+        if self.panel != Some(tab) {
+            self.panel = Some(tab);
+            self.sync_panels(cx);
+            cx.notify();
         }
+    }
+
+    /// F: opens the stage if a track is queued, closes it if open.
+    fn toggle_focus(&mut self, cx: &mut Context<Self>) {
+        let open = !self.stage_open && self.core.read(cx).snapshot().playback.queue.current().is_some();
         self.set_focus(open, cx);
     }
 
     fn set_focus(&mut self, open: bool, cx: &mut Context<Self>) {
-        if self.focus_open != open {
-            self.focus_open = open;
+        if self.stage_open != open {
+            self.stage_open = open;
+            let ms = crate::motion::duration(MOTION_PANEL, cx);
+            self.stage_t.set(if open { 1.0 } else { 0.0 }, ms, std::time::Instant::now());
             self.sync_panels(cx);
             cx.notify();
         }
     }
 
-    /// V (o «Videoclip a tutto schermo» del pannello): apre la vista immersiva sul videoclip se il brano ne
-    /// ha uno, la chiude se è già aperta lì (come `ToggleVideoFocus` del client Iced). Un videoclip che non
-    /// si apriva riprova.
+    /// The playing track has a clip.
+    fn has_video(&self, cx: &App) -> bool {
+        self.core.read(cx).snapshot().playback.queue.current().is_some_and(|track| track.has_video)
+    }
+
+    /// The bar's «Videoclip» and V: off if the clip is on screen; else on, in the stage's slot when the stage
+    /// is open, or in the panel's (opened on *In riproduzione* if it is not there). A clip that failed retries.
     #[cfg(feature = "video")]
-    fn toggle_video_focus(&mut self, cx: &mut Context<Self>) {
-        if self.focus_open && self.focus_video {
-            self.set_focus(false, cx);
+    fn toggle_video(&mut self, cx: &mut Context<Self>) {
+        if !self.has_video(cx) {
             return;
         }
-        let has_video =
-            self.core.read(cx).snapshot().playback.queue.current().is_some_and(|track| track.has_video);
-        if !has_video {
+        let shown = video_surface(self.panel, self.stage_open, self.video_on).is_some();
+        if shown {
+            self.set_video_on(false, cx);
             return;
         }
-        if matches!(self.video.read(cx).status(), crate::video::stage::Status::Failed) {
+        if !self.stage_open && self.panel != Some(SidePanel::Now) {
+            self.panel = Some(SidePanel::Now);
+        }
+        self.set_video_on(true, cx);
+        cx.notify();
+    }
+
+    /// The Cover / Video switch of a media slot.
+    fn set_video_on(&mut self, on: bool, cx: &mut Context<Self>) {
+        #[cfg(feature = "video")]
+        if on && matches!(self.video.read(cx).status(), crate::video::stage::Status::Failed) {
             self.video.read(cx).retry(cx);
         }
-        self.set_focus_video(true, cx);
-        self.set_focus(true, cx);
-    }
-
-    /// La faccia della vista immersiva: il videoclip o il testo.
-    #[cfg(feature = "video")]
-    fn set_focus_video(&mut self, on: bool, cx: &mut Context<Self>) {
-        if self.focus_video != on {
-            self.focus_video = on;
-            self.focus_view.update(cx, |view, cx| view.set_video(on, cx));
+        if self.video_on != on {
+            self.video_on = on;
             self.sync_panels(cx);
-            cx.notify();
         }
     }
 
-    /// Dice a ogni vista se si vede (solo allora ha i suoi timer) e al core se qualcuno mostra il testo.
+    /// Tells every view whether it shows (only then it has its timers) and the core whether anyone shows the
+    /// lyrics.
     fn sync_panels(&mut self, cx: &mut Context<Self>) {
-        let (panel, focus) = (self.panel, self.focus_open);
+        let (panel, stage) = (self.panel, self.stage_open);
+        if let Some(tab) = panel {
+            self.panel_last = tab;
+        }
         self.bar.update(cx, |bar, cx| {
             bar.set_panel(panel, cx);
-            bar.set_hidden(focus, cx);
+            bar.set_hidden(stage, cx);
         });
-        let panel_lyrics = panel == Some(SidePanel::Lyrics) && !focus;
-        self.lyrics.update(cx, |lyrics, cx| lyrics.set_visible(panel_lyrics, cx));
-        self.focus_view.update(cx, |view, cx| view.set_open(focus, cx));
+        let shown = |tab| panel == Some(tab) && !stage;
+        self.lyrics.update(cx, |lyrics, cx| lyrics.set_visible(shown(SidePanel::Lyrics), cx));
+        let now_shown = shown(SidePanel::Now);
+        let video_on = self.video_on && self.has_video(cx);
+        self.now_panel.update(cx, |view, cx| {
+            view.set_visible(now_shown, cx);
+            view.set_video(video_on, cx);
+        });
+        self.stage_view.update(cx, |view, cx| {
+            view.set_open(stage, cx);
+            view.set_video(video_on, cx);
+        });
         #[cfg(feature = "video")]
         {
-            let surface = video_surface(panel, focus, self.focus_video);
-            self.video.update(cx, |stage, cx| stage.set_surface(surface, cx));
+            let surface = video_surface(panel, stage, video_on);
+            self.video.update(cx, |video, cx| video.set_surface(surface, cx));
+            self.bar.update(cx, |bar, cx| bar.set_video_shown(surface.is_some(), cx));
         }
-        let wanted = panel == Some(SidePanel::Lyrics) || focus;
+        let wanted = shown(SidePanel::Lyrics) || now_shown || stage;
         if wanted != self.lyrics_wanted {
             self.lyrics_wanted = wanted;
             self.core.read(cx).playback(PlaybackCmd::Lyrics(wanted));
@@ -1283,8 +1474,8 @@ impl Shell {
         window.focus(&handle, cx);
     }
 
-    /// Chiude la finestra dopo che il core ha scritto `config.json`. Si aspetta il salvataggio fino a
-    /// [`SHUTDOWN_GRACE`]: oltre, si esce comunque (la configurazione resta quella dell'ultimo salvataggio).
+    /// Closes the window after the core has written `config.json`. It waits for the save up to
+    /// [`SHUTDOWN_GRACE`]: beyond that, it quits anyway (the configuration stays that of the last save).
     fn request_close(&mut self, cx: &mut Context<Self>) {
         if self.closing {
             return;
@@ -1293,13 +1484,13 @@ impl Shell {
         let done = self.core.update(cx, |core, _| core.begin_shutdown());
         cx.spawn(async move |_, cx| {
             if let Some(done) = done {
-                // L'esito non cambia niente: se il salvataggio è fallito il core l'ha già detto nel log.
+                // The outcome changes nothing: if the save failed, the core has already said so in the log.
                 let _ = done.await;
             }
             cx.update(|cx| cx.quit());
         })
         .detach();
-        // Rete di sicurezza: un core che non risponde non deve tenere aperta la finestra.
+        // Safety net: a core that does not answer must not keep the window open.
         cx.spawn(async move |_, cx| {
             cx.background_executor().timer(SHUTDOWN_GRACE).await;
             cx.update(|cx| cx.quit());
@@ -1307,7 +1498,30 @@ impl Shell {
         .detach();
     }
 
-    /// Il gestore del clic sull'account nella barra del titolo.
+    /// Sets the zoom the preference asks for this window width; a change lays everything out again (the
+    /// cached views too, through `Window::refresh`).
+    fn apply_zoom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let width = f32::from(window.viewport_size().width);
+        if crate::theme::set_zoom(self.zoom_pref.effective(width, crate::theme::zoom())) {
+            window.refresh();
+            cx.notify();
+        }
+    }
+
+    /// Ctrl+= / Ctrl+- (`Some(true)` / `Some(false)`) pin the next preset, Ctrl+0 (`None`) goes back to `Auto`.
+    fn step_zoom(&mut self, up: Option<bool>, window: &mut Window, cx: &mut Context<Self>) {
+        let pref = match up {
+            Some(up) => ZoomPref::stepped(crate::theme::zoom(), up),
+            None => ZoomPref::Auto,
+        };
+        if pref != self.zoom_pref {
+            self.zoom_pref = pref;
+            self.core.read(cx).settings(psytify_core::command::SettingsCmd::SaveUiPrefs(pref.prefs()));
+            self.apply_zoom(window, cx);
+        }
+    }
+
+    /// The handler of the click on the account in the title bar.
     fn account_handler(&self, cx: &mut Context<Self>) -> OnClose {
         let shell = cx.entity().downgrade();
         std::rc::Rc::new(move |_, cx| {
@@ -1315,7 +1529,7 @@ impl Shell {
         })
     }
 
-    /// Ciò che la barra del titolo o la barra laterale mostra (`chrome.rs`).
+    /// What the title bar or the sidebar shows (`chrome.rs`).
     fn chrome_key(&self, part: Part) -> ChromeKey {
         match part {
             Part::TitleBar => ChromeKey::TitleBar {
@@ -1325,14 +1539,17 @@ impl Shell {
                 account: self.account.clone(),
             },
             Part::Sidebar => ChromeKey::Sidebar {
-                current: self.history.current().nav(),
+                current: self.history.current(),
                 counts: [self.busy_downloads, self.unread_news, self.incoming, self.invites],
+                rail: self.sidebar_rail,
+                rev: self.sidebar.rev,
+                tab: self.sidebar.tab,
             },
         }
     }
 
-    /// `Shell` si è notificata: la barra del titolo e la barra laterale si ridisegnano se cambia ciò che
-    /// mostrano (lo scatto di uno sprite che dipinge `Shell` non le rifà).
+    /// `Shell` notified itself: the title bar and the sidebar redraw if what they show changes
+    /// (the frame of a sprite painted by `Shell` does not redo them).
     fn sync_chrome(&mut self, cx: &mut Context<Self>) {
         let keys = (self.chrome_key(Part::TitleBar), self.chrome_key(Part::Sidebar));
         let Some(before) = self.chrome_keys.replace(keys.clone()) else { return };
@@ -1344,7 +1561,7 @@ impl Shell {
         }
     }
 
-    /// Gli elementi della barra del titolo o della barra laterale, per la loro vista in cache (`Chrome`).
+    /// The elements of the title bar or the sidebar, for their cached view (`Chrome`).
     fn chrome(&mut self, part: Part, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         match part {
             Part::TitleBar => {
@@ -1355,17 +1572,23 @@ impl Shell {
                     account: self.account.clone(),
                     on_account: Some(self.account_handler(cx)),
                     on_close: Self::close_handler(&cx.entity()),
+                    on_sidebar: Some({
+                        let shell = cx.entity().downgrade();
+                        std::rc::Rc::new(move |window: &mut Window, cx: &mut App| {
+                            shell.update(cx, |shell, cx| shell.toggle_sidebar(window, cx)).ok();
+                        })
+                    }),
                 };
                 title_row(state, window, cx).into_any_element()
             }
             Part::Sidebar => {
-                let rail = f32::from(window.viewport_size().width) < BP_RAIL;
-                self.sidebar(rail, cx).into_any_element()
+                let rail = self.sidebar_rail;
+                self.sidebar(rail, window, cx)
             }
         }
     }
 
-    /// L'avviso sul display, sopra a tutto (anche al videoclip).
+    /// The notice on the display, above everything (also the video).
     fn toast(&self) -> Option<gpui::Div> {
         let notice = self.toasts.current()?;
         Some(
@@ -1380,7 +1603,7 @@ impl Shell {
         )
     }
 
-    /// Il gestore da dare alla barra del titolo e al sistema per chiudere la finestra.
+    /// The handler to give to the title bar and to the system to close the window.
     pub fn close_handler(this: &Entity<Self>) -> OnClose {
         let shell = this.downgrade();
         std::rc::Rc::new(move |_, cx| {
@@ -1388,111 +1611,158 @@ impl Shell {
         })
     }
 
-    fn sidebar(&self, rail: bool, cx: &mut Context<Self>) -> impl IntoElement {
-        let current = self.history.current().nav();
-        let items = Nav::ALL.iter().copied().enumerate().map(|(ix, nav)| {
-            let (idle, filled) = nav.icons();
-            // Animated icons say "something is going on" without a badge: unread news, a running download, a jam invite.
-            let (idle, filled) = match nav {
-                Nav::News if self.unread_news > 0 => (sprite::ICON_BELL_RING, sprite::ICON_BELL_RING),
-                Nav::Downloads if self.busy_downloads > 0 => {
-                    (sprite::ICON_DOWNLOAD_BUSY, sprite::ICON_DOWNLOAD_BUSY)
-                }
-                Nav::Jam if self.invites > 0 => (sprite::ICON_PEOPLE_LIVE, sprite::ICON_PEOPLE_LIVE),
-                _ => (idle, filled),
-            };
-            let mut item = NavigationItem::new(("nav", ix), nav.label(), idle).icon_selected(filled);
-            if nav == Nav::Downloads && self.busy_downloads > 0 {
-                item = item.count(u32::try_from(self.busy_downloads).unwrap_or(u32::MAX));
-            }
-            if nav == Nav::News && self.unread_news > 0 {
-                item = item.count(u32::try_from(self.unread_news).unwrap_or(u32::MAX));
-            }
-            if nav == Nav::Friends && self.incoming > 0 {
-                item = item.count(u32::try_from(self.incoming).unwrap_or(u32::MAX));
-            }
-            if nav == Nav::Jam && self.invites > 0 {
-                item = item.count(u32::try_from(self.invites).unwrap_or(u32::MAX));
-            }
-            item.selected(current == nav).rail(rail).on_click(cx.listener(
-                move |this, _: &ClickEvent, window, cx| {
-                    if nav == Nav::Search {
-                        this.focus_search(window, cx);
-                    } else {
-                        this.show(nav.page(), cx);
-                    }
-                },
-            ))
-        });
-        div()
-            .flex_none()
-            .h_full()
-            .w(dp(if rail { SIDEBAR_RAIL_W } else { SIDEBAR_W }))
-            .flex()
-            .flex_col()
-            .gap(dp(2.0))
-            .py(dp(SPACE_3))
-            .bg(col(SURFACE_CHROME))
-            .children(items)
-    }
-
-    /// La barra laterale, la pagina e il pannello laterale aperto (accanto alla pagina se c'è posto,
-    /// altrimenti sopra).
-    fn body(&self, rail: bool, docked: bool) -> gpui::Div {
+    /// The sidebar, the page and the open side panel (beside the page if there is room,
+    /// otherwise over it).
+    fn body(
+        &self,
+        layout: SidebarLayout,
+        width: f32,
+        docked: bool,
+        panel_w: f32,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        // Under the overlay the row keeps a plain rail-wide strip: the view draws once, over the canvas.
+        let slot = if layout.overlay.is_some() {
+            div().flex_none().h_full().w(dp(width)).bg(col(SURFACE_CHROME)).into_any_element()
+        } else {
+            self.sidebar_view.clone().cached(sidebar_style(width)).into_any_element()
+        };
         let mut body = div()
             .relative()
             .flex_1()
             .min_h_0()
             .flex()
-            .child(self.sidebar_view.clone().cached(sidebar_style(rail)))
+            .child(slot)
             .child(Separator::vertical())
-            // On very wide windows the page column stops at `CONTENT_MAX_W` and is centred.
+            // The canvas fills the width between the sidebar and the side panel (no column cap).
             .child(
-                div().flex_1().min_w_0().h_full().flex().justify_center().child(
-                    div()
-                        .relative()
-                        .w_full()
-                        .max_w(dp(CONTENT_MAX_W))
-                        .h_full()
-                        .child(self.page_content())
-                        .children(self.page_spot().map(spot_overlay)),
-                ),
-            );
-        if let Some(kind) = self.panel {
-            let content = match kind {
-                SidePanel::Queue => div()
+                div()
                     .relative()
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(self.queue.clone().cached(fill()))
-                    .child(spot_overlay(self.spots.queue.clone())),
-                SidePanel::Lyrics => {
-                    div().flex_1().min_w_0().h_full().child(self.lyrics.clone().cached(fill()))
-                }
-                #[cfg(feature = "video")]
-                SidePanel::Video => {
-                    div().flex_1().min_w_0().h_full().child(self.video_panel.clone().cached(fill()))
-                }
-            };
-            let panel = div()
-                .flex_none()
-                .h_full()
-                .w(dp(SIDE_PANEL_W))
-                .flex()
-                .bg(col(SURFACE_CHROME))
-                .child(Separator::vertical().strong())
-                .child(content);
+                    .child(self.page_content())
+                    .children(self.page_spot().map(spot_overlay)),
+            );
+        if panel_w > 0.0 {
             body = if docked {
-                body.child(panel)
+                body.child(self.side_panel(panel_w, cx))
             } else {
-                body.child(div().absolute().top_0().bottom_0().right_0().occlude().child(panel))
+                body.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .occlude()
+                        .child(self.side_panel(panel_w, cx)),
+                )
             };
+        }
+        if layout.resizable {
+            // The right edge drags the width (`SIDEBAR_MIN_W` to `SIDEBAR_MAX_W`), saved on release.
+            body = body.child(
+                div()
+                    .id("sidebar-grip")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(dp(width - SIDEBAR_GRIP_W / 2.0))
+                    .w(dp(SIDEBAR_GRIP_W))
+                    .cursor(gpui::CursorStyle::ResizeLeftRight)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                            this.sidebar.drag = Some((to_dp(event.position.x), this.sidebar.prefs.width));
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+            );
+        }
+        if let Some(over) = layout.overlay {
+            // A click beside the laid-over sidebar closes it.
+            body = body
+                .child(
+                    div()
+                        .id("sidebar-veil")
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .left(dp(over))
+                        .occlude()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                this.sidebar.overlay = false;
+                                cx.notify();
+                            }),
+                        ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left_0()
+                        .w(dp(over))
+                        .occlude()
+                        .child(hard_shadow(0, 2, col(SHADOW_HARD)))
+                        .child(self.sidebar_view.clone().cached(fill())),
+                );
         }
         body
     }
 
-    /// Il posto dell'equalizzatore della pagina corrente, se è una pagina con righe di brani.
+    /// The side panel `width` dp wide (less than `SIDE_PANEL_W` while it slides): the tabs, then the tab's
+    /// view at full width, clipped by the sliding edge so the cached view keeps its size.
+    fn side_panel(&self, width: f32, cx: &mut Context<Self>) -> gpui::Div {
+        let tab = self.panel.unwrap_or(self.panel_last);
+        let content = match tab {
+            SidePanel::Queue => div()
+                .relative()
+                .size_full()
+                .child(self.queue.clone().cached(fill()))
+                .child(spot_overlay(self.spots.queue.clone())),
+            SidePanel::Lyrics => div().size_full().child(self.lyrics.clone().cached(fill())),
+            SidePanel::Now => div().size_full().child(self.now_panel.clone().cached(fill())),
+        };
+        let shell = cx.entity().downgrade();
+        let tabs = Tabs::new(
+            SidePanel::ALL
+                .iter()
+                .map(|tab| crate::components::navigation::Tab::new(("panel-tab", tab.ix()), tab.label()))
+                .collect(),
+            tab.ix(),
+        )
+        .on_select(move |ix, _, cx| {
+            let tab = SidePanel::ALL.get(ix).copied().unwrap_or(SidePanel::Now);
+            shell.update(cx, |this, cx| this.select_tab(tab, cx)).ok();
+        });
+        let inner = div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left_0()
+            .w(dp(SIDE_PANEL_W))
+            .flex()
+            .bg(col(SURFACE_CHROME))
+            .child(Separator::vertical().strong())
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(div().flex_none().px(dp(SPACE_3)).pt(dp(SPACE_3)).child(tabs))
+                    .child(div().flex_1().min_h_0().child(content)),
+            );
+        div().relative().flex_none().h_full().w(dp(width)).overflow_hidden().child(inner)
+    }
+
+    /// The equaliser spot of the current page, if it is a page with track rows.
     fn page_spot(&self) -> Option<PlayingSpot> {
         let spot = match self.history.current() {
             Page::Home => &self.spots.home,
@@ -1537,7 +1807,7 @@ impl Shell {
     }
 }
 
-/// L'account come lo mostra la barra del titolo.
+/// The account as the title bar shows it.
 fn account_chip(account: &Account) -> AccountChip {
     match account {
         Account::Unavailable => AccountChip::Hidden,
@@ -1553,41 +1823,41 @@ fn account_chip(account: &Account) -> AccountChip {
     }
 }
 
-/// Il proprio nome utente, se lo si è scelto.
+/// One's own username, if one has been chosen.
 fn own_handle(social: &SocialView) -> Option<String> {
     social.account.profile().map(|profile| profile.handle.clone())
 }
 
-/// Le richieste di amicizia arrivate.
+/// Incoming friend requests.
 fn incoming(social: &SocialView) -> usize {
     social.friends.ready().map_or(0, |friends| friends.incoming.len())
 }
 
-/// Lo stile con cui una vista a pieno riquadro entra in `.cached()`: la cache di GPUI non misura i figli,
-/// dà alla vista la misura del contenitore. La vista si ridisegna solo quando si notifica da sé, quando
-/// cambia la sua misura o quando la finestra si ridisegna per intero (`Window::refresh`: ridimensionamento,
-/// arrivo di una copertina, passaggio del mouse sui bordi); gli scatti degli sprite invalidano solo la vista
-/// che li ha dipinti (`pixel::anim`).
+/// The style with which a full-area view enters `.cached()`: GPUI's cache does not measure the children,
+/// it gives the view the container's size. The view redraws only when it notifies itself, when
+/// its size changes or when the window redraws entirely (`Window::refresh`: resize,
+/// arrival of a cover, mouse over the edges); sprite frames invalidate only the view
+/// that painted them (`pixel::anim`).
 fn fill() -> StyleRefinement {
     StyleRefinement::default().size_full()
 }
 
-/// La barra «in riproduzione» in `.cached()`: larga quanto la finestra, alta `PLAYER_BAR_H`.
+/// The «in riproduzione» bar in `.cached()`: as wide as the window, `PLAYER_BAR_H` high.
 fn bar_style() -> StyleRefinement {
     StyleRefinement::default().w_full().h(dp(PLAYER_BAR_H)).flex_none()
 }
 
-/// La riga della barra del titolo in `.cached()`: larga quanto la finestra, alta `TITLE_BAR_H`.
+/// The title bar row in `.cached()`: as wide as the window, `TITLE_BAR_H` high.
 fn title_style() -> StyleRefinement {
     StyleRefinement::default().w_full().h(dp(TITLE_BAR_H)).flex_none()
 }
 
-/// La barra laterale in `.cached()`, larga quanto la voce o la sola icona (`rail`).
-fn sidebar_style(rail: bool) -> StyleRefinement {
-    StyleRefinement::default().flex_none().h_full().w(dp(if rail { SIDEBAR_RAIL_W } else { SIDEBAR_W }))
+/// The sidebar in `.cached()`, `width` dp wide (it eases between the rail and the expanded width).
+fn sidebar_style(width: f32) -> StyleRefinement {
+    StyleRefinement::default().flex_none().h_full().w(dp(width))
 }
 
-/// La fascia dell'aggiornamento in `.cached()`: larga quanto la finestra, alta `BANNER_H`.
+/// The update banner in `.cached()`: as wide as the window, `BANNER_H` high.
 fn banner_style() -> StyleRefinement {
     StyleRefinement::default().w_full().h(dp(BANNER_H)).flex_none()
 }
@@ -1600,12 +1870,37 @@ impl Focusable for Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let width = f32::from(window.viewport_size().width);
-        let rail = width < BP_RAIL;
-        // Il pannello sta accanto alla pagina se c'è posto, altrimenti ci galleggia sopra.
+        crate::theme::note_scale(window.scale_factor());
+        let width = to_dp(window.viewport_size().width);
+        let layout = self.sidebar.layout(width);
+        if layout.rail != self.sidebar_rail {
+            self.sidebar_rail = layout.rail;
+            self.sidebar_view.update(cx, |_, cx| cx.notify());
+        }
+        let (side_w, moving) = self.sidebar.width(layout.flow, crate::motion::duration(MOTION_PANEL, cx));
+        crate::motion::keep_running(window, moving);
+        // The side panel slides its width in `MOTION_PANEL`, on whole APs.
+        let panel_target = if self.panel.is_some() { SIDE_PANEL_W } else { 0.0 };
+        let panel_w = crate::motion::follow("side-panel-width", panel_target, MOTION_PANEL, window, cx);
+        let ap_dp = to_dp(Ap::of(window).one());
+        let panel_w = if ap_dp > 0.0 { ap_round(panel_w / ap_dp) as f32 * ap_dp } else { panel_w };
+        let panel_w = panel_w.min(SIDE_PANEL_W);
+        // The stage reveal: while it moves the stage lies over page and bar, uncached.
+        let now = std::time::Instant::now();
+        let stage_moving = self.stage_t.running(now);
+        let reveal = self.stage_t.value(now);
+        self.stage_reveal.set(reveal);
+        crate::motion::keep_running(window, stage_moving);
+        if self.stage_moving && !stage_moving {
+            // Landed: the cached stage view redraws once with the final reveal.
+            self.stage_view.update(cx, |_, cx| cx.notify());
+        }
+        self.stage_moving = stage_moving;
+        let stage_shown = self.stage_open && !stage_moving;
+        // The panel sits beside the page if there is room, otherwise it floats over it.
         let docked = width >= BP_PANEL_DOCK;
-        // In cache come le pagine: si rifanno solo quando cambia ciò che mostrano (`sync_chrome`), non a ogni
-        // scatto dell'equalizzatore che `Shell` dipinge sopra le pagine (BACKLOG 23).
+        // In cache like the pages: they redraw only when what they show changes (`sync_chrome`), not at every
+        // frame of the equaliser that `Shell` paints over the pages (BACKLOG 23).
         let bar = self.title_view.clone().cached(title_style());
 
         let mut root = div()
@@ -1629,17 +1924,21 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &ToggleFocusAction, _, cx| this.toggle_focus(cx)))
             .on_action(cx.listener(|this, _: &GoBack, _, cx| this.go_back(cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| this.show(Page::Settings, cx)))
+            .on_action(cx.listener(|this, _: &ZoomIn, window, cx| this.step_zoom(Some(true), window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, window, cx| this.step_zoom(Some(false), window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomReset, window, cx| this.step_zoom(None, window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| this.toggle_sidebar(window, cx)))
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" && this.menu.is_some() {
                     this.close_menu(cx);
                     cx.stop_propagation();
-                } else if event.keystroke.key == "escape" && this.focus_open && this.dialog.is_none() {
+                } else if event.keystroke.key == "escape" && this.stage_open && this.dialog.is_none() {
                     this.set_focus(false, cx);
                     cx.stop_propagation();
                 }
             }))
             .on_action(cx.listener(|this, _: &GoForward, _, cx| this.go_forward(cx)))
-            // I tasti laterali del mouse, come in un browser.
+            // The mouse side buttons, as in a browser.
             .on_mouse_down(
                 MouseButton::Navigate(NavigationDirection::Back),
                 cx.listener(|this, _, _, cx| this.go_back(cx)),
@@ -1667,34 +1966,66 @@ impl Render for Shell {
             .child(Separator::horizontal());
         #[cfg(feature = "video")]
         {
-            root =
-                root.on_action(cx.listener(|this, _: &ToggleVideoFocus, _, cx| this.toggle_video_focus(cx)));
+            root = root.on_action(cx.listener(|this, _: &ToggleVideoFocus, _, cx| this.toggle_video(cx)));
         }
-        if self.banner_shown && !self.focus_open {
-            // In cache alla sua altezza: il loader del download ridisegna solo la fascia.
+        if self.banner_shown && !stage_shown {
+            // Cached at its height: the download loader redraws only the banner.
             root = root.child(self.banner.clone().cached(banner_style())).child(Separator::horizontal());
         }
-        root = if self.focus_open {
-            // La vista immersiva prende tutto sotto la barra del titolo: niente pagina, pannello o barra.
-            root.child(div().flex_1().min_h_0().child(self.focus_view.clone().cached(fill())))
+        root = if stage_shown {
+            // The stage takes everything under the title bar: no page, panel or bar.
+            root.child(div().flex_1().min_h_0().child(self.stage_view.clone().cached(fill())))
         } else {
-            root.child(self.body(rail, docked))
+            let mut below = div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(self.body(layout, side_w, docked, panel_w, cx))
                 .child(Separator::horizontal())
-                // In cache come le pagine: si rifà quando si notifica da sé (il suo battito da 250 ms mentre
-                // suona, un cambio di brano o di stato), non a ogni ridisegno di `Shell` (BACKLOG 23).
-                .child(self.bar.clone().cached(bar_style()))
+                // Cached like the pages: redrawn when it notifies itself (its 250 ms tick while playing, a track
+                // or state change), not at every `Shell` draw (BACKLOG 23).
+                .child(self.bar.clone().cached(bar_style()));
+            if stage_moving {
+                below = below.child(
+                    div().absolute().top_0().left_0().size_full().occlude().child(self.stage_view.clone()),
+                );
+            }
+            root.child(below)
         };
-        // Il palco del videoclip dopo pagina, pannelli e vista immersiva: dipinge il fotogramma nel pozzo che il
-        // pannello o la vista immersiva hanno segnato in questo stesso disegno (`VideoStage::well`). Un
-        // fotogramma rifà `Shell` (la radice: GPUI la rifà a ogni disegno) e il palco; le viste in cache, il
-        // pannello e la vista immersiva compresi, si riusano (BACKLOG 41).
+        // The video stage after the page, panels and immersive view: it paints the frame in the well that the
+        // panel or the immersive view marked in this same draw (`VideoStage::well`). A
+        // frame redoes `Shell` (the root: GPUI redoes it on every draw) and the stage; the cached views, the
+        // panel and the immersive view included, are reused (BACKLOG 41).
+        if self.sidebar.drag.is_some() {
+            // Window-wide listeners only while the edge is dragged.
+            let shell = cx.entity().downgrade();
+            root = root.child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |_, (), window, _| {
+                        let moved = shell.clone();
+                        window.on_mouse_event(move |event: &gpui::MouseMoveEvent, _, _, cx| {
+                            moved.update(cx, |this, cx| this.drag_sidebar(to_dp(event.position.x), cx)).ok();
+                        });
+                        let released = shell.clone();
+                        window.on_mouse_event(move |_: &gpui::MouseUpEvent, _, _, cx| {
+                            released.update(cx, |this, cx| this.end_sidebar_drag(cx)).ok();
+                        });
+                    },
+                )
+                .absolute()
+                .size_0(),
+            );
+        }
         #[cfg(feature = "video")]
         {
             root = root.child(self.video.clone());
         }
 
         if let Some(open) = &self.menu {
-            // Un clic fuori dal menu lo chiude (e non arriva a ciò che c'è sotto).
+            // A click outside the menu closes it (and does not reach what is underneath).
             let close = |this: &mut Self,
                          _: &gpui::MouseDownEvent,
                          _: &mut Window,
@@ -1709,12 +2040,12 @@ impl Render for Shell {
                     .on_mouse_down(MouseButton::Left, cx.listener(close))
                     .on_mouse_down(MouseButton::Right, cx.listener(close)),
             ));
-            // Il pannello copre il velo: un clic su una voce non arriva al velo (che chiude).
+            // The panel covers the scrim: a click on an entry does not reach the scrim (which closes).
             let panel = div().occlude().child(self.menu_panel(open, cx));
             root = root.child(popup(open.menu.at, panel));
         }
         if let Some((dialog, ..)) = &self.dialog {
-            // Il velo copre tutta la finestra; un clic sul velo chiude come «Annulla».
+            // The scrim covers the whole window; a click on the scrim closes it, like «Annulla».
             let veil = scrim().on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.dialog_done(DialogEvent::Cancelled, window, cx)),
@@ -1766,21 +2097,29 @@ mod tests {
 
     #[cfg(feature = "video")]
     #[test]
-    fn the_video_shows_in_one_place_at_a_time() {
-        let video = Some(SidePanel::Video);
-        assert_eq!(video_surface(video, false, false), Some(Surface::Panel));
-        assert_eq!(video_surface(Some(SidePanel::Queue), false, true), None);
-        assert_eq!(video_surface(None, false, false), None);
-        // La vista immersiva copre il pannello: si vede lì, se è sul videoclip, o da nessuna parte.
-        assert_eq!(video_surface(video, true, true), Some(Surface::Focus));
-        assert_eq!(video_surface(video, true, false), None);
-        assert_eq!(video_surface(None, true, true), Some(Surface::Focus));
-        assert_eq!(toggled(video, SidePanel::Video), None);
+    fn the_clip_shows_in_one_media_slot_at_a_time() {
+        let now = Some(SidePanel::Now);
+        assert_eq!(video_surface(now, false, true), Some(Surface::Panel));
+        assert_eq!(video_surface(now, false, false), None, "the clip is off: the cover");
+        assert_eq!(video_surface(Some(SidePanel::Queue), false, true), None, "another tab hides the slot");
+        assert_eq!(video_surface(None, false, true), None);
+        // The stage covers the panel: the clip moves to the stage's slot.
+        assert_eq!(video_surface(now, true, true), Some(Surface::Stage));
+        assert_eq!(video_surface(None, true, true), Some(Surface::Stage));
+        assert_eq!(video_surface(None, true, false), None);
+    }
+
+    #[test]
+    fn the_panel_tabs_are_in_order_and_toggle() {
+        assert_eq!(SidePanel::ALL.map(SidePanel::label), ["In riproduzione", "Testo", "Coda"]);
+        assert_eq!(SidePanel::Queue.ix(), 2);
+        assert_eq!(toggled(Some(SidePanel::Now), SidePanel::Now), None);
+        assert_eq!(toggled(Some(SidePanel::Now), SidePanel::Lyrics), Some(SidePanel::Lyrics));
     }
 
     #[test]
     fn the_queue_and_the_lyrics_share_the_panel() {
-        // Come le schede del client Iced: il tasto apre la sua scheda, o chiude se era già aperta.
+        // A button opens its tab, or closes the panel if that tab was open.
         assert_eq!(toggled(None, SidePanel::Lyrics), Some(SidePanel::Lyrics));
         assert_eq!(toggled(Some(SidePanel::Queue), SidePanel::Lyrics), Some(SidePanel::Lyrics));
         assert_eq!(toggled(Some(SidePanel::Lyrics), SidePanel::Lyrics), None);

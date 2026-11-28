@@ -1,8 +1,17 @@
 name: Android
 
-# Builds and signs the APK. Runs by hand, on Android changes and as part of the release.
+# Builds the Kotlin app (android-app/, with the Rust core from mobile/ through UniFFI).
+#   pull requests: the quick debug APK (x86_64, no LTO), to see that it builds
+#   main:          the debug APK for both ABIs (arm64-v8a, x86_64)
+#   release, hand: the release APK (`dev.psytify.app`, R8, full LTO, both ABIs), signed with the
+#                  release key: it installs over the earlier releases
 on:
   workflow_call:
+    inputs:
+      # The release workflow calls this one on a tag push: the event alone does not say it.
+      release:
+        type: boolean
+        default: true
     secrets:
       ANDROID_KEYSTORE_BASE64:
         required: false
@@ -13,7 +22,21 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "android/**"
+      - "android-app/**"
+      - "mobile/**"
+      - "core/**"
+      - "design/**"
+      - "Cargo.lock"
+      - "scripts/android-*"
+      - ".github/workflows/android.yml"
+  push:
+    branches: [main]
+    paths:
+      - "android-app/**"
+      - "mobile/**"
+      - "core/**"
+      - "design/**"
+      - "Cargo.lock"
       - "scripts/android-*"
       - ".github/workflows/android.yml"
 
@@ -31,7 +54,10 @@ jobs:
   apk:
     name: Build APK
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
+    env:
+      # What this run builds: `quick` (pull requests), `debug` (main) or `release`.
+      KIND: ${{ inputs.release && 'release' || (github.event_name == 'pull_request' && 'quick' || (github.event_name == 'push' && 'debug' || 'release')) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,22 +66,23 @@ jobs:
       - run: rustup target add aarch64-linux-android x86_64-linux-android
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          workspaces: |
-            . -> target
-            android -> android/target
-      - name: Install cargo-apk
-        run: cargo install cargo-apk --version 0.10.0 --locked
-      - name: Locate the NDK 27 of the runner
+          workspaces: . -> target
+          key: ${{ env.KIND }}
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --version 4.1.2 --locked
+      # The NDK is the one in scripts/android-env.sh (NDK_VERSION); Gradle runs on the runner's JDK 21.
+      - name: Install the NDK and choose the JDK
         run: |
-          ndk=$(ls "$ANDROID_HOME/ndk" | grep '^27\.' | sort -V | tail -1)
-          echo "NDK_VERSION=$ndk" >> "$GITHUB_ENV"
-          echo "using NDK $ndk"
-      # Without secrets the APK is signed with a throwaway key: fine to try it, but an update
-      # does not install over a version signed with another key.
+          . scripts/android-env.sh
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" "build-tools;35.0.0" >/dev/null
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+      # Without secrets the release APK is signed with a throwaway key: fine to try it, but it does
+      # not install over a version signed with another key.
       - name: Restore the signing key
+        if: env.KIND == 'release'
         env:
-          KEYSTORE_B64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
-          KEYSTORE_PASS: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASS" ]; then
             umask 077
@@ -69,16 +96,34 @@ jobs:
       - name: Build the APK
         env:
           # Optional: the backend the app uses by default. It is a repository secret: it does not appear in logs.
-          # Not used on pull requests: anyone can download the artifacts of a public repository.
-          PSYTIFY_DEFAULT_API_URL: ${{ github.event_name != 'pull_request' && secrets.PSYTIFY_DEFAULT_API_URL || '' }}
+          # Only in the release APK: anyone can download the artifacts of a public repository.
+          PSYTIFY_DEFAULT_API_URL: ${{ env.KIND == 'release' && secrets.PSYTIFY_DEFAULT_API_URL || '' }}
           # The Clerk login (issuer and OAuth client ID): public values, kept as repository variables.
           PSYTIFY_DEFAULT_CLERK_ISSUER: ${{ vars.PSYTIFY_DEFAULT_CLERK_ISSUER }}
           PSYTIFY_DEFAULT_DISCORD_APP_ID: ${{ vars.PSYTIFY_DEFAULT_DISCORD_APP_ID }}
+          # The release tag: the app's version, and what the core compares with the latest release.
           PSYTIFY_BUILD_TAG: ${{ github.ref_name }}
-        run: scripts/android-apk.sh
+        run: |
+          case "$KIND" in
+            quick) QUICK=1 scripts/android-kotlin.sh ;;
+            debug) scripts/android-kotlin.sh ;;
+            release)
+              RELEASE=1 scripts/android-kotlin.sh
+              # The name the release job publishes (psytify-TAG-android.apk after renaming).
+              cp android-app/app/build/outputs/apk/release/psytify.apk "$RUNNER_TEMP/psytify.apk"
+              ;;
+          esac
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.KIND == 'release'
         with:
           name: psytify-apk
-          path: android/target/release/apk/psytify.apk
+          path: ${{ runner.temp }}/psytify.apk
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.KIND != 'release'
+        with:
+          name: psytify-${{ env.KIND }}-apk
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

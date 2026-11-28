@@ -1,19 +1,19 @@
-//! Le pagine dell'app e la cronologia dietro i tasti «Indietro» e «Avanti» della barra del titolo
-//! (Alt+← e Alt+→, e i tasti laterali del mouse). Logica pura: nessuna vista, nessun core.
+//! The app's pages and the history behind the «Indietro» and «Avanti» keys of the title bar
+//! (Alt+← and Alt+→, and the mouse side keys). Pure logic: no view, no core.
 //!
-//! La cronologia ha un fondo ([`HISTORY_CAP`] pagine dietro): oltre, cade la più vecchia. Tornare sulla
-//! pagina in cui si è già non aggiunge niente. Quando una pagina sparisce (una playlist eliminata) la si
-//! toglie da tutta la cronologia ([`History::forget`]), così «Indietro» non porta su una pagina vuota.
+//! The history has a cap ([`HISTORY_CAP`] pages behind): beyond it, the oldest falls off. Going back to the
+//! page one is already on adds nothing. When a page disappears (a deleted playlist) it is
+//! removed from the whole history ([`History::forget`]), so «Indietro» does not lead to an empty page.
 
 use std::collections::VecDeque;
 
 use psytify_design::sprite;
 use uuid::Uuid;
 
-/// Pagine tenute dietro quella corrente: oltre, cade la più vecchia.
+/// Pages kept behind the current one: beyond that, the oldest falls off.
 pub const HISTORY_CAP: usize = 50;
 
-/// Una pagina dell'app.
+/// One page of the app.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Page {
     Home,
@@ -21,34 +21,34 @@ pub enum Page {
     Library,
     /// «Brani che ti piacciono».
     Liked,
-    /// Una playlist locale.
+    /// A local playlist.
     Playlist(Uuid),
     Downloads,
-    /// «Novità»: le uscite degli artisti seguiti.
+    /// «Novità»: the releases of the artists you follow.
     News,
-    /// Un album del catalogo del server.
+    /// An album of the server's catalogue.
     Album(Uuid),
-    /// Un artista del catalogo del server.
+    /// An artist of the server's catalogue.
     Artist(Uuid),
-    /// Un album o una playlist del catalogo ufficiale (o di Bandcamp, YouTube): la scheda la tiene
-    /// `Shell`, qui c'è solo la sua impronta, così la pagina resta `Copy`.
+    /// An album or a playlist from the official catalogue (or from Bandcamp, YouTube): the tab is kept by
+    /// `Shell`, here there is only its fingerprint, so the page stays `Copy`.
     Source(SourceKey),
-    /// Impostazioni.
+    /// Settings.
     Settings,
-    /// «Accedi a Psytify»: password, codice via email, GitHub, Google, Discord.
+    /// «Accedi a Psytify»: password, email code, GitHub, Google, Discord.
     SignIn,
-    /// Amici: ricerca di persone, richieste, amici con il brano che ascoltano.
+    /// Amici: searching for people, requests, friends with the track they are listening to.
     Friends,
-    /// Il profilo di una persona (anche il proprio): il nome utente lo tiene `Shell`, qui c'è la sua
-    /// impronta, così la pagina resta `Copy`.
+    /// A person's profile (also one's own): `Shell` keeps the username, here there is its
+    /// fingerprint, so the page stays `Copy`.
     Profile(PersonKey),
-    /// La playlist pubblica di una persona.
+    /// A person's public playlist.
     FriendPlaylist(PersonKey, Uuid),
-    /// Jam: l'ascolto insieme (crea, entra con un codice, inviti, chi c'è).
+    /// Jam: listening together (create, join with a code, invitations, who is there).
     Jam,
 }
 
-/// L'impronta del nome utente di una persona.
+/// The username fingerprint of a person.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PersonKey(u64);
 
@@ -62,7 +62,7 @@ impl PersonKey {
     }
 }
 
-/// L'impronta di un album o di una playlist esterna: la fonte e il suo identificatore.
+/// The fingerprint of an external album or playlist: the source and its identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SourceKey(u64);
 
@@ -76,7 +76,7 @@ impl SourceKey {
     }
 }
 
-/// Le voci della barra laterale.
+/// The entries of the sidebar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Nav {
     Home,
@@ -90,7 +90,7 @@ pub enum Nav {
 }
 
 impl Nav {
-    /// Nell'ordine del client Iced: la Jam fra Scaricati e Amici.
+    /// The order: the Jam between Scaricati and Amici.
     pub const ALL: [Self; 8] = [
         Self::Home,
         Self::Search,
@@ -115,7 +115,7 @@ impl Nav {
         }
     }
 
-    /// Icona a riposo e piena (quando la voce è selezionata).
+    /// Icon at rest and filled (when the entry is selected).
     pub fn icons(self) -> (&'static str, &'static str) {
         match self {
             Self::Home => (sprite::ICON_HOME, sprite::ICON_HOME_FILL),
@@ -124,14 +124,14 @@ impl Nav {
             Self::News => (sprite::ICON_BELL, sprite::ICON_BELL_FILL),
             // The arrow is already solid; the check of `ICON_DOWNLOADED` means "saved on this device".
             Self::Downloads => (sprite::ICON_DOWNLOAD, sprite::ICON_DOWNLOAD),
-            // Come nel client Iced: il gruppo per la Jam, la persona per gli Amici.
+            // The group for the Jam, the person for Amici.
             Self::Jam => (sprite::ICON_PEOPLE, sprite::ICON_PEOPLE_FILL),
             Self::Friends => (sprite::ICON_ACCOUNT, sprite::ICON_ACCOUNT),
             Self::Settings => (sprite::ICON_SETTINGS, sprite::ICON_SETTINGS_FILL),
         }
     }
 
-    /// La pagina che la voce apre.
+    /// The page the entry opens.
     pub fn page(self) -> Page {
         match self {
             Self::Home => Page::Home,
@@ -147,9 +147,9 @@ impl Nav {
 }
 
 impl Page {
-    /// La voce della barra laterale accesa su questa pagina: i brani piaciuti, le playlist, gli album e
-    /// gli artisti stanno nella Libreria (come nel client Iced); un album del catalogo ufficiale si apre
-    /// dalla ricerca; l'accesso, i profili e le playlist degli amici stanno negli Amici.
+    /// The sidebar entry lit on this page: the liked tracks, the playlists, the albums and
+    /// the artists are in the Libreria; an album from the official catalogue opens
+    /// from the search; sign-in, the profiles and the friends' playlists are in Amici.
     pub fn nav(self) -> Nav {
         match self {
             Self::Home => Nav::Home,
@@ -165,9 +165,9 @@ impl Page {
         }
     }
 
-    /// Il nome della pagina sulla riga di comando (`--page`): `playlist` apre la prima playlist, `album`
-    /// il primo album salvato, `artist` il primo artista seguito, `profile` il proprio profilo (o quello
-    /// aperto dai dati di prova di `--fixture`).
+    /// The page's name on the command line (`--page`): `playlist` opens the first playlist, `album`
+    /// the first saved album, `artist` the first followed artist, `profile` one's own profile (or the one
+    /// opened by the `--fixture` test data).
     pub fn from_arg(name: &str) -> Option<PageArg> {
         Some(match name {
             "home" => PageArg::Page(Self::Home),
@@ -189,19 +189,19 @@ impl Page {
     }
 }
 
-/// La pagina chiesta dalla riga di comando: una pagina, o la prima playlist della libreria (il suo id
-/// si sa solo dopo aver letto la configurazione).
+/// The page asked for on the command line: one page, or the library's first playlist (its id
+/// is known only after reading the configuration).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PageArg {
     Page(Page),
     FirstPlaylist,
     FirstAlbum,
     FirstArtist,
-    /// Il proprio profilo (serve l'accesso), o quello aperto dai dati di prova.
+    /// One's own profile (needs sign-in), or the one opened by the test data.
     Profile,
 }
 
-/// La pagina corrente, quelle dietro (la più recente in fondo) e quelle davanti (la prossima in fondo).
+/// The current page, the ones behind (the most recent at the end) and the ones in front (the next at the end).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct History {
     back: VecDeque<Page>,
@@ -226,8 +226,8 @@ impl History {
         !self.forward.is_empty()
     }
 
-    /// Apre `page`. `false` se è già quella corrente: la cronologia non cambia. Una pagina nuova cancella
-    /// quelle davanti, come in un browser.
+    /// Opens `page`. `false` if it is already the current one: the history does not change. A new page cancels
+    /// the ones in front, as in a browser.
     pub fn go(&mut self, page: Page) -> bool {
         if page == self.current {
             return false;
@@ -241,7 +241,7 @@ impl History {
         true
     }
 
-    /// Torna alla pagina di prima; `None` se non ce n'è.
+    /// Goes back to the previous page; `None` if there is none.
     pub fn back(&mut self) -> Option<Page> {
         let previous = self.back.pop_back()?;
         self.forward.push(self.current);
@@ -249,7 +249,7 @@ impl History {
         Some(previous)
     }
 
-    /// Rifà il passo annullato da [`History::back`]; `None` se non ce n'è.
+    /// Redoes the step undone by [`History::back`]; `None` if there is none.
     pub fn forward(&mut self) -> Option<Page> {
         let next = self.forward.pop()?;
         self.back.push_back(self.current);
@@ -260,18 +260,18 @@ impl History {
         Some(next)
     }
 
-    /// Le pagine nella cronologia, la corrente compresa.
+    /// The pages in the history, the current one included.
     pub fn pages(&self) -> impl Iterator<Item = Page> + '_ {
         self.back.iter().copied().chain(std::iter::once(self.current)).chain(self.forward.iter().copied())
     }
 
-    /// Toglie dalla cronologia le pagine che non esistono più, e i doppioni che restano accostati (due
-    /// pagine uguali di fila, o accanto a quella corrente). La pagina corrente la cambia chi chiama,
-    /// prima, con [`History::go`].
+    /// Removes from the history the pages that no longer exist, and the duplicates left side by side (two
+    /// equal pages in a row, or next to the current one). The caller changes the current page
+    /// first, with [`History::go`].
     pub fn forget(&mut self, gone: impl Fn(Page) -> bool) {
         self.back.retain(|page| !gone(*page));
         self.forward.retain(|page| !gone(*page));
-        // Indietro: dalla più vecchia alla corrente.
+        // Back: from the oldest to the current one.
         let mut back: VecDeque<Page> = VecDeque::with_capacity(self.back.len());
         for page in self.back.drain(..) {
             if back.back() != Some(&page) {
@@ -282,7 +282,7 @@ impl History {
             back.pop_back();
         }
         self.back = back;
-        // Avanti: dalla più lontana alla prossima, che non deve essere la corrente.
+        // Forward: from the farthest to the next one, which must not be the current one.
         self.forward.dedup();
         while self.forward.last() == Some(&self.current) {
             self.forward.pop();
@@ -364,10 +364,10 @@ mod tests {
         for page in [playlist(1), Page::Library, playlist(1), Page::Liked, playlist(1)] {
             history.go(page);
         }
-        // Chi elimina la playlist aperta prima porta via la pagina corrente, poi la dimentica.
+        // Whoever deletes the open playlist takes the current page away first, then forgets it.
         history.go(Page::Library);
         history.forget(|page| page == playlist(1));
-        // Dietro restavano Library, Library, Liked: i due Library accostati diventano uno.
+        // Behind there were Library, Library, Liked: the two Library side by side become one.
         assert_eq!(history.back(), Some(Page::Liked));
         assert_eq!(history.back(), Some(Page::Library));
         assert_eq!(history.back(), None);
@@ -431,7 +431,7 @@ mod tests {
         {
             assert_eq!(page.nav(), Nav::Friends);
         }
-        // Due profili sono due passi della cronologia; lo stesso due volte no.
+        // Two profiles are two steps of the history; the same one twice is not.
         let mut history = History::new(Page::Friends);
         assert!(history.go(Page::Profile(luca)));
         assert!(!history.go(Page::Profile(luca)));

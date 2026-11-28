@@ -1,19 +1,23 @@
-//! La Home: le sezioni del client Iced (`client/src/ui/pages/home.rs`), nello stesso ordine, disegnate come
-//! da `PSYTIFY_ART_DIRECTION.md` (Home). In cima il titolo in tipo pixel e una riga di saluto; poi *Riprendi*
-//! (brani che ti piacciono, le prime playlist e gli ultimi ascolti in una griglia di due colonne), *Aggiunti
-//! di recente* come registro datato delle uscite (righe raggruppate per giorno, al posto dello scaffale),
-//! *Novità dai tuoi artisti* (le uscite non ancora viste portano «Nuovo»), gli artisti, *Mix per te*, *Più
-//! ascoltati da te*, *Ascoltati di recente*, gli *Album* del catalogo, *Il tuo ascolto* e *Dalla A alla Z*.
-//! Ogni scaffale è una riga di copertine intere (`components::shelf`): le frecce la spostano, «Mostra tutto»
-//! la apre in una griglia lì dove sta. Niente carosello in cima (la direzione artistica lo esclude).
+//! The Home: its sections, in the same order, drawn as
+//! in `PSYTIFY_ART_DIRECTION.md` (Home). At the top the title in pixel type and a greeting line; then *Riprendi*
+//! (liked tracks, the first playlists and the last listens in a two-column grid), *Aggiunti
+//! di recente* as a dated log of releases (rows grouped by day, in place of the shelf),
+//! *Novità dai tuoi artisti* (releases not yet seen carry «Nuovo»), the artists, *Mix per te*, *Più
+//! ascoltati da te*, *Ascoltati di recente*, the *Album* of the catalogue, *Il tuo ascolto* and *Dalla A alla Z*.
+//! Each shelf is one full row of a fluid tile grid (`components::frame::TileGrid`, tiles stretch to the
+//! width): the arrows move it, «Mostra tutto» opens it as a grid where it is. *Riprendi* is a 2 to 4 column
+//! grid of 56 dp shortcuts and *Aggiunti di recente* flows into one to three columns (`frame::Flow`) under
+//! date headers that span the row. The page fills the canvas with the frame margins and every section
+//! enters with the page-enter move (`motion::Enter`).
 //!
-//! I dati: le tre sezioni della Home del catalogo (`CatalogView::home`, caricate da `CatalogCmd::Ensure`,
-//! che sulla Home già pronta fa rifare il feed se gli ascolti sono cambiati) e il feed che il dominio della
-//! libreria ne ricava (`LibraryView::feed`: uscite, novità, artisti, mix, classifica). La pagina li copia nei
-//! suoi campi quando il core pubblica e prepara una volta i testi; `render` non li legge.
+//! The data: the three sections of the catalogue's Home (`CatalogView::home`, loaded by `CatalogCmd::Ensure`,
+//! which on a Home already ready makes the feed be rebuilt if the listens changed) and the feed that the library
+//! domain derives from it (`LibraryView::feed`: releases, news, artists, mixes, chart). The page copies them into its
+//! fields when the core publishes, and prepares the texts once; `render` does not read them.
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Instant;
 
 use gpui::{
     AnyElement, ClickEvent, Context, Entity, EventEmitter, IntoElement, ListState, ParentElement, Render,
@@ -29,8 +33,8 @@ use psytify_design::sprite;
 use psytify_design::tokens::color::{
     SURFACE_CANVAS, TEXT_ERROR, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY,
 };
-use psytify_design::tokens::size::cover::COVER_XS;
-use psytify_design::tokens::size::{GRID_GAP, TRACK_ROW_DENSE_H, TRACK_ROW_H};
+use psytify_design::tokens::size::cover::ART_ROW;
+use psytify_design::tokens::size::{TILE_GAP, TRACK_ROW_DENSE_H, TRACK_ROW_H};
 use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_5, SPACE_6};
 use psytify_design::tokens::type_::{TYPE_BODY, TYPE_HEADING, TYPE_LABEL, TYPE_META};
 use uuid::Uuid;
@@ -42,36 +46,36 @@ use super::{Page, PageEvent};
 use crate::components::badge::BadgeKind;
 use crate::components::button::Button;
 use crate::components::card::Card;
+use crate::components::frame::{Flow, Frame, TileGrid};
 use crate::components::icon_button::IconButton;
 use crate::components::indicators::{PlayState, Skeleton};
 use crate::components::list_row::{ListRow, RowArt};
 use crate::components::page_header::mosaic_urls;
 use crate::components::playing_spot::PlayingSpot;
-use crate::components::section::{PageTitle, note, section_heading};
-use crate::components::shelf::{Shelf, ShelfPage, Wheel, fit};
+use crate::components::section::{PageTitle, note_at, section_heading_at};
+use crate::components::shelf::{Shelf, ShelfPage, Wheel};
 use crate::components::shortcut::Shortcut;
 use crate::components::tile::AlbumTile;
 use crate::components::track_row::{TrackData, TrackRow};
 use crate::core_model::{Changed, CoreModel};
 use crate::format;
-use crate::theme::{Ap, TypeStyle, cased, col, dp};
+use crate::motion::{self, Enter};
+use crate::theme::{Ap, TypeStyle, cased, col, dp, to_dp};
 
-/// Il lato delle copertine degli scaffali.
-pub const TILE: f32 = 160.0;
-/// Le voci di *Riprendi* al massimo (due colonne).
+/// The *Riprendi* entries at most (two columns).
 const SHORTCUTS: usize = 8;
-/// Le playlist in *Riprendi*, dopo i brani che ti piacciono.
+/// The playlists in *Riprendi*, after the liked tracks.
 const SHORTCUT_PLAYLISTS: usize = 3;
-/// Le uscite del registro prima di «Mostra tutte».
+/// The releases of the log before «Mostra tutte».
 const LOG: usize = 8;
-/// Le novità dei tuoi artisti nello scaffale (come il client Iced; le altre sono in «Novità»).
+/// The news of your artists on the shelf.
 const NEWS: usize = 12;
-/// I brani della classifica (come il client Iced).
+/// The chart tracks.
 const TOP: usize = 10;
-/// Righe dello scheletro del registro mentre la Home arriva.
+/// Skeleton rows of the log while the Home arrives.
 const LOG_SKELETON: usize = 6;
 
-/// Gli scaffali della pagina.
+/// The page's shelves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     News,
@@ -90,7 +94,7 @@ impl Kind {
     }
 }
 
-/// Lo stato di un caricamento, per il piano delle righe.
+/// The state of a load, for the row plan.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Status {
     #[default]
@@ -109,16 +113,16 @@ impl Status {
     }
 }
 
-/// Le intestazioni che non sono uno scaffale intero.
+/// The headers that are not a whole shelf.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Head {
     Recent,
     Top,
-    /// Lo scaffale aperto in griglia, o in caricamento, fallito, vuoto.
+    /// The shelf open as a grid, or loading, failed, empty.
     Kind(Kind),
 }
 
-/// Una riga di stato sotto un'intestazione.
+/// A status row under a header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Note {
     RecentFailed,
@@ -129,30 +133,31 @@ enum Note {
     AlphabeticalEmpty,
 }
 
-/// Una riga dopo il titolo.
+/// A row after the title.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
-    /// Due voci di *Riprendi*, da questa.
+    /// A row of *Riprendi*, from this item.
     Shortcuts(usize),
     Heading(Head),
-    /// Una voce del registro (una data o un'uscita).
+    /// An entry of the log (a date or a release).
     Log(usize),
     LogSkeleton,
     Note(Note),
     Shelf(Kind),
     SkeletonShelf(Kind),
-    /// Una riga della griglia di uno scaffale aperto: le copertine da questa.
+    /// A row of the grid of an open shelf: the covers from this one.
     Grid(Kind, usize),
     Top(usize),
     Listening,
 }
 
-/// Che cosa c'è da mostrare, già contato. Puro, perché `plan` si possa provare.
+/// What there is to show, already counted. Pure, so that `plan` can be tested.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Shape {
     shortcuts: usize,
+    shortcut_columns: usize,
     recent: Status,
-    /// Le voci del registro (date e uscite), già tagliate.
+    /// The entries of the log (dates and releases), already cut.
     log: usize,
     news: usize,
     artists: usize,
@@ -181,9 +186,10 @@ impl Shape {
     }
 }
 
-/// Le righe della Home, nell'ordine del client Iced. Pura.
+/// The rows of the Home, in display order. Pure.
 fn plan(shape: Shape) -> Vec<Row> {
-    let mut rows: Vec<Row> = (0..shape.shortcuts).step_by(2).map(Row::Shortcuts).collect();
+    let mut rows: Vec<Row> =
+        (0..shape.shortcuts).step_by(shape.shortcut_columns.max(1)).map(Row::Shortcuts).collect();
     rows.push(Row::Heading(Head::Recent));
     match shape.recent {
         Status::Loading => rows.extend((0..LOG_SKELETON).map(|_| Row::LogSkeleton)),
@@ -235,32 +241,42 @@ fn plan(shape: Shape) -> Vec<Row> {
     rows
 }
 
-/// Una voce del registro delle uscite.
+/// A line of the release log.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum LogItem {
-    /// «21 nov 2026»: il giorno delle uscite che seguono.
+    /// «21 nov 2026»: the day of the releases that follow, across the row.
     Date(SharedString),
-    /// L'indice dell'uscita in `feed.releases`.
-    Release(usize),
+    /// A row of releases (indices in `feed.releases`), one per flowing column.
+    Releases(Vec<usize>),
 }
 
-/// Il registro: le prime `limit` uscite (già dalla più recente), con una data prima di ogni giorno nuovo.
-fn release_log(releases: &[Release], limit: usize) -> Vec<LogItem> {
+/// The log: the first `limit` releases (newest first), a date before each new day, and each day's releases
+/// flowed into `flow` columns.
+fn release_log(releases: &[Release], limit: usize, flow: Flow) -> Vec<LogItem> {
     let mut log = Vec::new();
-    let mut day: Option<String> = None;
-    for (ix, release) in releases.iter().enumerate().take(limit) {
-        let label = feed::date_label(&release.created_at).unwrap_or_else(|| "Senza data".to_owned());
-        if day.as_deref() != Some(label.as_str()) {
-            log.push(LogItem::Date(label.clone().into()));
-            day = Some(label);
+    let mut day: Vec<usize> = Vec::new();
+    let mut label: Option<String> = None;
+    let close = |log: &mut Vec<LogItem>, day: &mut Vec<usize>| {
+        for row in 0..flow.rows(day.len()) {
+            log.push(LogItem::Releases(flow.cells(row, day.len()).map(|ix| day[ix]).collect()));
         }
-        log.push(LogItem::Release(ix));
+        day.clear();
+    };
+    for (ix, release) in releases.iter().enumerate().take(limit) {
+        let date = feed::date_label(&release.created_at).unwrap_or_else(|| "Senza data".to_owned());
+        if label.as_deref() != Some(date.as_str()) {
+            close(&mut log, &mut day);
+            log.push(LogItem::Date(date.clone().into()));
+            label = Some(date);
+        }
+        day.push(ix);
     }
+    close(&mut log, &mut day);
     log
 }
 
-/// La riga di saluto sotto il titolo. Finché le uscite non sono arrivate (`ready` falso) non si sa se ce ne
-/// sono di nuove: si resta sulla frase neutra.
+/// The greeting line under the title. Until the releases have arrived (`ready` false) it is not known whether there are
+/// new ones: the neutral phrase stays.
 fn greeting(ready: bool, unread: usize, following: usize) -> &'static str {
     match (ready, unread, following) {
         (false, ..) | (_, 0, 0) => "Le ultime uscite del catalogo e ciò che ascolti",
@@ -269,22 +285,22 @@ fn greeting(ready: bool, unread: usize, following: usize) -> &'static str {
     }
 }
 
-/// «12.4 h» o «35 min»: il tempo ascoltato, con lo stesso formato del client Iced.
+/// «12.4 h» or «35 min»: the listening time, with the same format as the other pages.
 fn listened_label(ms: u64) -> String {
-    // Millisecondi in ore: la precisione di un `f64` basta e avanza.
+    // Milliseconds to hours: the precision of an `f64` is enough and it moves on.
     #[allow(clippy::cast_precision_loss)]
     let hours = ms as f64 / 3_600_000.0;
     if hours >= 1.0 {
         format!("{hours:.1} h")
     } else {
-        // Meno di un'ora: un numero di minuti piccolo e positivo.
+        // Less than an hour: a small positive number of minutes.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let minutes = (hours * 60.0).round() as u64;
         format!("{minutes} min")
     }
 }
 
-/// Che cosa fa una voce di *Riprendi*.
+/// What an entry of *Riprendi* does.
 #[derive(Clone, Debug)]
 enum ShortcutTarget {
     Liked,
@@ -298,12 +314,12 @@ struct ShortcutItem {
     target: ShortcutTarget,
 }
 
-/// I testi di un'uscita, pronti.
+/// The texts of a release, ready.
 struct ReleaseText {
     title: SharedString,
-    /// «Album · Artista» sotto la copertina.
+    /// «Album · Artista» under the cover.
     subtitle: SharedString,
-    /// «Artista · 12 brani» nel registro.
+    /// «Artista · 12 brani» in the log.
     detail: SharedString,
     kind: SharedString,
     cover: Option<SharedString>,
@@ -328,14 +344,14 @@ impl ReleaseText {
     }
 }
 
-/// Un mix, pronto: il mosaico, il nome e chi c'è dentro.
+/// A mix, ready: the mosaic, the name and who is in it.
 struct MixText {
     mosaic: Vec<SharedString>,
     title: SharedString,
     subtitle: SharedString,
 }
 
-/// Uno scaffale: dove parte la riga, la rotella, se è aperto in griglia.
+/// One shelf: where the row starts, the wheel, whether it is open as a grid.
 #[derive(Clone, Copy, Debug, Default)]
 struct ShelfState {
     start: usize,
@@ -343,7 +359,7 @@ struct ShelfState {
     open: bool,
 }
 
-/// Le tre cifre di *Il tuo ascolto*.
+/// The three figures of *Il tuo ascolto*.
 struct Listening {
     time: SharedString,
     plays: SharedString,
@@ -360,7 +376,7 @@ pub struct HomePage {
     downloads: Arc<DownloadsView>,
     liked: Arc<HashSet<Uuid>>,
     now: Option<(Uuid, PlayState)>,
-    /// L'album del brano in corso: la sua copertina mostra l'equalizzatore.
+    /// The album of the track playing: its cover shows the equaliser.
     now_album: Option<Uuid>,
     greeting: SharedString,
     shortcuts: Vec<ShortcutItem>,
@@ -376,17 +392,24 @@ pub struct HomePage {
     listening: Option<Listening>,
     shelves: [ShelfState; Kind::COUNT],
     log_open: bool,
-    columns: usize,
+    /// The layout for the page width (margins, tile grid, flowing columns).
+    frame: Frame,
+    /// The zoom of the last draw: a new one makes the list measure its rows again.
+    zoom: f32,
     rows: Vec<Row>,
+    /// The section of each row (for the staggered enter): 0 is the title.
+    sections: Vec<usize>,
+    /// The page enter in progress, if any.
+    enter: Option<Enter>,
     list: ListState,
-    /// I posti dell'equalizzatore del brano in corso: li dipinge `Shell` (BACKLOG 23).
+    /// The equaliser spots of the playing track: `Shell` paints them (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
 
 impl EventEmitter<PageEvent> for HomePage {}
 
-/// Lo stesso dato: i due `Arc` sono la stessa allocazione (o lo stato non ne ha, ed è uguale).
+/// The same data: the two `Arc`s are the same allocation (or the state has none, and they are equal).
 fn same<T: ?Sized>(a: &Load<Arc<T>>, b: &Load<Arc<T>>) -> bool {
     match (a, b) {
         (Load::Ready(a), Load::Ready(b)) => Arc::ptr_eq(a, b),
@@ -401,7 +424,7 @@ fn now_album(view: &PlaybackView) -> Option<Uuid> {
 }
 
 impl HomePage {
-    /// I posti dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// The equaliser spots of this view, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -434,8 +457,11 @@ impl HomePage {
             listening: None,
             shelves: [ShelfState::default(); Kind::COUNT],
             log_open: false,
-            columns: 4,
+            frame: Frame::default(),
+            zoom: crate::theme::zoom(),
             rows: Vec::new(),
+            sections: Vec::new(),
+            enter: None,
             list: new_list(0),
             core,
             spot: PlayingSpot::new(),
@@ -445,10 +471,16 @@ impl HomePage {
         page
     }
 
-    /// La Home è in vista: il core la carica se serve, e se è già pronta rifà il feed quando gli ascolti
-    /// sono cambiati (come il client Iced a ogni rientro).
+    /// The Home is in view: the core loads it if needed, and if it is ready it rebuilds the feed when the listens
+    /// have changed.
     pub fn show(&mut self, cx: &mut Context<Self>) {
         self.core.read(cx).catalog(CatalogCmd::Ensure(Resource::Home));
+    }
+
+    /// The page comes into view: its sections enter, rising unless it came from Back or Forward.
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.enter = Enter::begin(rise, cx);
+        cx.notify();
     }
 
     fn refresh(&mut self, core: &Entity<CoreModel>, changed: Changed, cx: &mut Context<Self>) {
@@ -465,7 +497,7 @@ impl HomePage {
         }
         if changed.downloads && !Arc::ptr_eq(&snapshot.downloads, &self.downloads) {
             self.downloads = Arc::clone(&snapshot.downloads);
-            // Solo la classifica mostra lo stato dei download.
+            // Only the chart shows the download status.
             dirty |= !self.top.is_empty();
         }
         if changed.playback {
@@ -485,7 +517,7 @@ impl HomePage {
         }
     }
 
-    /// Prende dal catalogo le tre sezioni della Home; `true` se una è cambiata.
+    /// Takes the three sections of the Home from the catalogue; `true` if one has changed.
     fn take(&mut self, catalog: &CatalogView) -> bool {
         let home = &catalog.home;
         let changed = !same(&home.recent, &self.recent)
@@ -499,7 +531,7 @@ impl HomePage {
         changed
     }
 
-    /// Rifà testi e righe: quando cambiano i dati, le colonne o uno scaffale si apre.
+    /// Rebuilds the texts and rows: when the data, the columns or a shelf opens, they change.
     fn rebuild(&mut self) {
         let library = Arc::clone(&self.library);
         let feed = Arc::clone(&library.feed);
@@ -508,7 +540,8 @@ impl HomePage {
         self.shortcuts = self.shortcut_items(&library);
         let seen = library.news_seen.as_str();
         self.releases = feed.releases.iter().map(|release| ReleaseText::of(release, false)).collect();
-        self.log = release_log(&feed.releases, if self.log_open { feed.releases.len() } else { LOG });
+        let limit = if self.log_open { feed.releases.len() } else { LOG };
+        self.log = release_log(&feed.releases, limit, self.frame.flow);
         self.news = feed
             .news
             .iter()
@@ -549,6 +582,7 @@ impl HomePage {
         let log = if Status::of(&self.recent) == Status::Ready { self.log.len() } else { 0 };
         self.rows = plan(Shape {
             shortcuts: self.shortcuts.len(),
+            shortcut_columns: self.frame.shortcuts,
             recent: Status::of(&self.recent),
             log,
             news: self.news.len(),
@@ -561,14 +595,15 @@ impl HomePage {
             alphabetical: Status::of(&self.alphabetical),
             alphabetical_count: self.alphabetical_tracks.len(),
             listening: self.listening.is_some(),
-            columns: self.columns,
+            columns: self.frame.grid.columns,
             open,
         });
+        self.sections = sections(&self.rows);
         set_rows(&self.list, self.rows.len());
         remeasure_header(&self.list);
     }
 
-    /// *Riprendi*: i brani che ti piacciono, le prime playlist, poi gli ultimi ascolti (al più 8).
+    /// *Riprendi*: the liked tracks, the first playlists, then the last listens (at most 8).
     fn shortcut_items(&self, library: &LibraryView) -> Vec<ShortcutItem> {
         let mut items = Vec::new();
         if !library.liked.is_empty() {
@@ -600,6 +635,21 @@ impl HomePage {
         items
     }
 
+    /// The play button of a *Riprendi* item: the liked songs, a playlist or the track.
+    fn play_shortcut(&self, target: &ShortcutTarget, cx: &gpui::App) {
+        let tracks: Arc<[Track]> = match target {
+            ShortcutTarget::Liked => self.library.liked.iter().cloned().collect(),
+            ShortcutTarget::Playlist(id) => match self.library.playlists.iter().find(|p| p.id == *id) {
+                Some(playlist) => playlist.tracks.iter().cloned().collect(),
+                None => return,
+            },
+            ShortcutTarget::Track(track) => Arc::from([(**track).clone()]),
+        };
+        if !tracks.is_empty() {
+            self.play_tracks(&tracks, 0, cx);
+        }
+    }
+
     fn kind_count(&self, kind: Kind) -> usize {
         match kind {
             Kind::News => self.news.len(),
@@ -612,19 +662,23 @@ impl HomePage {
     }
 
     fn shelf_page(&self, kind: Kind) -> ShelfPage {
-        ShelfPage::new(self.shelves[kind.ix()].start, self.columns, self.kind_count(kind))
+        ShelfPage::new(self.shelves[kind.ix()].start, self.frame.grid.columns, self.kind_count(kind))
     }
 
-    /// La larghezza della lista è cambiata: se cambia il numero di copertine per riga si rifanno le righe.
-    fn set_columns(&mut self, columns: usize, cx: &mut Context<Self>) {
-        if columns != self.columns {
-            self.columns = columns;
+    /// The page width changed: new column counts rebuild the rows, a new tile size only redraws.
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame == self.frame {
+            return;
+        }
+        let rebuild = frame.columns() != self.frame.columns();
+        self.frame = frame;
+        if rebuild {
             for state in &mut self.shelves {
                 state.wheel.reset();
             }
             self.rebuild();
-            cx.notify();
         }
+        cx.notify();
     }
 
     fn move_shelf(&mut self, kind: Kind, start: usize, cx: &mut Context<Self>) {
@@ -637,7 +691,7 @@ impl HomePage {
 
     fn wheel_shelf(&mut self, kind: Kind, dx: f32, cx: &mut Context<Self>) {
         let page = self.shelf_page(kind);
-        let steps = self.shelves[kind.ix()].wheel.step(dx, TILE + GRID_GAP);
+        let steps = self.shelves[kind.ix()].wheel.step(dx, self.frame.grid.tile + TILE_GAP);
         if steps != 0 {
             self.move_shelf(kind, page.moved(steps), cx);
         }
@@ -656,7 +710,7 @@ impl HomePage {
         cx.notify();
     }
 
-    /// Suona dei brani da `start`, o mette in pausa se è il brano in corso.
+    /// Plays tracks from `start`, or pauses if it is the playing track.
     fn play_tracks(&self, tracks: &Arc<[Track]>, start: usize, cx: &gpui::App) {
         let core = self.core.read(cx);
         match (tracks.get(start), self.now) {
@@ -665,7 +719,7 @@ impl HomePage {
         }
     }
 
-    /// Suona un'uscita: l'album intero (lo chiede il core al server) o il singolo. Se suona già, pausa.
+    /// Plays a release: the whole album (the core asks the server for it) or the single. If it already plays, pause.
     fn play_release(&self, release: &Release, cx: &gpui::App) {
         let core = self.core.read(cx);
         if self.release_playing(release).is_some() {
@@ -704,12 +758,24 @@ impl HomePage {
         self.now.filter(|_| self.now_album == Some(id)).map(|(_, state)| state)
     }
 
-    fn item(&mut self, ix: usize, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let element = match ix.checked_sub(1) {
-            None => Some(PageTitle::screen("Home").meta(self.greeting.clone()).into_any_element()),
+            None => Some(
+                PageTitle::screen("Home")
+                    .meta(self.greeting.clone())
+                    .margin(self.frame.margin)
+                    .into_any_element(),
+            ),
             Some(row) => self.row(row, cx),
         };
-        element.unwrap_or_else(|| div().into_any_element())
+        let element = element.unwrap_or_else(|| div().into_any_element());
+        match self.enter {
+            Some(enter) => {
+                let section = ix.checked_sub(1).and_then(|row| self.sections.get(row)).copied().unwrap_or(0);
+                enter.wrap(element, section, Ap::of(window), Instant::now())
+            }
+            None => element,
+        }
     }
 
     fn row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -717,40 +783,46 @@ impl HomePage {
             Row::Shortcuts(start) => self.shortcut_row(start, cx),
             Row::Heading(head) => self.heading(head, cx),
             Row::Log(position) => self.log_row(position, cx)?,
-            Row::LogSkeleton => log_skeleton(),
+            Row::LogSkeleton => log_skeleton(self.frame.margin),
             Row::Note(which) => self.note(which, cx),
             Row::Shelf(kind) => self.shelf(kind, cx),
             Row::SkeletonShelf(kind) => self.skeleton_shelf(kind),
             Row::Grid(kind, start) => {
-                let end = (start + self.columns.max(1)).min(self.kind_count(kind));
-                div()
-                    .flex()
-                    .gap(dp(GRID_GAP))
-                    .px(dp(SPACE_6))
-                    .pb(dp(SPACE_6))
-                    .children((start..end).filter_map(|position| self.tile(kind, position, cx)))
-                    .into_any_element()
+                let end = (start + self.frame.grid.columns.max(1)).min(self.kind_count(kind));
+                TileGrid::row(
+                    self.frame.margin,
+                    (start..end).filter_map(|position| self.tile(kind, position, cx)),
+                )
+                .pb(dp(SPACE_6))
+                .into_any_element()
             }
-            Row::Top(position) => self.top_row(position, cx)?.into_any_element(),
+            Row::Top(position) => div()
+                .px(dp(self.frame.margin - SPACE_3))
+                .child(self.top_row(position, cx)?)
+                .into_any_element(),
             Row::Listening => self.listening_card()?,
         })
     }
 
     fn shortcut_row(&self, start: usize, cx: &mut Context<Self>) -> AnyElement {
-        let last = start + 2 >= self.shortcuts.len();
-        let cells = (start..(start + 2).min(self.shortcuts.len())).filter_map(|position| {
+        let columns = self.frame.shortcuts.max(1);
+        let last = start + columns >= self.shortcuts.len();
+        let cells = (start..(start + columns).min(self.shortcuts.len())).filter_map(|position| {
             let item = self.shortcuts.get(position)?;
             let target = item.target.clone();
-            let mut shortcut = Shortcut::new(
-                ("home-shortcut", position),
-                item.art.clone(),
-                item.title.clone(),
-            )
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| match &target {
-                ShortcutTarget::Liked => cx.emit(PageEvent::Open(Page::Liked)),
-                ShortcutTarget::Playlist(id) => cx.emit(PageEvent::Open(Page::Playlist(*id))),
-                ShortcutTarget::Track(track) => this.play_tracks(&Arc::from([(**track).clone()]), 0, cx),
-            }));
+            let mut shortcut =
+                Shortcut::new(("home-shortcut", position), item.art.clone(), item.title.clone())
+                    .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| match &target {
+                        ShortcutTarget::Liked => cx.emit(PageEvent::Open(Page::Liked)),
+                        ShortcutTarget::Playlist(id) => cx.emit(PageEvent::Open(Page::Playlist(*id))),
+                        ShortcutTarget::Track(track) => {
+                            this.play_tracks(&Arc::from([(**track).clone()]), 0, cx)
+                        }
+                    }))
+                    .on_play({
+                        let target = item.target.clone();
+                        cx.listener(move |this, _: &ClickEvent, _, cx| this.play_shortcut(&target, cx))
+                    });
             if let ShortcutTarget::Track(track) = &item.target
                 && let Some(state) = self.track_playing(track)
             {
@@ -758,14 +830,17 @@ impl HomePage {
             }
             Some(shortcut)
         });
-        // Due colonne uguali su tutta la larghezza: senza `w_full` la griglia si stringe sul contenuto e ogni
-        // coppia ha una larghezza sua.
+        // Equal columns across the width: without `w_full` the grid shrinks to its content.
+        let mut cells: Vec<AnyElement> = cells.map(IntoElement::into_any_element).collect();
+        while cells.len() < columns {
+            cells.push(div().into_any_element());
+        }
         div()
             .w_full()
             .grid()
-            .grid_cols(2)
+            .grid_cols(u16::try_from(columns).unwrap_or(2))
             .gap(dp(SPACE_3))
-            .px(dp(SPACE_6))
+            .px(dp(self.frame.margin))
             .pb(dp(if last { SPACE_6 } else { SPACE_3 }))
             .children(cells)
             .into_any_element()
@@ -793,7 +868,7 @@ impl HomePage {
     }
 
     fn heading(&self, head: Head, cx: &mut Context<Self>) -> AnyElement {
-        let heading = section_heading(self.head_title(head), SharedString::default());
+        let heading = section_heading_at(self.head_title(head), SharedString::default(), self.frame.margin);
         match head {
             Head::Recent if self.library.feed.releases.len() > LOG => {
                 let label = if self.log_open { "Mostra meno" } else { "Mostra tutte" };
@@ -806,7 +881,9 @@ impl HomePage {
                     )
                     .into_any_element()
             }
-            Head::Kind(kind) if self.shelves[kind.ix()].open && self.kind_count(kind) > self.columns => {
+            Head::Kind(kind)
+                if self.shelves[kind.ix()].open && self.kind_count(kind) > self.frame.grid.columns =>
+            {
                 heading
                     .child(div().flex_1())
                     .child(Button::new(("home-less", kind.ix()), "Mostra meno").ghost().on_click(
@@ -818,17 +895,23 @@ impl HomePage {
         }
     }
 
-    /// Una voce del registro: la data del giorno, o un'uscita (un album si apre, un singolo suona).
+    /// A line of the log: the day's date, or a row of releases in flowing columns.
     fn log_row(&self, position: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let item = self.log.get(position)?;
-        let ix = match item {
-            LogItem::Date(label) => return Some(date_row(label.clone())),
-            LogItem::Release(ix) => *ix,
+        let cells = match self.log.get(position)? {
+            LogItem::Date(label) => return Some(date_row(label.clone(), self.frame.margin)),
+            LogItem::Releases(cells) => cells,
         };
+        let rows = cells.iter().filter_map(|ix| self.release_row(*ix, cx));
+        Some(self.frame.flow.row(self.frame.margin - SPACE_3, rows).into_any_element())
+    }
+
+    /// A release of the log (an album opens, a single plays).
+    fn release_row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
         let release = self.library.feed.releases.get(ix)?;
         let text = self.releases.get(ix)?;
         let (open, play) = (release.clone(), release.clone());
         let row = ListRow::new(("home-log", ix), RowArt::Cover(text.cover.clone()), text.title.clone())
+            .inset(SPACE_3)
             .badge(text.kind.clone(), BadgeKind::Neutral)
             .detail(text.detail.clone())
             .hover_action(
@@ -853,7 +936,7 @@ impl HomePage {
                     Load::Failed(error) => format!("Le novità non sono arrivate. {error}"),
                     _ => "Le novità non sono arrivate.".to_owned(),
                 };
-                return note(
+                return note_at(
                     div()
                         .flex()
                         .items_center()
@@ -864,6 +947,7 @@ impl HomePage {
                                 this.core.read(cx).catalog(CatalogCmd::Retry(Resource::Home));
                             },
                         ))),
+                    self.frame.margin,
                 )
                 .into_any_element();
             }
@@ -873,11 +957,12 @@ impl HomePage {
             Note::AlphabeticalFailed => ("Il catalogo non è arrivato: riprova più tardi.", true),
             Note::AlphabeticalEmpty => ("Nessun brano pubblicato.", false),
         };
-        note(
+        note_at(
             div()
                 .type_role(TYPE_BODY)
                 .text_color(col(if error { TEXT_ERROR } else { TEXT_SECONDARY }))
                 .child(text),
+            self.frame.margin,
         )
         .into_any_element()
     }
@@ -888,6 +973,7 @@ impl HomePage {
             page.range().filter_map(|position| self.tile(kind, position, cx)).collect();
         let (paged, wheeled) = (cx.entity().downgrade(), cx.entity().downgrade());
         let mut shelf = Shelf::new(("home-shelf", kind.ix()), self.kind_title(kind), page)
+            .frame(self.frame.margin, TILE_GAP)
             .tiles(tiles)
             .on_page(move |start, _, cx| {
                 paged.update(cx, |this, cx| this.move_shelf(kind, start, cx)).ok();
@@ -910,7 +996,7 @@ impl HomePage {
         shelf.into_any_element()
     }
 
-    /// La copertina `position` di uno scaffale (o della sua griglia).
+    /// The cover `position` of a shelf (or of its grid).
     fn tile(&self, kind: Kind, position: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = (SharedString::from(format!("home-{kind:?}")), position);
         let tile = match kind {
@@ -988,25 +1074,27 @@ impl HomePage {
                 }
             }
         };
-        Some(tile.side(TILE).into_any_element())
+        Some(tile.side(self.frame.grid.tile).into_any_element())
     }
 
-    /// Uno scaffale che aspetta: l'intestazione e le copertine vuote alla misura vera.
+    /// A shelf that waits: the header and the empty covers at the real size.
     fn skeleton_shelf(&self, kind: Kind) -> AnyElement {
-        let tiles = (0..self.columns.max(1)).map(|_| {
+        let tile = self.frame.grid.tile;
+        let tiles = (0..self.frame.grid.columns.max(1)).map(|_| {
             div()
                 .flex()
                 .flex_col()
                 .gap(dp(SPACE_3))
-                .child(Skeleton::new(TILE, TILE))
-                .child(Skeleton::new(TILE * 0.7, 12.0))
-                .child(Skeleton::new(TILE * 0.45, 10.0))
+                .child(Skeleton::new(tile, tile))
+                .child(Skeleton::new(tile * 0.7, 12.0))
+                .child(Skeleton::new(tile * 0.45, 10.0))
+                .into_any_element()
         });
         div()
             .flex()
             .flex_col()
-            .child(section_heading(self.kind_title(kind), SharedString::default()))
-            .child(div().flex().gap(dp(GRID_GAP)).px(dp(SPACE_6)).pb(dp(SPACE_6)).children(tiles))
+            .child(section_heading_at(self.kind_title(kind), SharedString::default(), self.frame.margin))
+            .child(TileGrid::row(self.frame.margin, tiles).pb(dp(SPACE_6)))
             .into_any_element()
     }
 
@@ -1049,11 +1137,11 @@ impl HomePage {
         if let Some(state) = self.track_playing(track) {
             row = row.playing_at(state, &self.spot);
         }
-        // L'ultima riga della classifica lascia lo spazio prima della sezione dopo.
+        // The last row of the chart leaves the space before the next section.
         Some(row)
     }
 
-    /// *Il tuo ascolto*: tempo, brani e l'artista più ascoltato, in una scheda.
+    /// *Il tuo ascolto*: time, tracks and the most played artist, in a card.
     fn listening_card(&self) -> Option<AnyElement> {
         let listening = self.listening.as_ref()?;
         let stat = |value: SharedString, label: &'static str, pixel: bool| {
@@ -1076,7 +1164,7 @@ impl HomePage {
         ];
         Some(
             div()
-                .px(dp(SPACE_6))
+                .px(dp(self.frame.margin))
                 .pt(dp(SPACE_6))
                 .pb(dp(SPACE_6))
                 .child(ListeningCard { stats })
@@ -1085,17 +1173,37 @@ impl HomePage {
     }
 }
 
-/// La scheda di *Il tuo ascolto*: le cifre in tipo pixel (l'artista, che viene dal catalogo, in Inter).
+/// The section of each row, for the staggered enter: a heading, a shelf, a skeleton shelf, the listening
+/// card and the first shortcut row each start one (0 is the page title).
+fn sections(rows: &[Row]) -> Vec<usize> {
+    let mut section = 0;
+    let mut previous: Option<Row> = None;
+    rows.iter()
+        .map(|row| {
+            let starts = match row {
+                Row::Shortcuts(_) => !matches!(previous, Some(Row::Shortcuts(_))),
+                Row::Heading(_) | Row::Shelf(_) | Row::SkeletonShelf(_) | Row::Listening => true,
+                _ => false,
+            };
+            if starts {
+                section += 1;
+            }
+            previous = Some(*row);
+            section
+        })
+        .collect()
+}
+
+/// The card of *Il tuo ascolto*: the figures in pixel type (the artist, which comes from the catalogue, in Inter).
 #[derive(IntoElement)]
 struct ListeningCard {
     stats: [(AnyElement, &'static str); 3],
 }
 
 impl gpui::RenderOnce for ListeningCard {
-    fn render(self, window: &mut Window, _cx: &mut gpui::App) -> impl IntoElement {
-        let ap = Ap::of(window);
+    fn render(self, _window: &mut Window, _cx: &mut gpui::App) -> impl IntoElement {
         let cells = self.stats.into_iter().enumerate().map(|(ix, (value, label))| {
-            let value = if ix < 2 { div().pixel_type(ap, true).child(value) } else { div().child(value) };
+            let value = if ix < 2 { div().pixel_type(true).child(value) } else { div().child(value) };
             div()
                 .flex_1()
                 .min_w_0()
@@ -1127,13 +1235,13 @@ impl gpui::RenderOnce for ListeningCard {
     }
 }
 
-/// La data di un giorno del registro, in `TYPE_LABEL`.
-fn date_row(label: SharedString) -> AnyElement {
+/// The date of a day in the log, in `TYPE_LABEL`, across the row.
+fn date_row(label: SharedString, margin: f32) -> AnyElement {
     div()
         .h(dp(TRACK_ROW_DENSE_H))
         .flex()
         .items_end()
-        .px(dp(SPACE_6))
+        .px(dp(margin))
         .pb(dp(SPACE_2))
         .type_role(TYPE_LABEL)
         .text_color(col(TEXT_TERTIARY))
@@ -1141,15 +1249,15 @@ fn date_row(label: SharedString) -> AnyElement {
         .into_any_element()
 }
 
-/// Una riga del registro che aspetta, sulla griglia di `ListRow`.
-fn log_skeleton() -> AnyElement {
+/// A waiting log row, on the `ListRow` grid.
+fn log_skeleton(margin: f32) -> AnyElement {
     div()
         .h(dp(TRACK_ROW_H))
         .flex()
         .items_center()
         .gap(dp(SPACE_3))
-        .px(dp(SPACE_6))
-        .child(Skeleton::new(COVER_XS, COVER_XS))
+        .px(dp(margin))
+        .child(Skeleton::new(ART_ROW, ART_ROW))
         .child(
             div()
                 .flex()
@@ -1162,19 +1270,29 @@ fn log_skeleton() -> AnyElement {
 }
 
 impl Render for HomePage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // I posti si segnano di nuovo nel paint di questo fotogramma, se ciò che suona è visibile.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The spots are marked again in this frame's paint, if what plays is visible.
         self.spot.clear();
-        // Quante copertine stanno in una riga lo dice la larghezza vera, letta a ogni disegno: se cambia, le
-        // righe si rifanno al giro dopo (un solo fotogramma).
+        // The layout comes from the real width, read at every draw: if it changes, the rows follow on the next
+        // frame (one frame).
+        let now = Instant::now();
+        if self.enter.is_some_and(|enter| !enter.running(now)) {
+            self.enter = None;
+        }
+        motion::keep_running(window, self.enter.is_some());
+        let zoom = crate::theme::zoom();
+        if (zoom - self.zoom).abs() > f32::EPSILON {
+            self.zoom = zoom;
+            self.list.remeasure();
+        }
         let entity = cx.entity().downgrade();
-        let current = self.columns;
+        let current = self.frame;
         let measure = canvas(
-            move |bounds, _, cx| {
-                let columns = fit(f32::from(bounds.size.width), TILE, GRID_GAP);
-                if columns != current {
+            move |bounds, window, cx| {
+                let frame = Frame::of(to_dp(bounds.size.width), to_dp(window.viewport_size().width));
+                if frame != current {
                     cx.defer(move |cx| {
-                        entity.update(cx, |this, cx| this.set_columns(columns, cx)).ok();
+                        entity.update(cx, |this, cx| this.set_frame(frame, cx)).ok();
                     });
                 }
             },
@@ -1204,6 +1322,7 @@ mod tests {
             albums: Status::Ready,
             alphabetical: Status::Ready,
             columns: 4,
+            shortcut_columns: 2,
             ..Shape::default()
         }
     }
@@ -1283,7 +1402,7 @@ mod tests {
             vec![Row::Grid(Kind::Albums, 0), Row::Grid(Kind::Albums, 4), Row::Grid(Kind::Albums, 8)]
         );
         assert!(rows.contains(&Row::Heading(Head::Kind(Kind::Albums))));
-        // Se le copertine stanno in una riga, aperto o no è uno scaffale.
+        // If the covers fit in one row, open or not it is a shelf.
         let rows = plan(Shape { album_count: 3, open, ..ready() });
         assert!(rows.contains(&Row::Shelf(Kind::Albums)));
     }
@@ -1297,18 +1416,45 @@ mod tests {
     #[test]
     fn the_log_puts_a_date_before_each_new_day() {
         let releases = [release(1, "21"), release(2, "21"), release(3, "20")];
-        let log = release_log(&releases, 10);
+        let one = Flow { columns: 1 };
+        let log = release_log(&releases, 10, one);
         assert_eq!(
             log,
             vec![
                 LogItem::Date("21 nov 2026".into()),
-                LogItem::Release(0),
-                LogItem::Release(1),
+                LogItem::Releases(vec![0]),
+                LogItem::Releases(vec![1]),
                 LogItem::Date("20 nov 2026".into()),
-                LogItem::Release(2),
+                LogItem::Releases(vec![2]),
             ]
         );
-        assert_eq!(release_log(&releases, 1), vec![LogItem::Date("21 nov 2026".into()), LogItem::Release(0)]);
+        assert_eq!(
+            release_log(&releases, 1, one),
+            vec![LogItem::Date("21 nov 2026".into()), LogItem::Releases(vec![0])]
+        );
+        // In two columns a day's releases share a row; the date still spans it.
+        assert_eq!(
+            release_log(&releases, 10, Flow { columns: 2 }),
+            vec![
+                LogItem::Date("21 nov 2026".into()),
+                LogItem::Releases(vec![0, 1]),
+                LogItem::Date("20 nov 2026".into()),
+                LogItem::Releases(vec![2]),
+            ]
+        );
+    }
+
+    #[test]
+    fn each_section_enters_on_its_own_step() {
+        let rows = [
+            Row::Shortcuts(0),
+            Row::Shortcuts(2),
+            Row::Heading(Head::Recent),
+            Row::Log(0),
+            Row::Shelf(Kind::News),
+            Row::Listening,
+        ];
+        assert_eq!(sections(&rows), vec![1, 1, 2, 2, 3, 4]);
     }
 
     #[test]

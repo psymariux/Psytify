@@ -1,20 +1,20 @@
-//! Catalogo (passo 4.4): Home, ricerca, elenco della libreria, album e artisti, librerie di Archive
-//! e catalogo ufficiale, più il ritrovamento dei brani spariti e la rilettura di quelli salvati.
+//! Catalog (step 4.4): Home, search, the library list, albums and artists, Archive libraries
+//! and the official catalog, plus the finding again of vanished tracks and the rereading of saved ones.
 //!
-//! Il dominio carica tutto dal backend con lavori ([`Job`]) e pubblica lo stato di ogni caricamento
-//! ([`Load`]) nella vista: un frontend lo copia e lo disegna, senza aprire richieste. Le pagine di
-//! album e artista si tengono in due cache a capienza fissa, con scarto del meno usato ([`Lru`]); una
-//! pagina vecchia si mostra subito e si rilegge in silenzio. La ricerca aspetta 300 ms dopo l'ultimo
-//! tasto con un timer del core ([`Timer::Search`]), e solo l'ultima richiesta conta: ogni tasto cambia
-//! il numero della richiesta e le risposte di un numero superato si scartano.
+//! The domain loads everything from the backend with jobs ([`Job`]) and publishes the state of each load
+//! ([`Load`]) into the view: a frontend copies it and draws it, without opening requests. The album and
+//! artist pages are kept in two caches of fixed capacity, with eviction of the least used ([`Lru`]); an
+//! old page is shown at once and reread silently. The search waits 300 ms after the last key
+//! with a core timer ([`Timer::Search`]), and only the last request counts: each key changes
+//! the request number and the replies of a superseded number are discarded.
 //!
-//! Il dominio parla con gli altri attraverso il passaggio che il core fa dopo ogni ingresso: ciò che
-//! chiede alla libreria (i brani recenti della Home da cui nasce il feed, le copertine corrette, gli
-//! artisti seguiti) e alla riproduzione (i brani ritrovati, la testata del primo brano di un album)
-//! lo mette in due serbatoi ([`Catalog::take_library`], [`Catalog::take_playback`]), e ciò che gli
-//! serve da loro (il brano mancante, il brano appena partito, il feed) glielo danno le sue funzioni
-//! `heal`, `track_started` e `after_library`. Cambiare vista solo se qualcosa cambia davvero: un
-//! comando uguale al precedente, o una risposta superata, non pubblica niente.
+//! The domain talks to the others through the passing that the core does after each input: what it
+//! asks of the library (the Home's recent tracks the feed comes from, the correct covers, the
+//! followed artists) and of playback (the tracks found again, the head of an album's first track)
+//! goes into two stores ([`Catalog::take_library`], [`Catalog::take_playback`]), and what it
+//! needs from them (the missing track, the track just started, the feed) is given to it by its functions
+//! `heal`, `track_started` and `after_library`. The view changes only if something really changes: a
+//! command equal to the previous one, or a superseded reply, publishes nothing.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -35,70 +35,70 @@ use crate::shared::Shared;
 use crate::state::library::{LibraryCmd, LibraryView};
 use crate::state::playback::PlaybackCmd;
 
-/// Attesa dopo l'ultimo tasto prima di lanciare la ricerca.
+/// Wait after the last key before launching the search.
 pub const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
-/// Brani per scaffale della Home (alfabetico).
+/// Tracks per shelf of the Home (alphabetical).
 const HOME_SECTION_SIZE: u32 = 12;
-/// Brani recenti da cui si ricavano uscite, novità e mix (il massimo che il server dà).
+/// Recent tracks from which releases, novelties and mixes are derived (the most the server gives).
 const HOME_RELEASES: u32 = 100;
-/// Album recenti mostrati nella Home.
+/// Recent albums shown on the Home.
 const HOME_ALBUMS: u32 = 24;
-/// Brani per pagina dell'elenco della libreria.
+/// Tracks per page of the library list.
 const LIBRARY_PAGE: u32 = 50;
-/// Album mostrati nella libreria (una sola pagina, dalla A alla Z).
+/// Albums shown in the library (a single page, from A to Z).
 const LIBRARY_ALBUMS: u32 = 100;
-/// Pagine di artista tenute in memoria: oltre, esce la meno usata.
+/// Artist pages kept in memory: beyond that, the least used goes out.
 pub const ARTIST_PAGES: usize = 40;
-/// Pagine di album tenute in memoria: oltre, esce la meno usata.
+/// Album pages kept in memory: beyond that, the least used goes out.
 pub const ALBUM_PAGES: usize = 24;
-/// Dopo quanto una pagina in cache si riscarica (in silenzio) aprendola.
+/// After how long a cached page is downloaded again (silently) when opened.
 pub const STALE_AFTER: Duration = Duration::from_secs(90);
-/// Pagine di artista caricate in anticipo per volta: l'abbondanza costerebbe al server.
+/// Artist pages loaded in advance at a time: abundance would cost the server.
 const PREFETCH_BATCH: usize = 8;
-/// Brani salvati senza copertina riletti dal server all'avvio, al massimo.
+/// Saved tracks without a cover reread from the server at startup, at most.
 const STALE_REFRESH: usize = 24;
-/// Brani riletti ricordati per la sessione, perché non si rileggano due volte.
+/// Reread tracks remembered for the session, so they are not reread twice.
 const REFRESHED: usize = 256;
-/// Eventi tenuti nella vista: un frontend che legge a ogni pubblicazione non ne perde.
+/// Events kept in the view: a frontend that reads at each publish does not lose any.
 const EVENTS: usize = 32;
 
-/// Che cosa si carica o si ricarica.
+/// What is loaded or reloaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resource {
-    /// I tre scaffali della Home (recenti, alfabetico, album).
+    /// The three shelves of the Home (recent, alphabetical, albums).
     Home,
-    /// I brani e gli album dell'elenco della libreria.
+    /// The tracks and albums of the library list.
     Library,
     Album(Uuid),
     Artist(Uuid),
 }
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone)]
 pub enum CatalogCmd {
-    /// Mostra una risorsa: dalla cache, se c'è, altrimenti dalla rete. Se è già pronta o in arrivo
-    /// non fa niente; sulla Home già carica fa rifare il feed se gli ascolti sono cambiati.
+    /// Shows a resource: from the cache if there is one, otherwise from the network. If it is
+    /// already ready or on its way it does nothing; on the loaded Home it rebuilds the feed if plays changed.
     Ensure(Resource),
-    /// «Riprova»: ricarica dalla rete, anche se c'è in cache.
+    /// "Riprova": reloads from the network, even if it is in the cache.
     Retry(Resource),
-    /// La pagina successiva dei brani della libreria.
+    /// The next page of the library's tracks.
     LibraryMore,
-    /// Cambia l'ordine della libreria e la ricarica.
+    /// Changes the library's order and reloads it.
     LibrarySort(Sort),
-    /// Il testo della ricerca è cambiato: parte dopo [`SEARCH_DEBOUNCE`] dall'ultimo tasto.
+    /// The search text has changed: it starts after [`SEARCH_DEBOUNCE`] from the last key.
     SearchInput(String),
-    /// Cerca subito questo testo (all'avvio, o «Riprova»).
+    /// Searches this text at once (at startup, or "Riprova").
     Search(String),
     ArchiveLibraryOpen(DiscoverLibrary),
     ArchiveLibraryMore,
     ArchiveLibraryClose,
-    /// Porta nel server l'artista del catalogo ufficiale con questo identificatore.
+    /// Brings the official catalog's artist with this identifier into the server.
     OpenMetaArtist(u64),
-    /// Il catalogo è cambiato (un'importazione): Home e libreria si ricaricano alla prossima visita.
+    /// The catalog has changed (an import): Home and library reload at the next visit.
     Changed,
 }
 
-/// Le tre sezioni della Home.
+/// The three sections of the Home.
 #[derive(Debug, Clone, Default)]
 pub struct HomeView {
     pub recent: Load<Arc<[Track]>>,
@@ -106,36 +106,36 @@ pub struct HomeView {
     pub albums: Load<Arc<[AlbumSummary]>>,
 }
 
-/// L'elenco della libreria: brani a pagine e album in una pagina sola.
+/// The library list: tracks in pages and albums in a single page.
 #[derive(Debug, Clone, Default)]
 pub struct LibraryListing {
     pub tracks: Load<Shared<Track>>,
     pub next_offset: Option<i64>,
     pub loading_more: bool,
-    /// L'errore di una pagina successiva: i brani già caricati restano.
+    /// The error of a next page: the tracks already loaded stay.
     pub more_error: Option<AppError>,
-    /// Ordine di album e brani: i più recenti o dalla A alla Z.
+    /// Order of albums and tracks: the most recent or from A to Z.
     pub sort: Sort,
     pub albums: Load<Arc<[AlbumSummary]>>,
-    /// Il catalogo ha più album di quelli caricati.
+    /// The catalog has more albums than those loaded.
     pub albums_truncated: bool,
 }
 
-/// Una libreria di Archive aperta: i suoi album, una pagina dopo l'altra.
+/// An open Archive library: its albums, one page after another.
 #[derive(Debug, Clone)]
 pub struct OpenLibrary {
     pub library: DiscoverLibrary,
-    /// Prima pagina in caricamento o fallita; poi tutti gli album caricati finora.
+    /// First page loading or failed; then all the albums loaded so far.
     pub items: Load<Arc<[DiscoverItem]>>,
     pub next_page: Option<u32>,
     pub loading_more: bool,
 }
 
 impl OpenLibrary {
-    /// Riceve una pagina di album: la prima sostituisce il caricamento (o diventa l'errore
-    /// mostrato al posto degli album), le altre si aggiungono in fondo. Restituisce l'errore di una
-    /// pagina successiva, da mostrare come avviso: gli album già caricati restano e «Altri album» si
-    /// può ripremere.
+    /// Receives a page of albums: the first replaces the loading (or becomes the error
+    /// shown in place of the albums), the others are added at the end. Returns the error of a
+    /// next page, to be shown as a notice: the albums already loaded stay and "Altri album" can be
+    /// pressed again.
     pub fn receive(&mut self, page: u32, result: Result<LibraryPage, AppError>) -> Result<(), AppError> {
         self.loading_more = false;
         let loaded = match result {
@@ -157,89 +157,89 @@ impl OpenLibrary {
     }
 }
 
-/// I risultati della ricerca: il catalogo, Internet Archive e il catalogo ufficiale.
+/// The search results: the catalog, Internet Archive and the official catalog.
 #[derive(Debug, Clone, Default)]
 pub struct SearchView {
-    /// Il testo cercato per ultimo, già ripulito; vuoto se non si cerca niente.
+    /// The text searched last, already cleaned; empty if nothing is searched.
     pub submitted: String,
     pub results: Load<Arc<SearchResults>>,
-    /// Risultati da Internet Archive, per ciò che non è ancora nel catalogo.
+    /// Results from Internet Archive, for what is not yet in the catalog.
     pub discover: Load<Arc<[DiscoverItem]>>,
-    /// Librerie di Archive (netlabel) in cui stanno gli album trovati.
+    /// Archive libraries (netlabels) where the albums found are.
     pub libraries: Arc<[DiscoverLibrary]>,
-    /// Libreria aperta dalla ricerca: al posto dei risultati di Archive si vedono i suoi album.
+    /// Library opened from the search: in place of Archive's results its albums are seen.
     pub open_library: Option<OpenLibrary>,
-    /// Brani del catalogo ufficiale (Deezer).
+    /// Tracks of the official catalog (Deezer).
     pub sources: Load<Arc<[SourceItem]>>,
-    /// Album e playlist del catalogo ufficiale.
+    /// Albums and playlists of the official catalog.
     pub playlists: Load<Arc<[SourcePlaylist]>>,
-    /// Artisti del catalogo ufficiale.
+    /// Artists of the official catalog.
     pub artists: Arc<[MetaArtist]>,
 }
 
-/// Qualcosa che il frontend deve far sapere o fare.
+/// Something the frontend must make known or do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CatalogEvent {
-    /// L'artista del catalogo ufficiale ora ha una pagina: il frontend la apre.
+    /// The official catalog's artist now has a page: the frontend opens it.
     MetaArtistOpened(Uuid),
     MetaArtistFailed(AppError),
-    /// Una pagina di album di una libreria di Archive non è arrivata: avviso, gli album restano.
+    /// A page of albums from an Archive library did not arrive: a notice, the albums stay.
     LibraryPageFailed(AppError),
-    /// Un brano ritrovato o riletto dal server: la sua copertina può essere nuova.
+    /// A track found again or reread from the server: its cover may be new.
     Replaced(Arc<Track>),
-    /// Una pagina di artista è arrivata in anticipo (o aggiornata): le sue prime copertine si
-    /// possono scaricare subito, così aprirla è immediato.
+    /// An artist's page has arrived in advance (or updated): its first covers can be
+    /// downloaded at once, so opening it is immediate.
     Prefetched(Arc<ArtistPage>),
 }
 
-/// Un [`CatalogEvent`] con il suo numero d'ordine, che cresce a ogni evento.
+/// A [`CatalogEvent`] with its sequence number, which grows with each event.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CatalogRaised {
     pub seq: u64,
     pub event: CatalogEvent,
 }
 
-/// Ciò che i frontend vedono del dominio.
+/// What the frontends see of the domain.
 #[derive(Debug, Clone, Default)]
 pub struct CatalogView {
     pub home: HomeView,
     pub library: LibraryListing,
     pub search: SearchView,
-    /// L'album aperto e il suo caricamento.
+    /// The open album and its loading.
     pub album: Option<(Uuid, Load<Arc<Album>>)>,
-    /// L'artista aperto e il suo caricamento.
+    /// The open artist and its loading.
     pub artist: Option<(Uuid, Load<Arc<ArtistPage>>)>,
-    /// Gli ultimi eventi, dal più vecchio: un frontend mostra quelli con `seq` nuovo, in ordine. Se
-    /// ne scorda al massimo [`EVENTS`] fra una lettura e l'altra, cioè mai.
+    /// The latest events, from the oldest: a frontend shows those with a new `seq`, in order. If it
+    /// forgets at most [`EVENTS`] between one read and the next, that is, never.
     pub events: Arc<VecDeque<CatalogRaised>>,
 }
 
-/// I timer del dominio.
+/// The domain's timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Timer {
-    /// Scade [`SEARCH_DEBOUNCE`] dopo l'ultimo tasto: parte la ricerca.
+    /// Expires [`SEARCH_DEBOUNCE`] after the last key: the search starts.
     Search,
 }
 
-/// Quale scaffale della Home.
+/// Which Home shelf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     Recent,
     Alphabetical,
 }
 
-/// Come si carica una pagina di artista.
+/// How an artist page is loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Fetch {
-    /// Aperta da chi guarda: se è quella aperta, la sostituisce e se fallisce lo mostra.
+    /// Opened by whoever is looking: if it is the one open, it replaces it, and if it fails it shows it.
     Open,
-    /// In anticipo o per aggiornare in silenzio: va in cache, e un errore non si mostra.
+    /// In advance or to update silently: it goes into the cache, and an error is not shown.
     Background,
 }
 
-/// I lavori asincroni del dominio (rete), che l'host esegue sul runtime. Quelli che riempiono una
-/// parte della vista portano il suo numero di epoca o di richiesta, per scartare le risposte
-/// superate.
+/// The domain's async jobs (network), which the host runs on the runtime. Those that fill a
+/// part of the view carry its epoch or request number, to discard the replies that are
+/// superseded.
 #[derive(Debug)]
 pub(crate) enum Job {
     Home {
@@ -297,19 +297,19 @@ pub(crate) enum Job {
         api: Result<ApiClient, AppError>,
         id: u64,
     },
-    /// Il brano non esiste più sul server: lo cerca nel catalogo ufficiale e lo importa di nuovo.
+    /// The track no longer exists on the server: it searches the official catalog and imports it again.
     Heal {
         api: Result<ApiClient, AppError>,
         track: Arc<Track>,
     },
-    /// Rilegge dal server un brano salvato.
+    /// Rereads a saved track from the server.
     Refresh {
         api: Result<ApiClient, AppError>,
         id: Uuid,
     },
 }
 
-/// L'esito di un [`Job`], che torna al dominio.
+/// The outcome of a [`Job`], which goes back to the domain.
 #[derive(Debug)]
 pub(crate) enum Done {
     Home { epoch: u64, section: Section, result: Result<Page<Track>, AppError> },
@@ -327,7 +327,7 @@ pub(crate) enum Done {
     Refreshed(Result<Box<Track>, AppError>),
 }
 
-/// L'esito di un lavoro andato perso.
+/// The outcome of a job that was lost.
 fn lost<T>() -> Result<T, AppError> {
     Err(AppError::Network)
 }
@@ -336,13 +336,13 @@ fn is_idle<T>(load: &Load<T>) -> bool {
     matches!(load, Load::Idle)
 }
 
-/// Una cache a capienza fissa con scarto del meno usato: chi legge o scrive una pagina la porta in
-/// fondo, e a capienza piena esce quella in testa. Ricorda quando ogni pagina è arrivata, per dire
-/// se è vecchia.
+/// A cache of fixed capacity with eviction of the least used: whoever reads or writes a page brings it to
+/// the end, and when full the one at the head goes out. It remembers when each page arrived, to say
+/// whether it is old.
 #[derive(Debug)]
 pub(crate) struct Lru<T> {
     capacity: usize,
-    /// Dal meno al più usato.
+    /// From the least to the most used.
     entries: VecDeque<(Uuid, Instant, Arc<T>)>,
 }
 
@@ -360,8 +360,8 @@ impl<T> Lru<T> {
         self.entries.len()
     }
 
-    /// La pagina, e se è vecchia (arrivata più di [`STALE_AFTER`] fa). Averla letta la rende la più
-    /// recente.
+    /// The page, and whether it is old (arrived more than [`STALE_AFTER`] ago). Having read it makes it the most
+    /// recent.
     pub(crate) fn get(&mut self, id: Uuid, now: Instant) -> Option<(Arc<T>, bool)> {
         let at = self.entries.iter().position(|(known, ..)| *known == id)?;
         let entry = self.entries.remove(at)?;
@@ -370,8 +370,8 @@ impl<T> Lru<T> {
         Some(found)
     }
 
-    /// Mette la pagina in fondo (sostituendo quella con lo stesso id) e scarta le più vecchie oltre
-    /// la capienza.
+    /// Puts the page at the end (replacing the one with the same id) and discards the oldest beyond
+    /// the capacity.
     pub(crate) fn put(&mut self, id: Uuid, value: T, now: Instant) -> Arc<T> {
         let value = Arc::new(value);
         self.entries.retain(|(known, ..)| *known != id);
@@ -387,36 +387,36 @@ impl<T> Lru<T> {
     }
 }
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug)]
 pub(crate) struct Catalog {
     pub(crate) view: Arc<CatalogView>,
     api: Result<ApiClient, AppError>,
     server: Option<String>,
-    /// Cambia quando il catalogo cambia o il backend è un altro: le risposte di prima si scartano.
+    /// Changes when the catalog changes or the backend is another: the earlier replies are discarded.
     home_epoch: u64,
     library_epoch: u64,
-    /// Il numero della ricerca: cresce a ogni tasto, e solo le risposte dell'ultimo contano.
+    /// The search number: it grows at each key, and only the replies of the last one count.
     ticket: u64,
-    /// L'ultimo testo scritto, com'è (il frontend lo ha già nel suo campo).
+    /// The last text written, as it is (the frontend already has it in its field).
     draft: String,
     artists: Lru<ArtistPage>,
     albums: Lru<Album>,
-    /// Pagine di artista in arrivo in sottofondo.
+    /// Artist pages arriving in the background.
     loading: HashSet<Uuid>,
-    /// Il numero dell'ultimo evento.
+    /// The number of the last event.
     events: u64,
-    /// Brani già riletti in questa sessione, i più recenti in fondo.
+    /// Tracks already reread in this session, the most recent at the end.
     refreshed: VecDeque<Uuid>,
-    /// L'ultimo caricamento di brano visto partire.
+    /// The last track loading seen starting.
     last_started: u64,
-    /// I brani salvati senza copertina vanno riletti: lo si fa una volta, all'avvio.
+    /// Saved tracks without a cover must be reread: it is done once, at startup.
     startup: bool,
-    /// Gli artisti della Home vanno caricati in anticipo, appena la libreria ne ha il feed.
+    /// The Home's artists must be loaded in advance, as soon as the library has their feed.
     prefetch_home: bool,
-    /// Il testo cercato è cambiato e le impostazioni non l'hanno ancora (`take_query`).
+    /// The searched text has changed and the settings do not have it yet (`take_query`).
     query: Option<String>,
-    /// Ciò che il dominio chiede alla libreria e alla riproduzione, in attesa del passaggio.
+    /// What the domain asks of the library and of playback, waiting for the passing.
     library: Vec<LibraryCmd>,
     playback: Vec<PlaybackCmd>,
 }
@@ -428,7 +428,7 @@ impl Default for Catalog {
 }
 
 impl Catalog {
-    /// Il dominio con il backend scelto nelle impostazioni.
+    /// The domain with the backend chosen in the settings.
     pub(crate) fn new(server: Option<String>) -> Self {
         Self {
             view: Arc::default(),
@@ -456,13 +456,13 @@ impl Catalog {
         Arc::make_mut(&mut self.view)
     }
 
-    /// L'epoca delle risposte della Home in arrivo (per i test).
+    /// The epoch of the Home's replies on the way (for the tests).
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn home_epoch(&self) -> u64 {
         self.home_epoch
     }
 
-    /// L'epoca delle risposte dell'elenco della libreria in arrivo (per i test).
+    /// The epoch of the library list's replies on the way (for the tests).
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn library_epoch(&self) -> u64 {
         self.library_epoch
@@ -476,31 +476,31 @@ impl Catalog {
         effects.push(Effect::Run(effect::Job::Catalog(job)));
     }
 
-    // ---------- Passaggio fra i domini ----------
+    // ---------- Passing between domains ----------
 
-    /// Ciò che il dominio chiede alla libreria, e lo svuota.
+    /// What the domain asks of the library, and empties it.
     pub(crate) fn take_library(&mut self) -> Vec<LibraryCmd> {
         std::mem::take(&mut self.library)
     }
 
-    /// Ciò che il dominio chiede alla riproduzione, e lo svuota.
+    /// What the domain asks of playback, and empties it.
     pub(crate) fn take_playback(&mut self) -> Vec<PlaybackCmd> {
         std::mem::take(&mut self.playback)
     }
 
-    /// Il testo cercato per ultimo, se è cambiato dopo l'ultima consegna alle impostazioni.
+    /// The text searched last, if it has changed since the last delivery to the settings.
     pub(crate) fn take_query(&mut self) -> Option<String> {
         self.query.take()
     }
 
-    /// Il core è appena partito: i brani salvati senza copertina si rileggono, alla prima occasione.
+    /// The core has just started: the saved tracks without a cover are reread, at the first chance.
     pub(crate) fn start(&mut self) {
         self.startup = true;
     }
 
-    /// Il backend scelto nelle impostazioni è cambiato: il client HTTP si rifà, le pagine in memoria
-    /// sono di un altro server e si buttano, l'elenco della libreria e le pagine aperte si
-    /// ricaricano alla prossima visita, e la Home si ricarica subito.
+    /// The backend chosen in the settings has changed: the HTTP client is made again, the pages in memory
+    /// belong to another server and are thrown away, the library list and the open pages are
+    /// reloaded at the next visit, and the Home reloads at once.
     pub(crate) fn set_server(&mut self, server: &Option<String>, effects: &mut Vec<Effect>) {
         if self.server == *server {
             return;
@@ -518,13 +518,13 @@ impl Catalog {
         self.load_home(effects);
     }
 
-    /// Un brano non esiste più sul server: lo si cerca nel catalogo ufficiale.
+    /// A track no longer exists on the server: it is searched for in the official catalog.
     pub(crate) fn heal(&mut self, track: Arc<Track>, effects: &mut Vec<Effect>) {
         Self::run(effects, Job::Heal { api: self.api(), track });
     }
 
-    /// Un altro brano ha cominciato a suonare: lo si rilegge dal server, una volta per sessione (le
-    /// copie salvate possono essere di prima che il server avesse il videoclip o la copertina
+    /// Another track has started playing: it is reread from the server, once per session (the
+    /// saved copies may be from before the server had the music video or the official cover).
     /// ufficiale).
     pub(crate) fn track_started(&mut self, started: u64, current: Option<Uuid>, effects: &mut Vec<Effect>) {
         if started == self.last_started {
@@ -536,8 +536,8 @@ impl Catalog {
         }
     }
 
-    /// La libreria ha pubblicato ciò che il dominio le aveva chiesto: ora si possono fare le cose che
-    /// dipendono dal suo stato (gli artisti della Home, i brani senza copertina).
+    /// The library has published what the domain had asked of it: now the things that
+    /// depend on its state can be done (the Home's artists, the tracks without a cover).
     pub(crate) fn after_library(&mut self, library: &LibraryView, effects: &mut Vec<Effect>) {
         if std::mem::take(&mut self.startup) {
             let saved = library
@@ -557,8 +557,8 @@ impl Catalog {
             }
         }
         if std::mem::take(&mut self.prefetch_home) {
-            // Gli artisti che la Home mette in vista (seguiti e primi del catalogo): si caricano
-            // subito, così aprirne uno è immediato.
+            // The artists the Home puts in view (followed and the catalog's first ones): they are loaded
+            // at once, so opening one is immediate.
             let followed = library.followed.iter().take(4).map(|a| a.id);
             let shown = library.feed.artists.iter().take(6).map(|card| card.artist.id);
             let ids: Vec<Uuid> = followed.chain(shown).collect();
@@ -566,7 +566,7 @@ impl Catalog {
         }
     }
 
-    // ---------- Comandi ----------
+    // ---------- Commands ----------
 
     pub(crate) fn apply(&mut self, command: CatalogCmd, now: Instant, effects: &mut Vec<Effect>) {
         match command {
@@ -575,7 +575,7 @@ impl Catalog {
                 if home.recent.needs_load() || home.alphabetical.needs_load() || home.albums.needs_load() {
                     self.load_home(effects);
                 } else {
-                    // Gli ascolti sono cambiati dall'ultima volta: i mix e gli artisti si rifanno.
+                    // The plays have changed since last time: the mixes and the artists are made again.
                     self.library.push(LibraryCmd::RefreshFeed);
                 }
             }
@@ -615,7 +615,7 @@ impl Catalog {
             }
             CatalogCmd::LibrarySort(sort) => {
                 if self.view.library.sort != sort {
-                    // Le pagine in arrivo con l'ordine di prima non vanno più bene.
+                    // The pages on the way with the earlier order are no longer right.
                     self.library_epoch += 1;
                     self.view_mut().library.sort = sort;
                     self.load_library_tracks(0, false, effects);
@@ -660,7 +660,7 @@ impl Catalog {
         }
     }
 
-    // ---------- Home e libreria ----------
+    // ---------- Home and library ----------
 
     fn load_home(&mut self, effects: &mut Vec<Effect>) {
         let home = &self.view.home;
@@ -691,8 +691,8 @@ impl Catalog {
         Self::run(effects, Job::LibraryAlbums { api: self.api(), epoch, sort });
     }
 
-    /// Il catalogo è cambiato: Home e libreria si ricaricano alla prossima visita, le risposte in
-    /// arrivo si scartano e la libreria butta il feed che aveva costruito.
+    /// The catalog has changed: Home and library reload at the next visit, the replies on the way
+    /// are discarded and the library drops the feed it had built.
     fn changed(&mut self) {
         self.home_epoch += 1;
         self.library_epoch += 1;
@@ -714,7 +714,7 @@ impl Catalog {
         self.library.push(LibraryCmd::HomeTracks(None));
     }
 
-    // ---------- Album e artisti ----------
+    // ---------- Albums and artists ----------
 
     fn open_album(&mut self, id: Uuid, force: bool, now: Instant, effects: &mut Vec<Effect>) {
         let cached = if force { None } else { self.albums.get(id, now) };
@@ -730,9 +730,8 @@ impl Catalog {
         }
     }
 
-    /// Ciò che segue a un album mostrato: «Riproduci» parte quasi sempre dal primo brano, quindi la
-    /// sua testata si prepara; l'album salvato prende la copertina di adesso, e le copie salvate dei
-    /// suoi brani anche.
+    /// What follows a shown album: "Riproduci" almost always starts from the first track, so its head
+    /// is prepared; the saved album takes the cover of now, and the saved copies of its tracks too.
     fn after_album(&mut self, album: &Album) {
         if let Some(first) = album.tracks.first() {
             self.playback.push(PlaybackCmd::Warm(first.id));
@@ -755,15 +754,15 @@ impl Catalog {
         }
     }
 
-    /// Riscarica una pagina già in cache senza mostrare un caricamento.
+    /// Downloads again a page already in the cache without showing a loading.
     fn refresh_artist(&mut self, id: Uuid, effects: &mut Vec<Effect>) {
         if self.loading.insert(id) {
             Self::run(effects, Job::Artist { api: self.api(), id, fetch: Fetch::Background });
         }
     }
 
-    /// Carica in anticipo le pagine di questi artisti, se non le ha già: non in cache e non già in
-    /// arrivo, al massimo [`PREFETCH_BATCH`], senza ripetizioni.
+    /// Loads in advance the pages of these artists, if it does not already have them: not in the cache and not already
+    /// on the way, at most [`PREFETCH_BATCH`], without repetitions.
     fn prefetch(&mut self, ids: impl IntoIterator<Item = Uuid>, effects: &mut Vec<Effect>) {
         let mut wanted = Vec::new();
         for id in ids {
@@ -779,9 +778,9 @@ impl Catalog {
         }
     }
 
-    /// Le copertine che il catalogo ha appena rimandato correggono quelle salvate (coda, recenti,
-    /// mi piace, playlist, ascolti): un brano salvato prima che il server smettesse di dare le onde
-    /// di Archive come copertina ne conserverebbe l'indirizzo.
+    /// The covers the catalog has just sent back correct those saved (queue, recent,
+    /// liked, playlists, plays): a track saved before the server stopped giving Archive's waves
+    /// as cover would keep their address.
     fn patch_covers(&mut self, fresh: &[Track]) {
         if fresh.is_empty() {
             return;
@@ -793,7 +792,7 @@ impl Catalog {
         self.playback.push(PlaybackCmd::PatchCovers(fresh));
     }
 
-    // ---------- Ricerca ----------
+    // ---------- Search ----------
 
     fn search_input(&mut self, text: String, effects: &mut Vec<Effect>) {
         if text == self.draft {
@@ -815,8 +814,8 @@ impl Catalog {
         }
     }
 
-    /// Lancia la ricerca del testo scritto, in parallelo nel catalogo, su Internet Archive e nel
-    /// catalogo ufficiale (brani, artisti, album e playlist con copertine e foto).
+    /// Launches the search of the written text, in parallel in the catalog, on Internet Archive and in the
+    /// official catalog (tracks, artists, albums and playlists with covers and photos).
     fn run_search(&mut self, effects: &mut Vec<Effect>) {
         let Some(query) = clean_query(&self.draft) else { return };
         let ticket = self.ticket;
@@ -837,9 +836,9 @@ impl Catalog {
         Self::run(effects, Job::Meta { api: c, ticket, query });
     }
 
-    // ---------- Rilettura dei brani ----------
+    // ---------- Rereading of tracks ----------
 
-    /// Rilegge dal server un brano, se non l'ha già fatto in questa sessione.
+    /// Rereads a track from the server, if it has not already done so in this session.
     fn refresh(&mut self, id: Uuid, effects: &mut Vec<Effect>) {
         if self.refreshed.contains(&id) {
             return;
@@ -861,7 +860,7 @@ impl Catalog {
         }
     }
 
-    // ---------- Risposte ----------
+    // ---------- Replies ----------
 
     pub(crate) fn done(&mut self, done: Done, now: Instant, effects: &mut Vec<Effect>) {
         match done {
@@ -872,8 +871,8 @@ impl Catalog {
                 let value = Load::of(result.map(|page| Arc::<[Track]>::from(page.items)));
                 match section {
                     Section::Recent => {
-                        // Con dei brani, il feed lo costruisce la libreria e la Home li mostra
-                        // insieme a lui, nella stessa istantanea.
+                        // With tracks, the library builds the feed and the Home shows them
+                        // together with it, in the same snapshot.
                         if let Load::Ready(tracks) = &value {
                             self.library.push(LibraryCmd::HomeTracks(Some(Arc::clone(tracks))));
                             self.patch_covers(tracks);
@@ -967,7 +966,7 @@ impl Catalog {
                 let Some(open) =
                     self.view.search.open_library.as_ref().filter(|o| o.library.identifier == identifier)
                 else {
-                    // Una risposta per una libreria già chiusa si ignora.
+                    // A reply for a library already closed is ignored.
                     return;
                 };
                 let mut open = open.clone();
@@ -983,12 +982,12 @@ impl Catalog {
             }),
             Done::Healed { old, result } => match result {
                 Ok(new) => {
-                    // Prende il posto del vecchio in coda e fra i salvati, e il brano riparte.
+                    // It takes the old one's place in the queue and among the saved, and the track starts again.
                     self.playback.push(PlaybackCmd::ReplaceTrack { old, new: new.clone(), restart: true });
                     self.library.push(LibraryCmd::ReplaceTrack { old, new: (*new).clone() });
                     self.raise(CatalogEvent::Replaced(Arc::new(*new)));
                 }
-                // Il brano non si è ritrovato: se è quello che si voleva sentire, resta in errore.
+                // The track was not found again: if it is the one that was wanted to hear, it stays in error.
                 Err(_) => self.playback.push(PlaybackCmd::HealFailed(old)),
             },
             Done::Refreshed(result) => {
@@ -1014,7 +1013,7 @@ impl Catalog {
                     self.view_mut().album = Some((id, Load::Ready(album)));
                 }
             }
-            // Un aggiornamento in silenzio che fallisce lascia la pagina com'è.
+            // A silent update that fails leaves the page as it is.
             Err(_) if silent => {}
             Err(err) if showing => self.view_mut().album = Some((id, Load::Failed(err))),
             Err(_) => {}
@@ -1035,7 +1034,7 @@ impl Catalog {
                 let page = self.artists.put(id, *page, now);
                 if open {
                     self.view_mut().artist = Some((id, Load::Ready(Arc::clone(&page))));
-                    // L'immagine di un artista seguito segue quella che il catalogo ha adesso.
+                    // The followed artist's image follows the one the catalog has now.
                     self.library.push(LibraryCmd::SetFollowedCover {
                         id,
                         cover_url: portrait_url(&page).map(str::to_owned),
@@ -1050,7 +1049,7 @@ impl Catalog {
                 }
             }
             (Fetch::Background, Ok(page)) => {
-                // Va in cache, e se è quella aperta la sostituisce senza che la vista salti.
+                // It goes into the cache, and if it is the one open it replaces it without the view jumping.
                 let page = self.artists.put(id, *page, now);
                 let replace =
                     matches!(&self.view.artist, Some((open, Load::Ready(_) | Load::Idle)) if *open == id);
@@ -1167,8 +1166,8 @@ impl Job {
         }
     }
 
-    /// Se il lavoro va perso, l'esito è un errore di rete: il dominio non resta ad aspettare (e una
-    /// ricerca o un elenco non restano «in caricamento» per sempre).
+    /// If the job is lost, the outcome is a network error: the domain does not keep waiting (and a
+    /// search or a list does not stay "loading" forever).
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::Home { epoch, section, .. } => {
@@ -1232,7 +1231,7 @@ mod tests {
         AppError::Network
     }
 
-    /// Il dominio da solo, con un orologio finto che si sposta a mano.
+    /// The domain alone, with a fake clock that is moved by hand.
     struct Rig {
         catalog: Catalog,
         now: Instant,
@@ -1270,7 +1269,7 @@ mod tests {
         }
     }
 
-    /// I lavori che gli effetti chiedono.
+    /// The jobs the effects ask for.
     fn jobs(effects: Vec<Effect>) -> Vec<Job> {
         effects
             .into_iter()
@@ -1298,10 +1297,10 @@ mod tests {
         }
     }
 
-    // ---------- Ricerca ----------
+    // ---------- Search ----------
 
-    /// `typing_debounces_and_late_results_are_dropped`: ogni tasto riarma l'attesa di 300 ms, parte
-    /// solo l'ultima ricerca, e le risposte di una richiesta superata si scartano.
+    /// `typing_debounces_and_late_results_are_dropped`: each key re-arms the 300 ms wait, only the last
+    /// search starts, and the replies of a superseded request are discarded.
     #[test]
     fn typing_debounces_and_late_results_are_dropped() {
         let mut rig = Rig::new();
@@ -1312,7 +1311,7 @@ mod tests {
         assert_eq!(timers(&second), [SEARCH_DEBOUNCE], "il secondo la riarma: è un debounce");
         assert!(matches!(rig.view().search.results, Load::Idle));
 
-        // L'attesa scade: tre ricerche in parallelo, tutte della stessa richiesta.
+        // The wait expires: three searches in parallel, all of the same request.
         let started = jobs(rig.fire());
         assert_eq!(started.len(), 3);
         let ticket = ticket_of(&started[0]);
@@ -1326,7 +1325,7 @@ mod tests {
         assert!(matches!(library.as_slice(), [LibraryCmd::RememberSearch(q)] if q == "low"), "{library:?}");
         assert_eq!(rig.catalog.take_query(), Some("low".into()));
 
-        // La risposta di una richiesta superata si scarta; quella giusta si mostra.
+        // The reply of a superseded request is discarded; the right one is shown.
         let found = |n| SearchResults { tracks: vec![track(n)], ..SearchResults::default() };
         let before = rig.view();
         rig.done(Done::Search { ticket: ticket - 1, result: Ok(Box::new(found(1))) });
@@ -1334,7 +1333,7 @@ mod tests {
         rig.done(Done::Search { ticket, result: Ok(Box::new(found(2))) });
         assert_eq!(rig.view().search.results, Load::Ready(Arc::new(found(2))));
 
-        // Si scrive ancora: una risposta in ritardo non sovrascrive i risultati.
+        // Writing again: a late reply does not overwrite the results.
         rig.cmd(CatalogCmd::SearchInput("lowe".into()));
         let before = rig.view();
         rig.done(Done::Search { ticket, result: Ok(Box::new(found(3))) });
@@ -1382,14 +1381,14 @@ mod tests {
         let view = rig.view();
         assert_eq!((&view.search.results, view.search.submitted.as_str()), (&Load::Idle, ""));
         assert_eq!(rig.catalog.take_query(), Some(String::new()), "the saved query follows");
-        // E se non c'era niente da cancellare, niente cambia.
+        // And if there was nothing to delete, nothing changes.
         let before = rig.view();
         rig.cmd(CatalogCmd::SearchInput(String::new()));
         assert!(Arc::ptr_eq(&before, &rig.view()));
     }
 
-    /// Prestazioni: lo stesso testo due volte non arma niente e non cambia la vista, e l'attesa
-    /// scaduta senza un testo valido non fa partire niente.
+    /// Performance: the same text twice arms nothing and does not change the view, and the wait
+    /// expired without a valid text starts nothing.
     #[test]
     fn an_identical_input_changes_nothing_and_an_empty_wait_starts_nothing() {
         let mut rig = Rig::new();
@@ -1433,7 +1432,7 @@ mod tests {
         assert!(rig.catalog.take_playback().iter().any(|c| matches!(c, PlaybackCmd::PatchCovers(_))));
     }
 
-    // ---------- Artisti e album ----------
+    // ---------- Artists and albums ----------
 
     #[test]
     fn the_artist_cache_forgets_the_least_used_page() {
@@ -1442,12 +1441,12 @@ mod tests {
         for n in 0..ARTIST_PAGES as u128 {
             cache.put(id(n), artist(n), now);
         }
-        // Rileggere la più vecchia la salva: esce la successiva.
+        // Rereading the oldest one saves it: the next one goes out.
         assert!(cache.get(id(0), now).is_some());
         cache.put(id(1000), artist(1000), now);
         assert_eq!(cache.len(), ARTIST_PAGES, "the capacity is fixed");
         assert!(cache.contains(id(0)) && !cache.contains(id(1)));
-        // Rimetterne una già presente la sostituisce senza far crescere la cache.
+        // Putting one already present back replaces it without making the cache grow.
         cache.put(id(0), artist(0), now);
         assert_eq!(cache.len(), ARTIST_PAGES);
     }
@@ -1469,27 +1468,27 @@ mod tests {
         let started = jobs(rig.cmd(CatalogCmd::Ensure(Resource::Artist(id(7)))));
         assert!(matches!(started.as_slice(), [Job::Artist { fetch: Fetch::Open, .. }]));
         assert!(matches!(rig.view().artist, Some((open, Load::Loading)) if open == id(7)));
-        // Già in arrivo: aprirla di nuovo non chiede niente.
+        // Already on the way: opening it again asks for nothing.
         assert!(jobs(rig.cmd(CatalogCmd::Ensure(Resource::Artist(id(7))))).is_empty());
 
         rig.done(Done::Artist { id: id(7), fetch: Fetch::Open, result: Ok(Box::new(artist(7))) });
         let view = rig.view();
         let Some((_, Load::Ready(page))) = &view.artist else { panic!("{:?}", view.artist) };
         assert_eq!(page.id, id(7));
-        // Un artista seguito prende l'immagine del catalogo e le copertine salvate si correggono.
+        // A followed artist takes the catalog's image and the saved covers are corrected.
         let library = rig.catalog.take_library();
         assert!(library.iter().any(
             |c| matches!(c, LibraryCmd::SetFollowedCover { id: i, only_if_missing: false, .. } if *i == id(7))
         ));
         assert!(library.iter().any(|c| matches!(c, LibraryCmd::PatchCovers(_))));
 
-        // Altrove, poi di nuovo qui: dalla cache, senza «in caricamento» e senza rete (è fresca).
+        // Elsewhere, then back here: from the cache, with no "loading" and no network (it is fresh).
         rig.cmd(CatalogCmd::Ensure(Resource::Artist(id(8))));
         let effects = rig.cmd(CatalogCmd::Ensure(Resource::Artist(id(7))));
         assert!(jobs(effects).is_empty(), "fresh: no request");
         assert!(matches!(&rig.view().artist, Some((open, Load::Ready(_))) if *open == id(7)));
 
-        // Dopo 90 secondi si mostra subito e si rilegge in silenzio.
+        // After 90 seconds it is shown at once and reread silently.
         rig.wait(STALE_AFTER + Duration::from_secs(1));
         rig.cmd(CatalogCmd::Ensure(Resource::Artist(id(8))));
         let refreshed = jobs(rig.cmd(CatalogCmd::Ensure(Resource::Artist(id(7)))));
@@ -1498,7 +1497,7 @@ mod tests {
             matches!(&rig.view().artist, Some((open, Load::Ready(_))) if *open == id(7)),
             "shown at once"
         );
-        // La risposta in silenzio sostituisce la pagina aperta senza che la vista salti.
+        // The silent reply replaces the open page without the view jumping.
         let mut fresher = artist(7);
         fresher.name = "Nuovo nome".into();
         rig.done(Done::Artist { id: id(7), fetch: Fetch::Background, result: Ok(Box::new(fresher)) });
@@ -1519,7 +1518,7 @@ mod tests {
         assert!(matches!(rig.view().artist, Some((_, Load::Loading))), "retry shows the loading state");
         rig.done(Done::Artist { id: id(7), fetch: Fetch::Open, result: Err(network()) });
         assert!(matches!(&rig.view().artist, Some((_, Load::Failed(e))) if *e == network()));
-        // Una pagina che arriva per un artista che non è più aperto non tocca la vista.
+        // A page that arrives for an artist no longer open does not touch the view.
         rig.cmd(CatalogCmd::Ensure(Resource::Artist(id(9))));
         let before = rig.view();
         rig.done(Done::Artist { id: id(7), fetch: Fetch::Open, result: Ok(Box::new(artist(7))) });
@@ -1541,7 +1540,7 @@ mod tests {
             })
             .collect();
         assert_eq!(asked, [id(2), id(3)]);
-        // Già in arrivo: nessuna seconda richiesta; arrivata, in cache: nemmeno.
+        // Already on the way: no second request; arrived, in the cache: not even that.
         let mut effects = Vec::new();
         rig.catalog.prefetch([id(2)], &mut effects);
         assert!(effects.is_empty());
@@ -1563,7 +1562,7 @@ mod tests {
         assert!(
             matches!(&rig.view().album, Some((open, Load::Ready(a))) if *open == id(5) && a.tracks.len() == 2)
         );
-        // La testata del primo brano, la copertina dell'album salvato e quelle dei brani.
+        // The head of the first track, the saved album's cover and those of the tracks.
         let playback = rig.catalog.take_playback();
         assert!(
             matches!(playback.as_slice(), [PlaybackCmd::Warm(first), PlaybackCmd::PatchCovers(_)] if *first == id(50)),
@@ -1572,11 +1571,11 @@ mod tests {
         let library = rig.catalog.take_library();
         assert!(matches!(library.first(), Some(LibraryCmd::SetSavedAlbumCover { id: a, .. }) if *a == id(5)));
 
-        // Rientrando dopo un altro album, dalla cache: nessuna richiesta.
+        // Coming back after another album, from the cache: no request.
         rig.cmd(CatalogCmd::Ensure(Resource::Album(id(6))));
         assert!(jobs(rig.cmd(CatalogCmd::Ensure(Resource::Album(id(5))))).is_empty());
         assert!(matches!(&rig.view().album, Some((open, Load::Ready(_))) if *open == id(5)));
-        // Vecchia: si mostra subito e si rilegge in silenzio, e se l'aggiornamento fallisce resta.
+        // Old: it is shown at once and reread silently, and if the update fails it stays.
         rig.wait(STALE_AFTER + Duration::from_secs(1));
         rig.cmd(CatalogCmd::Ensure(Resource::Album(id(6))));
         let silent = jobs(rig.cmd(CatalogCmd::Ensure(Resource::Album(id(5)))));
@@ -1584,7 +1583,7 @@ mod tests {
         let before = rig.view();
         rig.done(Done::Album { id: id(5), silent: true, result: Err(network()) });
         assert!(Arc::ptr_eq(&before, &rig.view()), "a failed silent refresh leaves the page as it is");
-        // «Riprova» butta la cache e mostra il caricamento.
+        // "Riprova" throws away the cache and shows the loading.
         assert!(matches!(
             jobs(rig.cmd(CatalogCmd::Retry(Resource::Album(id(5))))).as_slice(),
             [Job::Album { silent: false, .. }]
@@ -1632,7 +1631,7 @@ mod tests {
                 && view.home.alphabetical.is_loading()
                 && view.home.albums.is_loading()
         );
-        // Mentre carica non si chiede di nuovo.
+        // While loading it is not asked again.
         assert!(rig.cmd(CatalogCmd::Ensure(Resource::Home)).iter().all(|e| !matches!(e, Effect::Run(_))));
         rig.catalog.take_library();
 
@@ -1647,11 +1646,11 @@ mod tests {
         let Load::Ready(shown) = &view.home.recent else { panic!() };
         assert!(Arc::ptr_eq(tracks, shown), "la libreria costruisce il feed dagli stessi brani");
 
-        // Pronta: rientrando si chiede solo di rifare il feed, se serve.
+        // Ready: coming back only asks to make the feed again, if needed.
         let effects = rig.cmd(CatalogCmd::Ensure(Resource::Home));
         assert!(effects.is_empty());
         assert!(matches!(rig.catalog.take_library().as_slice(), [LibraryCmd::RefreshFeed]));
-        // Un errore si riprova.
+        // An error is retried.
         rig.done(Done::HomeAlbums { epoch, result: Err(network()) });
         assert!(jobs(rig.cmd(CatalogCmd::Ensure(Resource::Home))).len() == 3);
     }
@@ -1672,13 +1671,13 @@ mod tests {
         let library = rig.catalog.take_library();
         assert!(matches!(library.as_slice(), [LibraryCmd::HomeTracks(None)]), "{library:?}");
 
-        // Una risposta di prima del cambio non risorge.
+        // A reply from before the change does not come back to life.
         let before = rig.view();
         home_answers(&mut rig, old);
         rig.done(Done::LibraryTracks { epoch: 0, append: false, result: Ok(page_of(vec![track(1)], None)) });
         assert!(Arc::ptr_eq(&before, &rig.view()));
         assert!(rig.catalog.take_library().is_empty());
-        // Cambiare un catalogo già vuoto non pubblica niente.
+        // Changing an already empty catalog publishes nothing.
         rig.cmd(CatalogCmd::Changed);
         assert!(Arc::ptr_eq(&before, &rig.view()));
     }
@@ -1697,7 +1696,7 @@ mod tests {
         assert!(rig.view().artist.is_none());
     }
 
-    // ---------- Libreria ----------
+    // ---------- Library ----------
 
     #[test]
     fn the_listing_appends_pages_and_a_new_order_drops_the_old_pages() {
@@ -1717,7 +1716,7 @@ mod tests {
         assert_eq!(view.library.next_offset, Some(2));
         assert!(matches!(&view.library.tracks, Load::Ready(t) if t.len() == 2));
 
-        // «Altri»: una pagina alla volta, e non due richieste insieme.
+        // "Altri": one page at a time, and not two requests together.
         let more = jobs(rig.cmd(CatalogCmd::LibraryMore));
         assert!(matches!(more.as_slice(), [Job::LibraryTracks { offset: 2, append: true, .. }]));
         assert!(rig.view().library.loading_more);
@@ -1727,12 +1726,12 @@ mod tests {
         assert!(matches!(&view.library.tracks, Load::Ready(t) if t.len() == 3));
         assert!(!view.library.loading_more && view.library.next_offset.is_none());
 
-        // Una pagina successiva che fallisce lascia i brani e dice l'errore.
+        // A next page that fails leaves the tracks and says the error.
         rig.done(Done::LibraryTracks { epoch, append: true, result: Err(network()) });
         assert_eq!(rig.view().library.more_error, Some(network()));
         assert!(matches!(&rig.view().library.tracks, Load::Ready(t) if t.len() == 3));
 
-        // Un altro ordine: ricarica tutto e le pagine in arrivo con l'ordine di prima si scartano.
+        // Another order: it reloads everything and the pages on the way with the earlier order are discarded.
         let same = rig.cmd(CatalogCmd::LibrarySort(Sort::Recent));
         assert!(same.is_empty(), "the same order changes nothing");
         let sorted = jobs(rig.cmd(CatalogCmd::LibrarySort(Sort::Title)));
@@ -1752,7 +1751,7 @@ mod tests {
         assert!(rig.view().library.albums_truncated);
     }
 
-    // ---------- Librerie di Archive e catalogo ufficiale ----------
+    // ---------- Archive libraries and the official catalog ----------
 
     fn library(identifier: &str) -> DiscoverLibrary {
         DiscoverLibrary {
@@ -1801,7 +1800,7 @@ mod tests {
         assert_eq!(all.iter().map(|i| i.identifier.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
         assert_eq!((open.next_page, open.loading_more), (None, false));
 
-        // Una pagina successiva che fallisce: gli album restano e si può riprovare.
+        // A next page that fails: the albums stay and it can be retried.
         let mut rig = Rig::new();
         rig.cmd(CatalogCmd::ArchiveLibraryOpen(library("net")));
         rig.done(Done::ArchiveLibrary {
@@ -1819,13 +1818,13 @@ mod tests {
             Some(CatalogEvent::LibraryPageFailed(_))
         ));
 
-        // Una prima pagina fallita prende il posto degli album.
+        // A first page that fails takes the place of the albums.
         let mut rig = Rig::new();
         rig.cmd(CatalogCmd::ArchiveLibraryOpen(library("net")));
         rig.done(Done::ArchiveLibrary { identifier: "net".into(), page: 1, result: Err(network()) });
         assert!(matches!(&rig.view().search.open_library, Some(o) if matches!(o.items, Load::Failed(_))));
 
-        // Chiusa, una risposta in ritardo si ignora.
+        // Closed, a late reply is ignored.
         rig.cmd(CatalogCmd::ArchiveLibraryClose);
         let before = rig.view();
         rig.done(Done::ArchiveLibrary { identifier: "net".into(), page: 1, result: items(1, None, &["x"]) });
@@ -1868,7 +1867,7 @@ mod tests {
         assert_eq!(view.events.front().map(|e| e.seq), Some(11));
     }
 
-    // ---------- Brani spariti e riletti ----------
+    // ---------- Vanished and reread tracks ----------
 
     #[test]
     fn a_missing_track_is_healed_and_replaces_the_saved_copies() {
@@ -1893,7 +1892,7 @@ mod tests {
             matches!(rig.view().events.back().map(|e| &e.event), Some(CatalogEvent::Replaced(t)) if t.id == found.id)
         );
 
-        // Un brano che non si ritrova: la riproduzione resta in errore.
+        // A track that is not found again: playback stays in error.
         rig.done(Done::Healed { old: missing.id, result: Err(AppError::InvalidResponse) });
         assert!(
             matches!(rig.catalog.take_playback().as_slice(), [PlaybackCmd::HealFailed(old)] if *old == missing.id)
@@ -1923,7 +1922,7 @@ mod tests {
         assert!(
             matches!(rig.view().events.back().map(|e| &e.event), Some(CatalogEvent::Replaced(t)) if t.cover_url.as_deref() == Some("nuova"))
         );
-        // Un errore non fa niente.
+        // An error does nothing.
         let before = rig.view();
         rig.done(Done::Refreshed(Err(network())));
         assert!(Arc::ptr_eq(&before, &rig.view()));

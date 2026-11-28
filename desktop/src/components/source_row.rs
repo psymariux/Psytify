@@ -1,10 +1,10 @@
-//! SourceRow: riga di 48 dp di un risultato che non è ancora nel catalogo del server (il catalogo
-//! ufficiale, Internet Archive, le fonti esterne). Stessa griglia di `TrackRow` (indice | copertina |
-//! titolo e dettaglio | azioni | durata), così le due righe stanno nella stessa lista con le durate
-//! allineate. Un risultato non è un brano finché il server non lo importa: niente cuore né download, e
-//! mentre il core lo importa (`ExternalView::importing`) l'indice diventa il loader e la coda della
-//! riga dice «Apro…»; la riga non risponde finché dura (il core ignora comunque un secondo play).
-//! Stati come TrackRow: rest, hover, premuto, focus (anello interno).
+//! SourceRow: 48 dp row of a result not yet in the server's catalogue (the
+//! official catalogue, Internet Archive, the external sources). Same grid as `TrackRow` (index | cover |
+//! title and detail | actions | duration), so the two rows sit in the same list with the durations
+//! aligned. A result is not a track until the server imports it: no heart or download, and
+//! while the core imports it (`ExternalView::importing`) the index becomes the loader and the queue of the
+//! row says «Apro…»; the row does not respond while it lasts (the core ignores a second play anyway).
+//! States as in TrackRow: rest, hover, pressed, focus (inner ring).
 
 use gpui::{App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 use psytify_design::sprite;
@@ -20,20 +20,20 @@ use super::indicators::{Equalizer, PlayState};
 use super::tile::Cover;
 use crate::pixel::PixelSprite;
 use crate::pixel::shape::inset_ring;
-use crate::theme::{TypeStyle, col, dp};
+use crate::theme::{TypeStyle, col, dp, fade};
 
-/// Larghezza della coda della riga: quanto occupano cuore, download e «Altro» in `TrackRow` (3 x 32 dp).
+/// Width of the row's tail: how much the heart, download and «Altro» take in `TrackRow` (3 x 32 dp).
 const TAIL_W: f32 = 96.0;
 
-/// Stringhe già pronte: la view non formatta.
+/// Strings already ready: the view does not format.
 #[derive(Clone)]
 pub struct SourceData {
-    /// Posizione nella sezione, da 1.
+    /// Position in the section, from 1.
     pub index: u32,
     pub title: SharedString,
-    /// Artista (e fonte, se non è il catalogo ufficiale), creatore e licenza per Archive.
+    /// Artist (and source, if not the official catalogue), creator and licence for Archive.
     pub detail: SharedString,
-    /// Vuota se la fonte non dichiara la durata.
+    /// Empty if the source does not declare the duration.
     pub duration: SharedString,
     pub cover_url: Option<SharedString>,
 }
@@ -52,7 +52,7 @@ impl SourceRow {
         Self { id: id.into(), data, busy: false, preview: Preview::Live, on_click: None }
     }
 
-    /// Il server sta importando questo risultato: loader al posto dell'indice, «Apro…», nessun click.
+    /// The server is importing this result: loader in place of the index, «Apro…», no click.
     pub fn busy(mut self, busy: bool) -> Self {
         self.busy = busy;
         self
@@ -63,7 +63,7 @@ impl SourceRow {
         self
     }
 
-    /// Doppio clic o Invio (come `TrackRow`): importa e suona.
+    /// Double click or Enter (as `TrackRow`): imports and plays.
     pub fn on_click(mut self, handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(std::rc::Rc::new(handler));
         self
@@ -74,10 +74,11 @@ impl RenderOnce for SourceRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let wired = wire(&self.id, false, self.preview, window, cx);
         let v = wired.visual;
+        // The hover tone eases in, as on `TrackRow`; the press is solid at once.
         let fill = if v.pressed && !self.busy {
-            Some(SURFACE_SELECTED)
-        } else if v.hovered {
-            Some(SURFACE_RAISED)
+            Some(col(SURFACE_SELECTED))
+        } else if v.hover_t > 0.0 {
+            Some(fade(SURFACE_RAISED, v.hover_t))
         } else {
             None
         };
@@ -146,7 +147,7 @@ impl RenderOnce for SourceRow {
             )
             .child(inset_ring(col(PURE_WHITE), wired.focus.clone(), v.force_ring));
         if let Some(color) = fill {
-            row = row.bg(col(color));
+            row = row.bg(color);
         }
         with_click(row, if self.busy { None } else { self.on_click })
     }

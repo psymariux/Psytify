@@ -1,8 +1,8 @@
-//! Una stanza della jam finta per i test dell'host, su una porta locale: `POST /v1/jam` dà il codice,
-//! `GET /v1/jam/{code}/ws` apre il WebSocket (e risponde con il benvenuto, con lo stato che il test
-//! vuole), `GET /v1/catalog/tracks/{id}` serve i brani che il test le dà. Quello che il test le fa
-//! dire (`say`) arriva al core come un messaggio della stanza; ciò che il core le manda si legge con
-//! `received`. Gira sul runtime del test; ogni connessione chiusa si conta.
+//! A fake jam room for the host tests, on a local port: `POST /v1/jam` gives the code,
+//! `GET /v1/jam/{code}/ws` opens the WebSocket (and answers with the welcome, with the state the test
+//! wants), `GET /v1/catalog/tracks/{id}` serves the tracks the test gives it. What the test makes it
+//! say (`say`) reaches the core as a room message; what the core sends it is read with
+//! `received`. It runs on the test's runtime; every closed connection is counted.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -18,9 +18,9 @@ use uuid::Uuid;
 
 use crate::api::Track;
 
-/// La stanza finta in ascolto.
+/// The fake room listening.
 pub(crate) struct FakeRoom {
-    /// `http://127.0.0.1:<porta>`, da scrivere in `server` nella configurazione del core.
+    /// `http://127.0.0.1:<port>`, to write as `server` in the core configuration.
     pub(crate) url: String,
     received: Arc<Mutex<Vec<String>>>,
     names: Arc<Mutex<Vec<String>>>,
@@ -30,23 +30,23 @@ pub(crate) struct FakeRoom {
 }
 
 impl FakeRoom {
-    /// Fa dire alla stanza un messaggio (il suo JSON) al core collegato.
+    /// Makes the room say a message (its JSON) to the connected core.
     pub(crate) fn say(&self, json: &serde_json::Value) {
         let _ = self.said.send(json.to_string());
     }
 
-    /// I messaggi che il core ha mandato alla stanza, nell'ordine.
+    /// The messages the core has sent to the room, in order.
     pub(crate) fn received(&self) -> Vec<serde_json::Value> {
         let received = self.received.lock().map(|texts| texts.clone()).unwrap_or_default();
         received.iter().filter_map(|text| serde_json::from_str(text).ok()).collect()
     }
 
-    /// I nomi con cui il core è entrato.
+    /// The names the core has joined with.
     pub(crate) fn names(&self) -> Vec<String> {
         self.names.lock().map(|names| names.clone()).unwrap_or_default()
     }
 
-    /// Quante connessioni WebSocket sono finite.
+    /// How many WebSocket connections have ended.
     pub(crate) fn closed(&self) -> usize {
         self.closed.load(Ordering::SeqCst)
     }
@@ -58,8 +58,8 @@ impl Drop for FakeRoom {
     }
 }
 
-/// Avvia la stanza: ha il codice `code`, manda `state` (un oggetto con `queue`, `index`,
-/// `position_ms`, `playing` e `from`) a chi entra, e serve `tracks` dal catalogo.
+/// Starts the room: it has the code `code`, sends `state` (an object with `queue`, `index`,
+/// `position_ms`, `playing` and `from`) to whoever joins, and serves `tracks` from the catalog.
 pub(crate) async fn start(code: &str, state: Option<serde_json::Value>, tracks: Vec<Track>) -> FakeRoom {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free local port");
     let url = format!("http://{}", listener.local_addr().expect("a local address"));
@@ -83,7 +83,7 @@ pub(crate) async fn start(code: &str, state: Option<serde_json::Value>, tracks: 
     FakeRoom { url, received, names, closed, said, accepting }
 }
 
-/// Ciò che ogni connessione condivide con la stanza.
+/// What every connection shares with the room.
 #[derive(Clone)]
 struct Room {
     code: String,
@@ -97,7 +97,7 @@ struct Room {
 
 async fn serve(mut socket: TcpStream, room: Room) {
     let Room { code, state, tracks, hear, received, names, closed } = room;
-    // Il WebSocket vuole la richiesta intera: si guarda il metodo senza consumarla.
+    // The WebSocket wants the whole request: the method is looked at without consuming it.
     let mut first = [0u8; 4];
     loop {
         match socket.peek(&mut first).await {
@@ -111,7 +111,7 @@ async fn serve(mut socket: TcpStream, room: Room) {
         return;
     }
     let seen = Arc::clone(&names);
-    // La firma della callback è quella di tungstenite: l'errore grosso non lo decidiamo noi.
+    // The signature of the callback is tungstenite's: we do not decide the big error.
     #[allow(clippy::result_large_err, reason = "firma imposta da tungstenite")]
     let callback = move |request: &Request, response: Response| {
         let name = request
@@ -168,7 +168,7 @@ async fn serve(mut socket: TcpStream, room: Room) {
     closed.fetch_add(1, Ordering::SeqCst);
 }
 
-/// Il percorso della richiesta, guardato senza consumarla.
+/// The request's path, looked at without consuming it.
 async fn peek_path(socket: &mut TcpStream) -> Option<String> {
     let mut buffer = [0u8; 256];
     let n = socket.peek(&mut buffer).await.ok()?;
@@ -177,7 +177,7 @@ async fn peek_path(socket: &mut TcpStream) -> Option<String> {
     Some(target.split('?').next()?.to_owned())
 }
 
-/// Le richieste HTTP semplici: la creazione della stanza e i brani del catalogo.
+/// The simple HTTP requests: the room's creation and the catalog's tracks.
 async fn plain(mut socket: TcpStream, code: &str, tracks: &[Track]) {
     let mut request = Vec::new();
     let mut chunk = [0u8; 1024];

@@ -53,7 +53,7 @@ Examples: `fix(player): resume at the right position after a pause`, `feat(ui): 
 ## Code rules
 
 - **No `unwrap`, `expect` or `panic!`** outside tests (clippy denies them). `unsafe` is forbidden.
-- **Colors and sizes come only from `client/src/ui/theme.rs`.** No glass effects; gradients and shadows
+- **Colors and sizes come only from the design tokens (`design/`).** No glass effects; gradients and shadows
   only where [docs/STYLE.md](docs/STYLE.md) allows them.
 - **Never put URLs, tokens or credentials** in code, tests or logs. Signed links are secrets.
 - **New dependencies** need a comment in `Cargo.toml` explaining why, and must pass `cargo deny`.

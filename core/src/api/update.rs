@@ -1,13 +1,13 @@
-//! Aggiornamento dell'app: il backend legge l'ultima release e serve il pacchetto di questa
-//! piattaforma. Il client chiede tutto al backend, come per il resto.
+//! App update: the backend reads the latest release and serves the package for this
+//! platform. The client asks the backend for everything, as for the rest.
 
 use serde::Deserialize;
 
-/// La release da cui è stata compilata questa copia: il workflow la imposta da `github.ref_name`.
-/// Senza (compilazione locale) non si controlla nulla.
+/// The release this copy was built from: the workflow sets it from `github.ref_name`.
+/// Without it (local build) nothing is checked.
 pub const BUILD_TAG: Option<&str> = option_env!("PSYTIFY_BUILD_TAG");
 
-/// L'ultima release, come la serve il backend.
+/// The latest release, as the backend serves it.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Release {
     pub tag: String,
@@ -20,15 +20,15 @@ pub struct Asset {
     pub size: u64,
 }
 
-/// Un aggiornamento da proporre: la release e il pacchetto di questa piattaforma.
+/// An update to offer: the release and this platform's package.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Offer {
     pub tag: String,
     pub asset: Asset,
 }
 
-/// L'offerta, se la release è diversa da quella di questa copia e ha un pacchetto per questa
-/// piattaforma. Senza `build` (compilazione locale) non si offre nulla.
+/// The offer, if the release differs from this copy's and has a package for this
+/// platform. Without `build` (local build) nothing is offered.
 pub fn offer(release: Release, build: Option<&str>) -> Option<Offer> {
     let build = build?;
     if release.tag == build {
@@ -38,7 +38,7 @@ pub fn offer(release: Release, build: Option<&str>) -> Option<Offer> {
     Some(Offer { tag: release.tag, asset })
 }
 
-/// Il suffisso del pacchetto di questa piattaforma, come lo chiama il workflow di release.
+/// The suffix of this platform's package, as the release workflow names it.
 fn package_suffix() -> &'static str {
     if cfg!(target_os = "android") {
         "-android.apk"
@@ -49,9 +49,9 @@ fn package_suffix() -> &'static str {
     }
 }
 
-/// Il nome di un pacchetto, se è un nome di file semplice: lettere, cifre, `.`, `_` e `-`, senza
-/// punto iniziale, al massimo 128 caratteri. Il nome viene dal server e finisce in un percorso e in
-/// un URL: `../x`, un separatore o un `?` non passano.
+/// The name of a package, if it is a simple file name: letters, digits, `.`, `_` and `-`, without a
+/// leading dot, at most 128 characters. The name comes from the server and ends up in a path and in
+/// a URL: `../x`, a separator or a `?` do not pass.
 pub fn safe_asset_name(name: &str) -> Option<&str> {
     let simple = !name.is_empty()
         && name.len() <= 128

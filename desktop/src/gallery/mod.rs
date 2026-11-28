@@ -1,7 +1,8 @@
-//! Galleria dei componenti: ogni componente in ogni stato (forzato con `Preview`, così si vedono
-//! affiancati senza tenere premuto il mouse), la lista da 10 000 righe e tutti gli sprite alla scala
-//! corrente. Si apre con `psytify --gallery` (oggi anche senza argomenti).
+//! Gallery of the components: each component in each state (forced with `Preview`, so they can be seen
+//! side by side without holding the mouse), the 10 000-row list and all the sprites at the
+//! current scale. It is opened with `psytify --gallery` (today also without arguments).
 
+mod now_playing;
 mod sections;
 
 use std::time::Duration;
@@ -24,7 +25,7 @@ use crate::components::{Button, Preview};
 use crate::theme::{col, dp};
 use crate::titlebar::{TitleBarState, title_bar, window_frame};
 
-/// Durata del brano di prova in secondi (il seek simula un brano da 3:30).
+/// Length of the test track in seconds (the seek simulates a 3:30 track).
 pub const DEMO_SECONDS: f32 = 210.0;
 
 pub struct Gallery {
@@ -34,7 +35,7 @@ pub struct Gallery {
     search_text: gpui::Entity<SearchField>,
     search_loading: gpui::Entity<SearchField>,
     search_disabled: gpui::Entity<SearchField>,
-    /// I campi da 40 dp dei moduli: uno in chiaro, uno mascherato pieno e uno vuoto.
+    /// The 40 dp module fields: one in plain text, one masked full and one empty.
     form_email: gpui::Entity<SearchField>,
     form_password: gpui::Entity<SearchField>,
     form_code: gpui::Entity<SearchField>,
@@ -50,7 +51,7 @@ pub struct Gallery {
     selected_row: Option<usize>,
     playing_row: Option<usize>,
     menu: Option<Point<gpui::Pixels>>,
-    /// La prima copertina dello scaffale di prova (le frecce e la rotella la spostano).
+    /// The first cover of the test shelf (the arrows and the wheel move it).
     shelf_start: usize,
     shelf_wheel: crate::components::shelf::Wheel,
     dialog: bool,
@@ -69,7 +70,7 @@ impl Gallery {
         let form_email = cx.new(|cx| {
             SearchField::new("form-email", "Email", cx).plain().large().with_text("luca@example.com")
         });
-        // Un testo di prova (non è una password di nessuno): mostra i pallini.
+        // A test text (not anyone's password): it shows the dots.
         let form_password = cx.new(|cx| {
             SearchField::new("form-password", "Password", cx).masked().large().with_text("prova-123")
         });
@@ -106,8 +107,8 @@ impl Gallery {
         }
     }
 
-    /// Avvia o ferma il conteggio del brano di prova: un timer da `PROGRESS_TICK_MS`, attivo solo
-    /// mentre «suona». Da fermo non esiste nessun timer, quindi nessun lavoro a riposo.
+    /// Starts or stops the count of the test track: a timer from `PROGRESS_TICK_MS`, active only
+    /// while it "plays". At rest there is no timer at all, so no work at rest.
     fn set_playing(&mut self, playing: bool, cx: &mut Context<Self>) {
         self.playing = playing;
         self.tick_task = None;
@@ -168,6 +169,7 @@ impl Render for Gallery {
                 account: crate::titlebar::AccountChip::SignedIn { avatar: None, name: "Psy".into() },
                 on_account: None,
                 on_close: std::rc::Rc::new(|_, cx| cx.quit()),
+                on_sidebar: None,
             },
             window,
             cx,

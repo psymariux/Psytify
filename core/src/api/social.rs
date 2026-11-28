@@ -1,5 +1,5 @@
-//! Profili, amici e attività (`docs/BACKEND.md`, «Profili e amici»): modelli e chiamate, tutte con il
-//! token di sessione di Clerk.
+//! Profiles, friends and activity (`docs/BACKEND.md`, "Profili e amici"): models and calls, all with the
+//! Clerk session token.
 
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use super::client::ApiClient;
 use super::models::{Page, Track};
 use crate::error::AppError;
 
-/// Il proprio profilo.
+/// One's own profile.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct MyProfile {
     pub handle: String,
@@ -21,7 +21,7 @@ pub struct MyProfile {
     pub share_activity: bool,
 }
 
-/// Il profilo di un altro, come lo vedono tutti.
+/// Someone else's profile, as everyone sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Profile {
     pub handle: String,
@@ -35,9 +35,9 @@ pub enum Relation {
     #[serde(rename = "self")]
     Me,
     Friend,
-    /// L'altro ha chiesto l'amicizia.
+    /// The other one asked for the friendship.
     Incoming,
-    /// La richiesta è partita da qui.
+    /// The request started from here.
     Outgoing,
     None,
 }
@@ -99,7 +99,7 @@ pub struct Friends {
     pub outgoing: Vec<Profile>,
 }
 
-/// L'invito di un amico a una jam: il codice con cui entrare e chi l'ha mandato.
+/// A friend's invitation to a jam: the code to join with and who sent it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct JamInvite {
     pub code: String,
@@ -122,7 +122,7 @@ pub struct PublicPlaylist {
     pub id: Uuid,
     pub name: String,
     pub owner: Profile,
-    /// Condivisi con la coda quando si preme play, senza copie.
+    /// Shared with the queue when play is pressed, without copies.
     #[serde(deserialize_with = "shared_tracks")]
     pub tracks: Arc<[Track]>,
 }
@@ -136,7 +136,7 @@ struct RelationBody {
     relation: Relation,
 }
 
-/// Il profilo da creare o aggiornare.
+/// The profile to create or update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileDraft {
     pub handle: String,
@@ -145,7 +145,7 @@ pub struct ProfileDraft {
     pub share_activity: Option<bool>,
 }
 
-/// Una risposta senza corpo dove ne serviva uno.
+/// A reply without a body where one was needed.
 fn body<T>(reply: Option<T>) -> Result<T, AppError> {
     reply.ok_or(AppError::InvalidResponse)
 }
@@ -186,26 +186,26 @@ impl ApiClient {
         body(self.authed(Method::GET, "/v1/friends", token, &[], None).await?)
     }
 
-    /// Chiede l'amicizia o accetta quella ricevuta.
+    /// Asks for the friendship or accepts the one received.
     pub async fn add_friend(&self, token: &str, handle: &str) -> Result<Relation, AppError> {
         let path = format!("/v1/friends/{}", path_segment(handle));
         let reply: RelationBody = body(self.authed(Method::POST, &path, token, &[], None).await?)?;
         Ok(reply.relation)
     }
 
-    /// Toglie l'amicizia, ritira o rifiuta la richiesta.
+    /// Removes the friendship, withdraws or refuses the request.
     pub async fn remove_friend(&self, token: &str, handle: &str) -> Result<(), AppError> {
         let path = format!("/v1/friends/{}", path_segment(handle));
         self.authed::<serde_json::Value>(Method::DELETE, &path, token, &[], None).await.map(|_| ())
     }
 
-    /// Gli inviti alle jam ricevuti dagli amici e ancora validi.
+    /// The jam invitations received from friends and still valid.
     pub async fn jam_invites(&self, token: &str) -> Result<Vec<JamInvite>, AppError> {
         let reply: JamInvites = body(self.authed(Method::GET, "/v1/jam/invites", token, &[], None).await?)?;
         Ok(reply.invites)
     }
 
-    /// Invita degli amici nella jam `code`; restituisce quanti inviti sono partiti.
+    /// Invites friends to the jam `code`; returns how many invitations were sent.
     pub async fn invite_to_jam(
         &self,
         token: &str,
@@ -218,7 +218,7 @@ impl ApiClient {
         Ok(reply.invited)
     }
 
-    /// Toglie gli inviti alla jam `code`, rifiutati o già accettati.
+    /// Removes the invitations to the jam `code`, refused or already accepted.
     pub async fn dismiss_jam_invite(&self, token: &str, code: &str) -> Result<(), AppError> {
         let path = format!("/v1/jam/invites/{}", path_segment(code));
         self.authed::<serde_json::Value>(Method::DELETE, &path, token, &[], None).await.map(|_| ())
@@ -269,13 +269,13 @@ impl ApiClient {
     }
 }
 
-/// Un nome utente nel percorso: solo i caratteri che il server ammette, il resto non arriva.
+/// A username in the path: only the characters the server admits, the rest does not arrive.
 fn path_segment(handle: &str) -> String {
     handle.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect()
 }
 
-/// Nome utente proposto per un profilo nuovo: quello di Clerk, oppure la parte dell'email prima
-/// della chiocciola, ridotti alle regole del server (3-30 fra minuscole, cifre e `_`).
+/// Username proposed for a new profile: Clerk's one, or the part of the email before the
+/// `@`, reduced to the server's rules (3-30 between lowercase letters, digits and `_`).
 pub fn suggest_handle(username: Option<&str>, email: Option<&str>) -> String {
     let source = username.or_else(|| email.and_then(|e| e.split('@').next())).unwrap_or("ascoltatore");
     let mut handle: String = source

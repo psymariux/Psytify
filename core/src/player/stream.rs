@@ -1,15 +1,15 @@
-//! Ascolto progressivo, come in un servizio di streaming: il brano parte appena arrivano i primi
-//! byte, mentre il resto continua a scaricarsi in memoria. Niente finisce su disco.
+//! Progressive listening, as in a streaming service: the track starts as soon as the first
+//! bytes arrive, while the rest keeps downloading into memory. Nothing ends up on disk.
 //!
-//! Un brano già scaricato sul dispositivo si suona senza passare dalla memoria: [`StreamBuffer::open_file`]
-//! apre il file e il lettore lo legge a richiesta, con letture posizionali (nessun tratto in RAM).
+//! A track already downloaded to the device plays without going through memory: [`StreamBuffer::open_file`]
+//! opens the file and the reader reads it on request, with positional reads (no stretch in RAM).
 //!
-//! Un task tokio scrive i blocchi del download nel buffer condiviso; il decoder legge con
-//! [`StreamReader`] e, se chiede byte non ancora arrivati, aspetta. Il buffer è fatto di tratti:
-//! se il lettore salta lontano dal punto in cui sta scrivendo il download (un seek a un minuto
-//! di un FLAC), chiede al download di ripartire da lì con una richiesta `Range`, invece di
-//! aspettare che ci arrivi. Finito il tratto in corso, il download riempie i buchi rimasti, così
-//! un brano riascoltato è tutto in memoria.
+//! A tokio task writes the download's blocks into the shared buffer; the decoder reads with
+//! [`StreamReader`] and, if it asks for bytes not yet arrived, it waits. The buffer is made of stretches:
+//! if the reader jumps far from where the download is writing (a seek to a minute
+//! of a FLAC), it asks the download to restart from there with a `Range` request, instead of
+//! waiting for it to arrive. When the current stretch ends, the download fills the remaining holes, so
+//! a track listened to again is all in memory.
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -17,26 +17,26 @@ use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
-/// Byte da avere in memoria prima di aprire il decoder: bastano per le intestazioni più comuni.
-/// Su archive.org 128 KB arrivano in circa 2,5 secondi, 512 KB in circa 5: si parte prima e il
-/// resto arriva mentre si ascolta. Se servono più byte (copertina incorporata), il decoder aspetta.
+/// Bytes to have in memory before opening the decoder: enough for the most common headers.
+/// On archive.org 128 KB arrive in about 2.5 seconds, 512 KB in about 5: it starts earlier and the
+/// rest arrives while listening. If more bytes are needed (embedded cover), the decoder waits.
 pub const PREFETCH_BYTES: usize = 128 * 1024;
-/// Testata di un brano tenuta pronta in anticipo: circa otto secondi di FLAC, il tempo che il resto
-/// impiega ad arrivare quando il brano parte davvero.
+/// A track's head kept ready in advance: about eight seconds of FLAC, the time the rest
+/// takes to arrive when the track really starts.
 pub const WARM_BYTES: usize = 768 * 1024;
-/// Un lettore che chiede byte entro questa distanza davanti al download aspetta che arrivino; più
-/// lontano conviene una nuova richiesta da quel punto. Su archive.org i primi byte di una richiesta
-/// `Range` arrivano in circa 1,7 s, il tempo in cui il download in corso scarica circa 1,4 MB.
+/// A reader that asks for bytes within this distance ahead of the download waits for them to arrive; further
+/// away a new request from that point is better. On archive.org the first bytes of a `Range` request
+/// arrive in about 1.7 s, the time in which the download in progress fetches about 1.4 MB.
 pub const JUMP_DISTANCE: usize = 1024 * 1024;
-/// Un salto parte un po' prima del byte chiesto. Il seek in un FLAC senza seektable cerca per
-/// bisezione: dopo il primo punto lontano chiede punti via via più vicini e spesso più indietro
-/// (116 KB, 58 KB, 29 KB…). Senza margine ogni passo è una richiesta nuova, circa un secondo l'una
-/// su archive.org; con 256 KB di margine (0,3 s di download) il primo salto li copre quasi tutti.
+/// A jump starts a little before the requested byte. The seek in a FLAC without a seektable searches by
+/// bisection: after the first far point it asks for points closer and closer, often further back
+/// (116 KB, 58 KB, 29 KB…). Without a margin each step is a new request, about a second each
+/// on archive.org; with a 256 KB margin (0.3 s of download) the first jump covers almost all of them.
 pub const JUMP_LEAD: usize = 256 * 1024;
-/// Attesa massima di un blocco: oltre, la lettura fallisce invece di bloccare per sempre.
+/// Maximum wait for a block: beyond it, the read fails instead of blocking forever.
 const READ_WAIT: Duration = Duration::from_secs(30);
 
-/// Un tratto contiguo del file, da `start`.
+/// A contiguous stretch of the file, from `start`.
 #[derive(Debug)]
 struct Segment {
     start: usize,
@@ -55,21 +55,21 @@ impl Segment {
 
 #[derive(Debug, Default)]
 struct State {
-    /// Tratti ordinati e separati da buchi: due tratti che si toccano diventano uno.
+    /// Stretches sorted and separated by holes: two stretches that touch become one.
     segments: Vec<Segment>,
-    /// Lunghezza del file, se il server l'ha detta.
+    /// Length of the file, if the server said it.
     total: Option<usize>,
-    /// Il server accetta richieste `Range`: si può saltare.
+    /// The server accepts `Range` requests: one can jump.
     ranges: bool,
-    /// Prossimo byte che il download scriverà.
+    /// Next byte the download will write.
     front: usize,
-    /// Byte chiesto dal lettore lontano dal download: il download riparte da qui.
+    /// Byte asked for by the reader far from the download: the download restarts from here.
     wanted: Option<usize>,
     complete: bool,
     failed: bool,
     cancelled: bool,
-    /// Un buffer "caldo" scarica solo la testata: il download si ferma quando ha questi byte
-    /// dall'inizio e riparte con [`StreamBuffer::release`].
+    /// A "warm" buffer downloads only the head: the download stops when it has these bytes
+    /// from the start and restarts with [`StreamBuffer::release`].
     hold: Option<usize>,
 }
 
@@ -78,28 +78,28 @@ impl State {
         self.segments.iter().find(|s| s.contains(position))
     }
 
-    /// Byte contigui dall'inizio del file.
+    /// Contiguous bytes from the start of the file.
     fn head_len(&self) -> usize {
         self.segments.first().filter(|s| s.start == 0).map_or(0, |s| s.data.len())
     }
 
-    /// Il download deve aspettare: ha la testata richiesta e nessuno l'ha ancora sbloccato.
+    /// The download must wait: it has the requested head and nobody has unblocked it yet.
     fn held(&self) -> bool {
         !self.complete && self.hold.is_some_and(|hold| self.head_len() >= hold)
     }
 
-    /// Il primo byte dopo `from` che non è ancora in memoria (`from` stesso, se manca).
+    /// The first byte after `from` that is not yet in memory (`from` itself, if it is missing).
     fn first_missing(&self, from: usize) -> usize {
         self.segment_at(from).map_or(from, Segment::end)
     }
 
-    /// Tutto il file è in memoria.
+    /// The whole file is in memory.
     fn is_full(&self) -> bool {
         self.total.is_some_and(|total| self.head_len() >= total)
     }
 
-    /// Scrive `chunk` da `offset`, saltando le parti già presenti e fondendo i tratti che si
-    /// toccano.
+    /// Writes `chunk` from `offset`, skipping the parts already present and merging the stretches that
+    /// touch.
     fn insert(&mut self, offset: usize, chunk: &[u8]) {
         let mut position = offset;
         let mut rest = chunk;
@@ -139,13 +139,13 @@ impl State {
         }
     }
 
-    /// Dove il download deve continuare dopo aver scritto fino ad `after`: il punto chiesto dal
-    /// lettore se c'è, altrimenti il primo byte mancante da lì, altrimenti il primo buco del file.
+    /// Where the download must continue after writing up to `after`: the point asked for by the
+    /// reader if there is one, otherwise the first missing byte from there, otherwise the first hole in the file.
     fn next_step(&mut self, after: usize) -> Next {
         if let Some(wanted) = self.wanted.take()
             && self.segment_at(wanted).is_none()
         {
-            // Il margine si ferma alla fine dei byte già presenti prima del punto chiesto.
+            // The margin stops at the end of the bytes already present before the requested point.
             let present = self.segments.iter().map(Segment::end).filter(|&end| end <= wanted).max();
             let start = wanted.saturating_sub(JUMP_LEAD).max(present.unwrap_or(0));
             self.front = start;
@@ -166,42 +166,42 @@ impl State {
     }
 }
 
-/// Cosa fa il download dopo un blocco.
+/// What the download does after a block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Next {
-    /// Continua a leggere la risposta in corso: il prossimo blocco va da questo byte.
+    /// Keeps reading the response in progress: the next block starts from this byte.
     Continue(usize),
-    /// Chiude la risposta e ne apre una nuova da questo byte (`Range: bytes=N-`).
+    /// Closes the response and opens a new one from this byte (`Range: bytes=N-`).
     Jump(usize),
-    /// Il file è tutto in memoria.
+    /// The file is all in memory.
     Done,
 }
 
 #[derive(Default)]
 struct Shared {
-    /// Il file da cui si legge a richiesta (un brano scaricato): `state` è già completo e il lettore
-    /// non passa dai tratti. Non cambia dopo la nascita.
+    /// The file to read from on request (a downloaded track): `state` is already complete and the reader
+    /// does not go through the stretches. It does not change after birth.
     file: Option<File>,
     state: Mutex<State>,
-    /// Sveglia i lettori quando arrivano byte o cambia lo stato.
+    /// Wakes the readers when bytes arrive or the state changes.
     arrived: Condvar,
-    /// Sveglia il download quando un lettore chiede un salto: non aspetta il blocco successivo
-    /// della risposta in corso, che su un nodo lento può tardare.
+    /// Wakes the download when a reader asks for a jump: it does not wait for the next block
+    /// of the response in progress, which can be slow on a sluggish node.
     jump: tokio::sync::Notify,
-    /// Sveglia chi aspetta un cambio senza bloccare il runtime ([`StreamBuffer::ready`], il download fermo
-    /// sulla testata): niente sondaggi a tempo, il task dorme finché lo stato non cambia (BACKLOG 33).
+    /// Wakes whoever waits for a change without blocking the runtime ([`StreamBuffer::ready`], the download stopped
+    /// on the head): no timed polling, the task sleeps until the state changes (BACKLOG 33).
     changed: tokio::sync::Notify,
 }
 
 impl Shared {
-    /// Lo stato è cambiato: si svegliano i lettori (thread) e chi aspetta in un task.
+    /// The state changed: the readers (threads) and whoever waits in a task are woken.
     fn wake(&self) {
         self.arrived.notify_all();
         self.changed.notify_waiters();
     }
 }
 
-/// Buffer di un brano in arrivo. Si clona a basso costo: tutte le copie vedono gli stessi byte.
+/// Buffer of an incoming track. Cloning it is cheap: all the copies see the same bytes.
 #[derive(Clone, Default)]
 pub struct StreamBuffer(Arc<Shared>);
 
@@ -222,7 +222,7 @@ impl StreamBuffer {
         Self::default()
     }
 
-    /// Buffer già completo.
+    /// Buffer already complete.
     #[cfg(any(test, feature = "test-support"))]
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
         let buffer = Self::new();
@@ -231,9 +231,9 @@ impl StreamBuffer {
         buffer
     }
 
-    /// Apre un brano già su disco: il buffer nasce completo e legge dal file a richiesta, senza
-    /// tenerlo in memoria. Fallisce se il file non c'è o non pesa `expected_len` byte (non è più
-    /// quello che si era scaricato): chi chiama ripiega sulla rete.
+    /// Opens a track already on disk: the buffer is born complete and reads from the file on request, without
+    /// keeping it in memory. It fails if the file is missing or does not weigh `expected_len` bytes (it is no longer
+    /// the one that was downloaded): the caller falls back to the network.
     pub fn open_file(path: &Path, expected_len: u64) -> io::Result<Self> {
         let file = File::open(path)?;
         let meta = file.metadata()?;
@@ -246,13 +246,13 @@ impl StreamBuffer {
         Ok(Self(Arc::new(Shared { file: Some(file), state: Mutex::new(state), ..Shared::default() })))
     }
 
-    /// Il buffer legge da un file su disco (un brano scaricato), non dalla rete.
+    /// The buffer reads from a file on disk (a downloaded track), not from the network.
     pub fn is_file(&self) -> bool {
         self.0.file.is_some()
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
-        // Un panic nel task che scrive non deve rendere inutilizzabile il buffer.
+        // A panic in the writing task must not make the buffer unusable.
         self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
@@ -262,7 +262,7 @@ impl StreamBuffer {
         result
     }
 
-    /// Lunghezza del file (dalla prima risposta) e se il server accetta richieste `Range`.
+    /// Length of the file (from the first response) and whether the server accepts `Range` requests.
     pub fn set_total(&self, total: usize, ranges: bool) {
         self.update(|state| {
             state.total = Some(total);
@@ -270,7 +270,7 @@ impl StreamBuffer {
         });
     }
 
-    /// Scrive un blocco arrivato da `offset` e dice al download come continuare.
+    /// Writes a block arrived from `offset` and tells the download how to continue.
     pub fn write_at(&self, offset: usize, chunk: &[u8]) -> Next {
         self.update(|state| {
             state.insert(offset, chunk);
@@ -278,8 +278,8 @@ impl StreamBuffer {
         })
     }
 
-    /// La risposta in corso è finita a `offset`: il file è completo, oppure restano buchi da
-    /// riempire (dopo un salto). Senza lunghezza nota, la fine della risposta è la fine del file.
+    /// The response in progress ended at `offset`: the file is complete, or holes remain to be
+    /// filled (after a jump). Without a known length, the end of the response is the end of the file.
     pub fn response_ended(&self, offset: usize) -> Next {
         self.update(|state| {
             if state.total.is_none() || !state.ranges {
@@ -287,14 +287,14 @@ impl StreamBuffer {
                 return Next::Done;
             }
             match state.next_step(offset) {
-                // La risposta è finita: continuare vuol dire aprirne un'altra da lì.
+                // The response has ended: continuing means opening another one from there.
                 Next::Continue(at) => Next::Jump(at),
                 other => other,
             }
         })
     }
 
-    /// Si risolve quando un lettore chiede di saltare (subito, se l'ha già chiesto).
+    /// Resolves when a reader asks to jump (at once, if it has already asked).
     pub async fn jump_requested(&self) {
         self.0.jump.notified().await;
     }
@@ -303,7 +303,7 @@ impl StreamBuffer {
         self.update(|state| state.failed = true);
     }
 
-    /// Ferma il download: serve quando si passa a un altro brano prima della fine.
+    /// Stops the download: needed when moving to another track before the end.
     pub fn cancel(&self) {
         self.update(|state| state.cancelled = true);
     }
@@ -312,43 +312,43 @@ impl StreamBuffer {
         self.lock().cancelled
     }
 
-    /// Il download è caduto e il buffer non si completerà più.
+    /// The download fell and the buffer will not complete any more.
     pub fn is_failed(&self) -> bool {
         self.lock().failed
     }
 
-    /// Il server accetta richieste `Range` e ha detto la lunghezza: si può riaprire il download.
+    /// The server accepts `Range` requests and has said the length: the download can be reopened.
     pub fn can_range(&self) -> bool {
         let state = self.lock();
         state.ranges && state.total.is_some()
     }
 
-    /// Chiede al download di fermarsi appena ha `bytes` byte dall'inizio, in attesa di [`Self::release`].
+    /// Asks the download to stop as soon as it has `bytes` bytes from the start, waiting for [`Self::release`].
     pub fn hold_at(&self, bytes: usize) {
         self.update(|state| state.hold = Some(bytes));
     }
 
-    /// Lascia continuare un download fermato da [`Self::hold_at`]. Non fa nulla se non era fermo.
+    /// Lets a download stopped by [`Self::hold_at`] continue. Does nothing if it was not stopped.
     pub fn release(&self) {
         self.update(|state| state.hold = None);
     }
 
-    /// Il download deve aspettare: ha già la testata richiesta e nessuno l'ha ancora sbloccato.
+    /// The download must wait: it already has the requested head and nobody has unblocked it yet.
     pub fn is_held(&self) -> bool {
         self.lock().held()
     }
 
-    /// Aspetta che il download possa ripartire: qualcuno l'ha sbloccato ([`Self::release`], o un lettore
-    /// che va oltre la testata), il file è completo o il download è annullato. Subito, se non è fermo.
+    /// Waits until the download can restart: someone has unblocked it ([`Self::release`], or a reader
+    /// that goes beyond the head), the file is complete or the download is cancelled. At once, if it is not stopped.
     pub async fn wait_released(&self) {
         self.wait_until(|state| (state.cancelled || !state.held()).then_some(())).await;
     }
 
-    /// Aspetta senza sondare che `check` dia un esito: lo prova adesso e poi a ogni cambio di stato.
+    /// Waits without polling until `check` gives an outcome: it tries it now and then at each state change.
     async fn wait_until<T>(&self, mut check: impl FnMut(&State) -> Option<T>) -> T {
         loop {
-            // Ci si iscrive prima di guardare lo stato: un cambio fra il controllo e l'attesa sveglia lo
-            // stesso (`notify_waiters` raggiunge solo chi è già iscritto).
+            // One subscribes before looking at the state: a change between the check and the wait wakes the
+            // same one (`notify_waiters` reaches only those already subscribed).
             let notified = self.0.changed.notified();
             let mut notified = std::pin::pin!(notified);
             notified.as_mut().enable();
@@ -363,14 +363,14 @@ impl StreamBuffer {
         self.lock().complete
     }
 
-    /// Lunghezza del file, se nota (dal server o a download finito): serve al decoder per cercare
-    /// nel file.
+    /// Length of the file, if known (from the server or when the download is finished): the decoder needs it to seek
+    /// in the file.
     pub fn total(&self) -> Option<usize> {
         let state = self.lock();
         state.total.or_else(|| state.complete.then(|| state.head_len()))
     }
 
-    /// I primi `n` byte scaricati finora (meno, se sono di meno).
+    /// The first `n` bytes downloaded so far (fewer, if there are fewer).
     pub fn head(&self, n: usize) -> Vec<u8> {
         if let Some(file) = &self.0.file {
             let total = self.lock().total.unwrap_or(0);
@@ -393,14 +393,14 @@ impl StreamBuffer {
             .map_or_else(Vec::new, |s| s.data[..n.min(s.data.len())].to_vec())
     }
 
-    /// Copia dei byte contigui dall'inizio: a download completo, il file intero.
+    /// Copy of the contiguous bytes from the start: when the download is complete, the whole file.
     #[cfg(test)]
     pub fn snapshot(&self) -> Vec<u8> {
         self.head(usize::MAX)
     }
 
-    /// Aspetta senza bloccare il runtime che ci siano `bytes` byte dall'inizio, o che il download
-    /// finisca. `false` se il download è fallito o è stato annullato prima.
+    /// Waits without blocking the runtime until there are `bytes` bytes from the start, or the download
+    /// ends. `false` if the download failed or was cancelled before.
     pub async fn ready(&self, bytes: usize) -> bool {
         self.wait_until(|state| {
             if state.failed || state.cancelled {
@@ -419,7 +419,7 @@ impl StreamBuffer {
     }
 }
 
-/// Lettore per il decoder: legge dal buffer e aspetta i byte che mancano.
+/// Reader for the decoder: it reads from the buffer and waits for the bytes that are missing.
 #[derive(Debug)]
 pub struct StreamReader {
     buffer: StreamBuffer,
@@ -427,13 +427,13 @@ pub struct StreamReader {
 }
 
 impl StreamReader {
-    /// Lunghezza del file, se nota.
+    /// Length of the file, if known.
     pub fn total(&self) -> Option<usize> {
         self.buffer.total()
     }
 }
 
-/// Legge da `at` senza spostare il cursore del file: più lettori non si pestano i piedi.
+/// Reads from `at` without moving the file's cursor: several readers do not step on each other.
 #[cfg(unix)]
 fn read_at(file: &File, out: &mut [u8], at: u64) -> io::Result<usize> {
     std::os::unix::fs::FileExt::read_at(file, out, at)
@@ -446,7 +446,7 @@ fn read_at(file: &File, out: &mut [u8], at: u64) -> io::Result<usize> {
 
 impl Read for StreamReader {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        // Un brano su disco: lettura posizionale, senza tratti e senza attese.
+        // A track on disk: positional read, without stretches and without waits.
         if let Some(file) = &self.buffer.0.file {
             let read = read_at(file, out, self.position as u64)?;
             self.position += read;
@@ -468,11 +468,11 @@ impl Read for StreamReader {
             if state.failed || state.cancelled {
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, "stream interrupted"));
             }
-            // Chi legge oltre la testata sblocca il download: il brano sta suonando.
+            // Who reads beyond the head unblocks the download: the track is playing.
             if state.hold.take().is_some() {
                 shared.wake();
             }
-            // Dietro il download o troppo avanti: il download salta qui.
+            // Behind the download or too far ahead: the download jumps here.
             let far = self.position < state.front || self.position > state.front + JUMP_DISTANCE;
             if state.ranges && far && state.wanted != Some(self.position) {
                 state.wanted = Some(self.position);
@@ -501,7 +501,7 @@ impl Seek for StreamReader {
                 let end = match state.total {
                     Some(total) => total,
                     None if state.complete => state.head_len(),
-                    // Senza lunghezza la fine si conosce solo a download finito.
+                    // Without a length the end is only known when the download finishes.
                     None => return Err(io::Error::new(io::ErrorKind::Unsupported, "length not known yet")),
                 };
                 end as i128 + i128::from(delta)
@@ -516,7 +516,7 @@ impl Seek for StreamReader {
 mod tests {
     use super::*;
 
-    /// Buffer di un file di `total` byte con richieste `Range`, ancora vuoto.
+    /// Buffer of a file of `total` bytes with `Range` requests, still empty.
     fn ranged(total: usize) -> StreamBuffer {
         let buffer = StreamBuffer::new();
         buffer.set_total(total, true);
@@ -603,7 +603,7 @@ mod tests {
             reader.read_exact(&mut out).unwrap();
             out
         });
-        // Il download scrive il blocco successivo e scopre che il lettore è lontano.
+        // The download writes the next block and finds out that the reader is far.
         let next = loop {
             std::thread::sleep(Duration::from_millis(5));
             match buffer.write_at(1024, &[]) {
@@ -645,7 +645,7 @@ mod tests {
     fn after_a_jump_the_gap_before_is_filled() {
         let buffer = ranged(10);
         buffer.write_at(0, b"01");
-        // Salto a 6: il tratto 6..10 arriva fino alla fine del file.
+        // Jump to 6: the 6..10 stretch arrives up to the end of the file.
         assert_eq!(buffer.write_at(6, b"6789"), Next::Jump(2));
         assert_eq!(buffer.write_at(2, b"2345"), Next::Done);
         assert_eq!(buffer.snapshot(), b"0123456789");
@@ -688,7 +688,7 @@ mod tests {
         let writer = buffer.clone();
         let handle = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(30));
-            // Il download si è sbloccato: scrive il resto.
+            // The download has unblocked: it writes the rest.
             assert!(!writer.is_held());
             writer.write_at(4, &[2u8; 4]);
         });
@@ -724,15 +724,15 @@ mod tests {
         assert!(tokio::time::timeout(Duration::from_millis(50), buffer.ready(10)).await.is_err());
     }
 
-    /// Il task che aspetta non ha ancora un esito: lo si fa girare finché non resta fermo.
+    /// The waiting task does not have an outcome yet: it is run until it stays stopped.
     async fn settle() {
         for _ in 0..8 {
             tokio::task::yield_now().await;
         }
     }
 
-    // Con il tempo fermo (`start_paused`) un'attesa a sondaggio farebbe avanzare l'orologio: queste prove
-    // dicono che l'attesa si sveglia per il cambio di stato e non per un timer (BACKLOG 33).
+    // With the time stopped (`start_paused`) a polling wait would advance the clock: these tests
+    // show that the wait wakes for the state change and not for a timer (BACKLOG 33).
     #[tokio::test(start_paused = true)]
     async fn ready_wakes_on_the_bytes_without_a_timer() {
         let buffer = ranged(100);
@@ -773,7 +773,7 @@ mod tests {
             waiting.await.unwrap();
             assert_eq!(tokio::time::Instant::now(), start, "no timer ran");
         }
-        // Non fermo: torna subito.
+        // Not stopped: it returns at once.
         let free = ranged(100);
         tokio::time::timeout(Duration::from_millis(1), free.wait_released()).await.unwrap();
     }
@@ -789,7 +789,7 @@ mod tests {
         });
         settle().await;
         assert!(!waiting.is_finished());
-        // Il lettore va oltre la testata (su un altro thread: la lettura aspetta i byte che mancano).
+        // The reader goes beyond the head (on another thread: the read waits for the missing bytes).
         let reader = buffer.clone();
         let read = std::thread::spawn(move || {
             let mut out = [0u8; 8];
@@ -837,7 +837,7 @@ mod tests {
         reader.read_to_end(&mut tail).unwrap();
         assert_eq!(tail, bytes[4990..]);
         assert_eq!(reader.read(&mut out).unwrap(), 0, "at the end of the file");
-        // Un secondo lettore parte dall'inizio, indipendente dal primo.
+        // A second reader starts from the beginning, independent of the first.
         let mut again = buffer.reader();
         again.read_exact(&mut out).unwrap();
         assert_eq!(out, bytes[..100]);

@@ -1,14 +1,14 @@
-//! Il dialogo delle playlist: nome di una playlist nuova, rinomina, conferma di eliminazione, come quelli
-//! del client Iced (`client/src/ui/dialog.rs`). Invio conferma, Esc, «Annulla» o un clic sul velo chiudono
-//! (il velo è di `Shell`, che mostra il dialogo sopra tutto). Lo stesso dialogo chiede la conferma prima di
-//! togliere un amico («Togliere NOME dagli amici?», decisione del proprietario: nel client Iced «Amici»
-//! toglieva con un clic solo); l'esito lo dice il core con il suo evento sociale.
+//! The playlist dialog: the name of a new playlist, rename, delete confirmation, as those of the
+//! Enter confirms, Esc, «Annulla» or a click on the scrim close it
+//! (the scrim belongs to `Shell`, which shows the dialog above all). The same dialog asks to confirm before
+//! removing a friend («Togliere NOME dagli amici?», the owner's decision: in the old client «Amici»
+//! removed with one click); the core says the outcome with its social event.
 //!
-//! Il dialogo manda il comando al core (`LibraryCmd::CreatePlaylist`, `RenamePlaylist`, `DeletePlaylist`)
-//! e dice a `Shell` che cosa è successo ([`DialogEvent`]): l'avviso da mostrare (il dominio libreria del
-//! core non ha eventi, e questi sono gli stessi testi locali del client Iced), la playlist da aprire quando
-//! il core la pubblica, quella eliminata da togliere dalla cronologia. Il nome lo pulisce il core
-//! (`config::clean_name`), qui lo si pulisce solo per l'avviso.
+//! The dialog sends the command to the core (`LibraryCmd::CreatePlaylist`, `RenamePlaylist`, `DeletePlaylist`)
+//! and tells `Shell` what happened ([`DialogEvent`]): the notice to show (the core's library domain has no
+//! events, and these are the same local texts), the playlist to open when
+//! the core publishes it, the deleted one to remove from the history. The core cleans the name
+//! (`config::clean_name`); here it is cleaned only for the notice.
 
 use gpui::{
     AppContext, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
@@ -25,11 +25,11 @@ use crate::components::search_field::SearchField;
 use crate::core_model::CoreModel;
 use crate::notices::Notice;
 
-/// Quale dialogo aprire.
+/// Which dialog to open.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DialogRequest {
-    /// Una playlist nuova: vuota (dalla Libreria, e allora si apre) o con dei brani (dal menu di un
-    /// brano, e allora si resta dove si è).
+    /// A new playlist: empty (from the Libreria, and then it opens) or with tracks (from the menu of a
+    /// track, and then you stay where you are).
     NewPlaylist {
         seed: Vec<Track>,
     },
@@ -41,28 +41,28 @@ pub enum DialogRequest {
         id: Uuid,
         name: String,
     },
-    /// Togliere un amico: il suo nome utente e il nome che si mostra.
+    /// Removing a friend: their username and the name shown.
     Unfriend {
         handle: String,
         name: String,
     },
 }
 
-/// Com'è finito il dialogo.
+/// How the dialog ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DialogEvent {
-    /// Chiuso senza fare niente.
+    /// Closed without doing anything.
     Cancelled,
     Done {
         notice: Option<Notice>,
-        /// La playlist appena creata: si apre quando il core la pubblica.
+        /// The playlist just created: it opens when the core publishes it.
         open: Option<Uuid>,
-        /// La playlist appena eliminata: la pagina e la cronologia la lasciano.
+        /// The playlist just deleted: the page and the history let it go.
         deleted: Option<Uuid>,
     },
 }
 
-/// Che cosa dice il dialogo di una playlist nuova, secondo i brani con cui nasce (come nel client Iced).
+/// What the dialog of a new playlist says, according to the tracks it starts with.
 fn new_playlist_hint(seed: usize) -> String {
     match seed {
         0 => "Dai un nome alla playlist. Potrai aggiungere i brani dal menu «Altro» di un brano.".to_owned(),
@@ -71,17 +71,17 @@ fn new_playlist_hint(seed: usize) -> String {
     }
 }
 
-/// Il titolo della conferma per togliere un amico.
+/// The title of the confirmation for removing a friend.
 fn unfriend_title(name: &str) -> String {
     format!("Togliere {name} dagli amici?")
 }
 
-/// Il comando che toglie l'amico, dopo la conferma.
+/// The command that removes the friend, after the confirmation.
 fn unfriend(handle: &str) -> SocialCmd {
     SocialCmd::FriendAction { handle: handle.to_owned(), add: false }
 }
 
-/// Il nome proposto per una playlist nuova, come nel client Iced.
+/// The proposed name for a new playlist.
 pub fn suggested_name(playlists: usize) -> String {
     format!("La mia playlist n. {}", playlists + 1)
 }
@@ -89,7 +89,7 @@ pub fn suggested_name(playlists: usize) -> String {
 pub struct PlaylistDialog {
     core: Entity<CoreModel>,
     request: DialogRequest,
-    /// Il campo del nome (playlist nuova e rinomina).
+    /// The name field (new playlist and rename).
     field: Option<Entity<SearchField>>,
     focus: FocusHandle,
 }
@@ -120,7 +120,7 @@ impl PlaylistDialog {
                     .with_text(text)
                     .select_all_text()
                     .on_submit(move |text, _, cx| {
-                        // Il campo è in aggiornamento: il testo arriva da lui, non si rilegge.
+                        // The field is being updated: the text comes from it, it is not read back.
                         let text = text.to_owned();
                         submit.update(cx, |dialog, cx| dialog.confirm(Some(text), cx)).ok();
                     })
@@ -144,8 +144,8 @@ impl PlaylistDialog {
         cx.emit(DialogEvent::Cancelled);
     }
 
-    /// Invio o il pulsante principale: il comando al core e l'esito a `Shell`.
-    /// `typed` è il testo quando lo manda il campo stesso (Invio); dal pulsante si legge dal campo.
+    /// Enter or the main button: the command to the core and the outcome to `Shell`.
+    /// `typed` is the text when the field itself sends it (Enter); from the button it is read from the field.
     fn confirm(&mut self, typed: Option<String>, cx: &mut Context<Self>) {
         let typed = typed
             .or_else(|| self.field.as_ref().map(|field| field.read(cx).text().to_owned()))
@@ -193,7 +193,7 @@ impl PlaylistDialog {
         cx.emit(event);
     }
 
-    /// Esc e Invio quando il dialogo non ha un campo (le conferme).
+    /// Esc and Enter when the dialog has no field (the confirmations).
     fn on_key(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         match event.keystroke.key.as_str() {
             "escape" => self.cancel(cx),
@@ -254,7 +254,7 @@ impl Render for PlaylistDialog {
             .relative()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
-            // Un clic sul dialogo non arriva al velo dietro (che chiude).
+            // A click on the dialog does not reach the scrim behind it (which closes).
             .occlude()
             .child(dialog)
     }

@@ -1,25 +1,25 @@
-//! Fonti esterne (passo 4.5): le playlist di YouTube e gli album di Bandcamp si aprono, si ascoltano
-//! e si salvano; il catalogo ufficiale (Deezer) dà a ogni artista i brani popolari e la discografia,
-//! e un brano trovato dalla ricerca si importa e si suona con un comando solo. L'audio non viene
-//! dalla fonte: quando si preme play il server lo trova e lo porta nel catalogo, e il core suona
-//! quello che il server gli restituisce.
+//! External sources (step 4.5): YouTube playlists and Bandcamp albums are opened, listened to
+//! and saved; the official catalog (Deezer) gives each artist the popular tracks and the discography,
+//! and a track found by the search is imported and played with a single command. The audio does not come
+//! from the source: when play is pressed the server finds it and brings it into the catalog, and the core plays
+//! what the server returns to it.
 //!
-//! Salvare una playlist crea subito la playlist locale con i brani «in arrivo» (`Playlist::pending`,
-//! salvati nella configurazione dalla libreria): il dominio li importa uno alla volta, e chi chiude
-//! l'app ritrova l'importazione dove l'aveva lasciata (riparte dal primo avvio del core). Ascoltare
-//! una playlist senza salvarla importa subito il primo brano, senza aspettare le importazioni in
-//! sottofondo, lo suona e poi accoda gli altri. Dopo un «troppe richieste» la coda aspetta venti
-//! secondi, con un timer del core, e riprende dallo stesso brano.
+//! Saving a playlist creates the local playlist at once with the tracks "in arrivo" (`Playlist::pending`,
+//! saved in the configuration by the library): the domain imports them one at a time, and whoever closes
+//! the app finds the import again where it left it (it restarts from the core's first start). Listening to
+//! a playlist without saving it imports the first track at once, without waiting for the imports in the
+//! background, plays it and then queues the others. After a "troppe richieste" the queue waits twenty
+//! seconds, with a core timer, and resumes from the same track.
 //!
-//! Il passo successivo di una playlist salvata non aspetta che il frontend rilegga la vista: il
-//! dominio legge la libreria nel passaggio che il core fa dopo ogni ingresso (`settle`, poi `pace`),
-//! quando il brano importato è già al suo posto nella playlist. Come gli altri domini, non chiama mai
-//! la libreria, la riproduzione o il catalogo: chiede (un brano importato, un `Play`, «il catalogo è
-//! cambiato») con tre serbatoi che il passaggio svuota nello stesso giro, così il brano, la coda e la
-//! vista sono un'unica istantanea.
+//! The next step of a saved playlist does not wait for the frontend to reread the view: the
+//! domain reads the library in the passing that the core does after each input (`settle`, then `pace`),
+//! when the imported track is already in its place in the playlist. Like the other domains, it never calls
+//! the library, playback or the catalog: it asks (an imported track, a `Play`, "the catalog has
+//! changed") with three stores that the passing empties in the same round, so the track, the queue and the
+//! view are a single snapshot.
 //!
-//! Cambiare vista solo se qualcosa cambia davvero: un comando uguale al precedente, o una risposta
-//! superata (un'apertura, una scelta o un'importazione più recenti), non pubblica niente.
+//! Change the view only if something really changes: a command equal to the previous one, or a reply
+//! superseded (an opening, a choice or an import more recent), publishes nothing.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -39,47 +39,49 @@ use crate::state::catalog::{CatalogCmd, CatalogView};
 use crate::state::library::{LibraryCmd, LibraryView};
 use crate::state::playback::{PlaybackCmd, PlaybackView};
 
-/// Dopo un «troppe richieste» l'importazione riprende da sola dopo questa pausa.
+/// After a "troppe richieste" the import resumes on its own after this pause.
 pub const RATE_LIMIT_PAUSE: Duration = Duration::from_secs(20);
-/// Schede «Altro di …» tenute in memoria: oltre, esce la meno usata.
+/// "Altro di …" tabs kept in memory: beyond that, the least used goes out.
 pub const ARTIST_EXTRAS: usize = 64;
-/// Eventi tenuti nella vista: un frontend che legge a ogni pubblicazione non ne perde.
+/// Events kept in the view: a frontend that reads at each publish does not lose any.
 const EVENTS: usize = 32;
-/// Artisti seguiti già chiesti in questa sessione: se la lista cresce oltre, si ricomincia.
+/// Followed artists already asked for in this session: if the list grows beyond, it starts again.
 const ASKED: usize = 512;
+/// Imports remembered with the server track they became: the oldest go first.
+pub const LINKS: usize = 128;
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone)]
 pub enum ExternalCmd {
-    /// Apre una playlist o un album esterno e ne carica i brani. Se è già aperto e pronto non fa
-    /// niente.
+    /// Opens an external playlist or album and loads its tracks. If it is already open and ready it does
+    /// nothing.
     OpenPlaylist(SourcePlaylist),
-    /// «Riprova»: ricarica i brani della playlist aperta.
+    /// "Riprova": reloads the tracks of the open playlist.
     RetryPlaylist,
-    /// Salva la playlist aperta nella libreria come playlist `id` (lo sceglie chi chiede, che la apre
-    /// quando compare nella vista): i brani arrivano uno alla volta. Con la libreria piena, o se la
-    /// playlist non è pronta, non fa niente.
+    /// Saves the open playlist into the library as playlist `id` (chosen by whoever asks, who opens it
+    /// when it appears in the view): the tracks arrive one at a time. With a full library, or if the
+    /// playlist is not ready, it does nothing.
     SavePlaylist { id: Uuid },
-    /// Ascolta la playlist aperta da `start`: il primo brano parte appena importato. `video` chiede
-    /// anche il videoclip, per chi lo mostra.
+    /// Listens to the open playlist from `start`: the first track plays as soon as it is imported. `video` asks
+    /// also for the music video, for whoever shows it.
     PlayPlaylist { start: usize, video: bool },
-    /// Ascolta i brani popolari dell'artista, da `start` in poi.
+    /// Listens to the artist's popular tracks, from `start` on.
     PlayArtistTop { artist: Uuid, start: usize, video: bool },
-    /// Importa un risultato della ricerca (del catalogo ufficiale o di una fonte esterna) e lo suona.
-    /// Una richiesta alla volta: finché una è in corso le altre di questo tipo si ignorano.
+    /// Imports a search result (from the official catalog or an external source) and plays it.
+    /// One request at a time: while one is in progress the others of this kind are ignored.
     PlaySource { source: SourceKind, id: String, video: bool },
-    /// Importa un risultato di Internet Archive e lo suona. Come [`ExternalCmd::PlaySource`].
+    /// Imports an Internet Archive result and plays it. As [`ExternalCmd::PlaySource`].
     PlayArchive { identifier: String },
 }
 
-/// Una playlist esterna aperta: la sua scheda dalla ricerca e i brani, quando arrivano.
+/// An external playlist open: its sheet from the search and the tracks, when they arrive.
 #[derive(Debug, Clone)]
 pub struct OpenPlaylist {
     pub playlist: SourcePlaylist,
     pub items: Load<Arc<[SourceItem]>>,
 }
 
-/// L'artista dal catalogo ufficiale: i brani più ascoltati e tutta la discografia.
+/// The artist from the official catalog: the most played tracks and the whole discography.
 #[derive(Debug, Clone)]
 pub struct ArtistExtras {
     pub artist: MetaArtist,
@@ -87,46 +89,66 @@ pub struct ArtistExtras {
     pub albums: Arc<[SourcePlaylist]>,
 }
 
-/// Che cosa si sta importando: un item di Archive (per identificatore) o un brano di una fonte.
+/// What is being imported: an Archive item (by identifier) or a track of a source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Importing {
     Archive(String),
     Source(SourceKind, String),
 }
 
-/// Le importazioni in corso, per «Apro…» sulle righe e per la riga «in arrivo».
+/// The imports in progress, for "Apro…" on the rows and for the "in arrivo" row.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImportsView {
-    /// Brani di «Riproduci» ancora da importare.
+    /// "Riproduci" tracks still to be imported.
     pub queued: usize,
-    /// Il brano premuto nella ricerca: se c'è, le altre scelte di questo tipo aspettano.
+    /// The track pressed in the search: if there is one, the other choices of this kind wait.
     pub play: Option<Importing>,
-    /// Il primo brano di «Riproduci»: si importa a parte, subito.
+    /// The first track of "Riproduci": it is imported separately, at once.
     pub start: Option<Importing>,
-    /// L'importazione in sottofondo, una alla volta: la coda di «Riproduci» o una playlist salvata.
+    /// The background import, one at a time: the queue of "Riproduci" or a saved playlist.
     pub step: Option<Importing>,
-    /// In pausa dopo un «troppe richieste».
+    /// Paused after a "troppe richieste".
     pub paused: bool,
 }
 
-/// Qualcosa che il frontend deve far sapere o fare.
+/// The server track each external item became in this session, newest last, at most [`LINKS`]: a
+/// row of the official catalogue knows from it that the current track is its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ImportLinks(VecDeque<(Importing, Track)>);
+
+impl ImportLinks {
+    /// The server track that `key` became, if it was imported in this session.
+    pub fn track(&self, key: &Importing) -> Option<&Track> {
+        self.0.iter().rev().find(|(known, _)| known == key).map(|(_, track)| track)
+    }
+
+    fn put(&mut self, key: Importing, track: &Track) {
+        self.0.retain(|(known, _)| *known != key);
+        self.0.push_back((key, track.clone()));
+        while self.0.len() > LINKS {
+            self.0.pop_front();
+        }
+    }
+}
+
+/// Something the frontend must make known or do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExternalEvent {
-    /// Dei brani sono entrati nel catalogo, in coda o in una playlist: le loro copertine si possono
-    /// scaricare.
+    /// Some tracks have entered the catalog, in the queue or in a playlist: their covers can be
+    /// downloaded.
     Imported(Arc<[Track]>),
-    /// Una playlist è nella libreria: i suoi `count` brani arrivano uno alla volta.
+    /// A playlist is in the library: its `count` tracks arrive one at a time.
     PlaylistSaved { name: String, count: usize },
-    /// Una playlist salvata ha finito di importare: `count` brani, `failed` non disponibili.
+    /// A saved playlist has finished importing: `count` tracks, `failed` not available.
     PlaylistReady { name: String, count: usize, failed: usize },
-    /// Il brano premuto non si è potuto importare.
+    /// The track pressed could not be imported.
     PlayFailed(AppError),
-    /// Il server ha portato l'item nel catalogo, ma senza brani da ascoltare.
+    /// The server brought the item into the catalog, but with no tracks to listen to.
     NothingToPlay,
 }
 
 impl ExternalEvent {
-    /// L'avviso da mostrare, se l'evento ne ha uno (`Imported` no: porta solo dati).
+    /// The notice to show, if the event has one (`Imported` does not: it carries only data).
     pub fn message(&self) -> Option<String> {
         match self {
             Self::Imported(_) => None,
@@ -137,19 +159,19 @@ impl ExternalEvent {
         }
     }
 
-    /// L'avviso è un errore, non un'informazione.
+    /// The notice is an error, not information.
     pub fn is_error(&self) -> bool {
         matches!(self, Self::PlayFailed(_) | Self::NothingToPlay)
     }
 }
 
-/// «1 brano», «2 brani».
+/// "1 brano", "2 brani".
 fn tracks_label(count: usize) -> String {
     if count == 1 { "1 brano".to_owned() } else { format!("{count} brani") }
 }
 
-/// L'avviso di una playlist salvata: il numero di brani concorda («il brano arriva», «i 3 brani
-/// arrivano»).
+/// The notice of a saved playlist: the number of tracks agrees ("il brano arriva", "i 3 brani
+/// arrivano").
 pub fn saved_message(name: &str, count: usize) -> String {
     if count == 1 {
         format!("«{name}» è nella libreria: il brano arriva a breve.")
@@ -158,7 +180,7 @@ pub fn saved_message(name: &str, count: usize) -> String {
     }
 }
 
-/// L'avviso di fine importazione, con i numeri che concordano: «1 brano», «1 non disponibile».
+/// The notice at the end of an import, with the numbers agreeing: "1 brano", "1 non disponibile".
 pub fn ready_message(name: &str, count: usize, failed: usize) -> String {
     let tracks = tracks_label(count);
     match failed {
@@ -168,81 +190,83 @@ pub fn ready_message(name: &str, count: usize, failed: usize) -> String {
     }
 }
 
-/// Un [`ExternalEvent`] con il suo numero d'ordine, che cresce a ogni evento.
+/// An [`ExternalEvent`] with its sequence number, which grows with each event.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternalRaised {
     pub seq: u64,
     pub event: ExternalEvent,
 }
 
-/// Ciò che i frontend vedono del dominio.
+/// What the frontends see of the domain.
 #[derive(Debug, Clone, Default)]
 pub struct ExternalView {
-    /// La playlist esterna aperta e il suo caricamento.
+    /// The open external playlist and its loading.
     pub open: Option<OpenPlaylist>,
-    /// Per artista: `Loading` finché non arrivano entrambe le ricerche. Le più vecchie escono oltre
+    /// Per artist: `Loading` until both searches arrive. The oldest go out beyond
     /// [`ARTIST_EXTRAS`].
     pub artists: Arc<HashMap<Uuid, Load<ArtistExtras>>>,
     pub imports: ImportsView,
-    /// Gli ultimi eventi, dal più vecchio: un frontend mostra quelli con `seq` nuovo, in ordine.
+    /// What the imports of this session became on the server.
+    pub links: Arc<ImportLinks>,
+    /// The latest events, from the oldest: a frontend shows those with a new `seq`, in order.
     pub events: Arc<VecDeque<ExternalRaised>>,
 }
 
 impl ExternalView {
-    /// Il brano si sta importando adesso (per «Apro…» sulla sua riga).
+    /// The track is being imported right now (for "Apro…" on its row).
     pub fn importing(&self, source: SourceKind, id: &str) -> bool {
         let is = |slot: &Option<Importing>| matches!(slot, Some(Importing::Source(s, i)) if *s == source && i == id);
         is(&self.imports.play) || is(&self.imports.start) || is(&self.imports.step)
     }
 
-    /// L'item di Archive si sta importando adesso.
+    /// The Archive item is being imported right now.
     pub fn importing_archive(&self, identifier: &str) -> bool {
         matches!(&self.imports.play, Some(Importing::Archive(i)) if i == identifier)
     }
 
-    /// Brani di «Riproduci» ancora da importare.
+    /// "Riproduci" tracks still to be imported.
     pub fn queued(&self) -> usize {
         self.imports.queued
     }
 
-    /// La scheda «Altro di …» dell'artista, se è stata chiesta.
+    /// The artist's "Altro di …" sheet, if it has been asked for.
     pub fn artist(&self, id: Uuid) -> Option<&Load<ArtistExtras>> {
         self.artists.get(&id)
     }
 }
 
-/// I timer del dominio.
+/// The domain's timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Timer {
-    /// Scade [`RATE_LIMIT_PAUSE`] dopo un «troppe richieste»: l'importazione riprende.
+    /// Expires [`RATE_LIMIT_PAUSE`] after a "troppe richieste": the import resumes.
     Resume,
 }
 
-/// Dove va un brano importato. Una risposta per una scelta superata si scarta.
+/// Where an imported track goes. A reply for a superseded choice is discarded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportTarget {
-    /// In fondo a una playlist locale (e fuori dai suoi brani «in arrivo»).
+    /// At the end of a local playlist (and outside its "in arrivo" tracks).
     Playlist(Uuid),
-    /// In coda, dopo il brano che sta partendo.
+    /// In the queue, after the track that is starting.
     Queue,
-    /// Il primo brano di «Riproduci», con il numero della scelta.
+    /// The first track of "Riproduci", with the number of the choice.
     Start(u64),
-    /// Il brano premuto nella ricerca, con il numero della scelta.
+    /// The track pressed in the search, with the number of the choice.
     Click(u64),
 }
 
-/// I lavori asincroni del dominio (rete), che l'host esegue sul runtime.
+/// The domain's async jobs (network), which the host runs on the runtime.
 #[derive(Debug)]
 pub(crate) enum Job {
-    /// I brani di una playlist esterna; `ticket` è il numero dell'apertura.
+    /// The tracks of an external playlist; `ticket` is the number of the opening.
     Playlist { api: Result<ApiClient, AppError>, ticket: u64, source: SourceKind, id: String },
-    /// Porta un brano (o un item di Archive) nel catalogo.
+    /// Brings a track (or an Archive item) into the catalog.
     Import { api: Result<ApiClient, AppError>, target: ImportTarget, key: Importing, video: bool },
-    /// I brani popolari e la discografia di un artista dal catalogo ufficiale.
+    /// The popular tracks and the discography of an artist from the official catalog.
     Artist { api: Result<ApiClient, AppError>, id: Uuid, name: String },
 }
 
-/// L'esito di un [`Job`], che torna al dominio.
+/// The outcome of a [`Job`], which goes back to the domain.
 #[derive(Debug)]
 pub(crate) enum Done {
     Playlist { ticket: u64, source: SourceKind, result: Result<Box<SourcePlaylistPage>, AppError> },
@@ -250,23 +274,23 @@ pub(crate) enum Done {
     Artist { id: Uuid, result: Result<Box<MetaArtistPage>, AppError> },
 }
 
-/// L'esito di un lavoro andato perso.
+/// The outcome of a job that was lost.
 fn lost<T>() -> Result<T, AppError> {
     Err(AppError::Network)
 }
 
-/// Il primo brano che il server ha importato.
+/// The first track the server has imported.
 fn first_track(result: Result<Box<DiscoverImport>, AppError>) -> Option<Track> {
     result.ok().and_then(|imported| imported.tracks.into_iter().next())
 }
 
-/// L'importazione si è fermata per le troppe richieste.
+/// The import stopped for too many requests.
 fn rate_limited(result: &Result<Box<DiscoverImport>, AppError>) -> bool {
     matches!(result, Err(AppError::Api { code, .. }) if code == "rate_limited")
 }
 
-/// Un brano di una playlist salvata, importato (o no): aspetta il passaggio, che legge la libreria
-/// per sapere se la playlist ha finito.
+/// A track of a saved playlist, imported (or not): it waits for the passing, which reads the library
+/// to know whether the playlist has finished.
 #[derive(Debug)]
 struct Landed {
     playlist: Uuid,
@@ -275,7 +299,7 @@ struct Landed {
     track: Option<Track>,
 }
 
-/// Una playlist da salvare: il passaggio la crea se la libreria ha posto.
+/// A playlist to save: the passing creates it if the library has room.
 #[derive(Debug)]
 struct Save {
     id: Uuid,
@@ -283,54 +307,54 @@ struct Save {
     items: Arc<[SourceItem]>,
 }
 
-/// Le importazioni: una richiesta alla volta (il server ne regge poche).
+/// The imports: one request at a time (the server handles few).
 #[derive(Debug, Default)]
 struct Imports {
-    /// Brani da ascoltare di una playlist non salvata.
+    /// Tracks to listen to of an unsaved playlist.
     queue: VecDeque<SourceItem>,
-    /// Il prossimo brano della coda sostituisce quella attuale (il primo di «Riproduci» che non si è
-    /// potuto importare).
+    /// The next track of the queue replaces the current one (the first of "Riproduci" that could
+    /// not be imported).
     start_queue: bool,
-    /// Le importazioni della coda portano il videoclip.
+    /// The queue's imports carry the music video.
     video: bool,
-    /// L'importazione in sottofondo.
+    /// The background import.
     in_flight: Option<(ImportTarget, SourceKind, String)>,
-    /// Il primo brano di «Riproduci», con il numero della scelta.
+    /// The first track of "Riproduci", with the number of the choice.
     starting: Option<(u64, SourceItem)>,
-    /// Il brano premuto nella ricerca, con il numero della scelta.
+    /// The track pressed in the search, with the number of the choice.
     clicking: Option<(u64, Importing)>,
-    /// Il numero dell'ultima scelta («Riproduci» o un brano premuto): l'ultima vince.
+    /// The number of the last choice ("Riproduci" or a track pressed): the last one wins.
     picks: u64,
-    /// In pausa dopo un «troppe richieste».
+    /// Paused after a "troppe richieste".
     paused: bool,
-    /// Brani non importati per ogni playlist, per l'avviso finale.
+    /// Tracks not imported for each playlist, for the final notice.
     failed: HashMap<Uuid, usize>,
 }
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug)]
 pub(crate) struct External {
     pub(crate) view: Arc<ExternalView>,
     api: Result<ApiClient, AppError>,
     server: Option<String>,
-    /// Il numero dell'ultima apertura di una playlist: le risposte di una precedente si scartano.
+    /// The number of the last opening of a playlist: the replies of an earlier one are discarded.
     ticket: u64,
-    /// L'ordine d'uso delle schede degli artisti, la meno usata in testa.
+    /// The order of use of the artists' sheets, the least used at the head.
     recency: VecDeque<Uuid>,
-    /// Gli artisti seguiti di cui si è già cercata la foto in questa sessione.
+    /// The followed artists whose photo has already been looked for in this session.
     asked: HashSet<Uuid>,
     imports: Imports,
     landed: Vec<Landed>,
     saves: Vec<Save>,
-    /// Il numero dell'ultimo evento.
+    /// The number of the last event.
     events: u64,
-    /// La pagina dell'artista aperta che ha già avviato la sua scheda.
+    /// The open artist page that has already started its sheet.
     seen_artist: Option<(Uuid, Arc<ArtistPage>)>,
-    /// L'ultimo avvio di brano visto: ne parte uno nuovo, e si cerca la foto del suo artista.
+    /// The last track start seen: a new one starts, and its artist's photo is looked for.
     seen_started: u64,
-    /// Il core è appena partito: le foto degli artisti seguiti si cercano alla prima occasione.
+    /// The core has just started: the photos of the followed artists are looked for at the first chance.
     startup: bool,
-    /// Ciò che il dominio chiede alle altre, in attesa del passaggio.
+    /// What the domain asks of the others, waiting for the passing.
     library: Vec<LibraryCmd>,
     playback: Vec<PlaybackCmd>,
     catalog: Vec<CatalogCmd>,
@@ -343,7 +367,7 @@ impl Default for External {
 }
 
 impl External {
-    /// Il dominio con il backend scelto nelle impostazioni.
+    /// The domain with the backend chosen in the settings.
     pub(crate) fn new(server: Option<String>) -> Self {
         Self {
             view: Arc::default(),
@@ -369,6 +393,11 @@ impl External {
         Arc::make_mut(&mut self.view)
     }
 
+    /// Remembers that `key` became `track` on the server.
+    fn link(&mut self, key: Importing, track: &Track) {
+        Arc::make_mut(&mut self.view_mut().links).put(key, track);
+    }
+
     fn api(&self) -> Result<ApiClient, AppError> {
         self.api.clone()
     }
@@ -377,30 +406,30 @@ impl External {
         effects.push(Effect::Run(effect::Job::External(job)));
     }
 
-    // ---------- Passaggio fra i domini ----------
+    // ---------- Passing between domains ----------
 
-    /// Ciò che il dominio chiede alla libreria, e lo svuota.
+    /// What the domain asks of the library, and empties it.
     pub(crate) fn take_library(&mut self) -> Vec<LibraryCmd> {
         std::mem::take(&mut self.library)
     }
 
-    /// Ciò che il dominio chiede alla riproduzione, e lo svuota.
+    /// What the domain asks of playback, and empties it.
     pub(crate) fn take_playback(&mut self) -> Vec<PlaybackCmd> {
         std::mem::take(&mut self.playback)
     }
 
-    /// Ciò che il dominio chiede al catalogo, e lo svuota.
+    /// What the domain asks of the catalog, and empties it.
     pub(crate) fn take_catalog(&mut self) -> Vec<CatalogCmd> {
         std::mem::take(&mut self.catalog)
     }
 
-    /// Il core è appena partito: le foto degli artisti si cercano alla prima occasione.
+    /// The core has just started: the artists' photos are looked for at the first chance.
     pub(crate) fn start(&mut self) {
         self.startup = true;
     }
 
-    /// Il backend scelto nelle impostazioni è cambiato: il client HTTP si rifà e le schede degli
-    /// artisti, che sono di un altro server, si buttano.
+    /// The backend chosen in the settings has changed: the HTTP client is made again and the artists'
+    /// sheets, which belong to another server, are thrown away.
     pub(crate) fn set_server(&mut self, server: &Option<String>) {
         if self.server == *server {
             return;
@@ -415,9 +444,9 @@ impl External {
         }
     }
 
-    /// Il passaggio dopo ogni ingresso, prima che le altre vedano ciò che il dominio chiede: salva le
-    /// playlist chieste, sistema i brani arrivati in una playlist (che hanno bisogno della libreria
-    /// per dire se ha finito) e avvia le schede degli artisti che servono.
+    /// The passing after each input, before the others see what the domain asks: it saves the
+    /// playlists asked for, sorts out the tracks that arrived in a playlist (which need the library
+    /// to say whether it has finished) and starts the artists' sheets that are needed.
     pub(crate) fn settle(
         &mut self,
         library: &LibraryView,
@@ -427,8 +456,8 @@ impl External {
     ) {
         self.create_playlists(library);
         self.land(library);
-        // La pagina dell'artista aperta: la sua scheda «Altro di …» si chiede una volta, e di nuovo se
-        // la pagina torna (una pagina nuova, o la stessa dopo essere stata altrove).
+        // The open artist page: its "Altro di …" sheet is asked once, and again if
+        // the page comes back (a new page, or the same one after having been elsewhere).
         match &catalog.artist {
             Some((id, Load::Ready(page))) => {
                 let known =
@@ -440,8 +469,8 @@ impl External {
             }
             _ => self.seen_artist = None,
         }
-        // Un altro brano suona, o il core è appena partito: l'artista in corso e gli artisti seguiti
-        // senza foto prendono la loro dal catalogo ufficiale.
+        // Another track plays, or the core has just started: the current artist and the followed artists
+        // without a photo take theirs from the official catalog.
         let started = playback.started != self.seen_started;
         self.seen_started = playback.started;
         if started || std::mem::take(&mut self.startup) {
@@ -449,7 +478,7 @@ impl External {
         }
     }
 
-    /// Crea le playlist salvate dalla playlist aperta, se la libreria ha ancora posto.
+    /// Creates the saved playlists from the open playlist, if the library still has room.
     fn create_playlists(&mut self, library: &LibraryView) {
         let mut created = 0;
         for Save { id, name, items } in std::mem::take(&mut self.saves) {
@@ -468,18 +497,18 @@ impl External {
         }
     }
 
-    /// I brani arrivati per una playlist salvata vanno alla libreria; se era l'ultimo, la playlist è
-    /// pronta e il catalogo è cambiato.
+    /// The tracks that arrived for a saved playlist go to the library; if it was the last, the playlist is
+    /// ready and the catalog has changed.
     fn land(&mut self, library: &LibraryView) {
         for Landed { playlist, source, id, track } in std::mem::take(&mut self.landed) {
             let waiting = |item: &SourceItem| item.source == source && item.id == id;
-            // La playlist può essere sparita, o il brano non essere più da importare: niente da fare.
+            // The playlist may have vanished, or the track no longer to be imported: nothing to do.
             let found = library.playlists.iter().find(|p| p.id == playlist);
             let Some(found) = found.filter(|p| p.pending.iter().any(waiting)) else {
                 self.imports.failed.remove(&playlist);
                 continue;
             };
-            // Com'è la playlist dopo il comando: serve per l'avviso di fine importazione.
+            // What the playlist is like after the command: needed for the end-of-import notice.
             let added = track.as_ref().is_some_and(|t| !found.contains(t.id));
             let finished = found.pending.iter().all(waiting);
             let summary = finished.then(|| (found.name.clone(), found.tracks.len() + usize::from(added)));
@@ -487,6 +516,7 @@ impl External {
                 *self.imports.failed.entry(playlist).or_default() += 1;
             }
             if let Some(track) = &track {
+                self.link(Importing::Source(source, id.clone()), track);
                 self.raise(ExternalEvent::Imported(Arc::from(vec![track.clone()])));
             }
             self.library.push(LibraryCmd::ImportedToPlaylist { id: playlist, source, item: id, track });
@@ -498,9 +528,9 @@ impl External {
         }
     }
 
-    /// L'artista del brano in corso e quelli seguiti senza foto: la scheda dal catalogo ufficiale
-    /// dice anche la foto, che va all'artista seguito. Un artista seguito si chiede una volta per
-    /// sessione.
+    /// The artist of the track playing and the followed ones without a photo: the sheet from the official catalog
+    /// also says the photo, which goes to the followed artist. A followed artist is asked once per
+    /// session.
     fn photos(&mut self, library: &LibraryView, playback: &PlaybackView, effects: &mut Vec<Effect>) {
         if let Some(track) = playback.queue.current() {
             self.ensure_artist(track.artist.id, track.artist.name.clone(), effects);
@@ -520,9 +550,9 @@ impl External {
         }
     }
 
-    /// Avvia, se serve, la prossima importazione: prima i brani da ascoltare, poi le playlist
-    /// salvate. Una alla volta, e mai in pausa. Il passaggio la chiama dopo aver dato alla libreria
-    /// ciò che il dominio aveva chiesto, così non rilegge un brano appena importato.
+    /// Starts, if needed, the next import: first the tracks to listen to, then the saved
+    /// playlists. One at a time, and never when paused. The passing calls it after giving the library
+    /// what the domain had asked, so it does not reread a track just imported.
     pub(crate) fn pace(&mut self, library: &LibraryView, effects: &mut Vec<Effect>) {
         let imports = &self.imports;
         if imports.in_flight.is_some() || imports.starting.is_some() || imports.paused {
@@ -537,14 +567,14 @@ impl External {
         };
         let Some((target, item)) = next else { return };
         self.imports.in_flight = Some((target, item.source, item.id.clone()));
-        // I brani da ascoltare arrivano con il videoclip, se chi ascolta lo mostra.
+        // The tracks to listen to arrive with the music video, if whoever listens shows it.
         let video = self.imports.video && target == ImportTarget::Queue;
         let key = Importing::Source(item.source, item.id);
         Self::run(effects, Job::Import { api: self.api(), target, key, video });
         self.publish_imports();
     }
 
-    // ---------- Comandi ----------
+    // ---------- Commands ----------
 
     pub(crate) fn apply(&mut self, command: ExternalCmd, _now: Instant, effects: &mut Vec<Effect>) {
         match command {
@@ -587,7 +617,7 @@ impl External {
 
     pub(crate) fn fire(&mut self, timer: Timer, _now: Instant, _effects: &mut Vec<Effect>) {
         match timer {
-            // Il passaggio che segue riavvia l'importazione dallo stesso brano.
+            // The passing that follows restarts the import from the same track.
             Timer::Resume => {
                 self.imports.paused = false;
                 self.publish_imports();
@@ -595,7 +625,7 @@ impl External {
         }
     }
 
-    // ---------- Playlist aperta ----------
+    // ---------- Open playlist ----------
 
     fn open_playlist(&mut self, playlist: SourcePlaylist, force: bool, effects: &mut Vec<Effect>) {
         let same = !force
@@ -613,10 +643,10 @@ impl External {
         Self::run(effects, Job::Playlist { api: self.api(), ticket: self.ticket, source, id });
     }
 
-    // ---------- Importazioni ----------
+    // ---------- Imports ----------
 
-    /// Importa subito il primo brano, anche se un'altra importazione è in corso: chi ha premuto play
-    /// non aspetta la fila. Gli altri entrano in coda dopo, uno alla volta.
+    /// Imports the first track at once, even if another import is in progress: whoever pressed play
+    /// does not wait in the line. The others enter the queue afterwards, one at a time.
     fn play_imported(&mut self, mut queue: VecDeque<SourceItem>, video: bool, effects: &mut Vec<Effect>) {
         let Some(first) = queue.pop_front() else { return };
         let imports = &mut self.imports;
@@ -631,7 +661,7 @@ impl External {
         self.publish_imports();
     }
 
-    /// Importa un brano premuto nella ricerca e lo suona: uno alla volta.
+    /// Imports a track pressed in the search and plays it: one at a time.
     fn play_one(&mut self, key: Importing, video: bool, effects: &mut Vec<Effect>) {
         if self.imports.clicking.is_some() {
             return;
@@ -643,7 +673,7 @@ impl External {
         self.publish_imports();
     }
 
-    /// L'importazione si ferma per [`RATE_LIMIT_PAUSE`]: il brano resta il primo da importare.
+    /// The import stops for [`RATE_LIMIT_PAUSE`]: the track stays the first to be imported.
     fn pause(&mut self, effects: &mut Vec<Effect>) {
         self.imports.paused = true;
         effects.push(Effect::Timer { key: TimerKey::External(Timer::Resume), after: RATE_LIMIT_PAUSE });
@@ -659,7 +689,7 @@ impl External {
             ImportTarget::Click(pick) => self.clicked(pick, result),
             ImportTarget::Start(play) => self.started(play, result, effects),
             ImportTarget::Queue | ImportTarget::Playlist(_) => {
-                // Una risposta che non è quella in corso (la coda è stata cambiata) si ignora.
+                // A reply that is not the one in progress (the queue has been changed) is ignored.
                 if !matches!(&self.imports.in_flight, Some((current, ..)) if *current == target) {
                     return;
                 }
@@ -671,7 +701,7 @@ impl External {
                 let track = first_track(result);
                 match target {
                     ImportTarget::Playlist(playlist) => {
-                        // La playlist cambia nella libreria, e il passaggio dice se ha finito.
+                        // The playlist changes in the library, and the passing says whether it has finished.
                         self.landed.push(Landed { playlist, source, id, track });
                     }
                     _ => self.imported_to_queue(source, &id, track),
@@ -680,12 +710,18 @@ impl External {
         }
     }
 
-    /// Il brano premuto nella ricerca è arrivato: parte, con tutti i brani che l'item ha portato.
+    /// The track pressed in the search has arrived: it starts, with all the tracks the item brought.
     fn clicked(&mut self, pick: u64, result: Result<Box<DiscoverImport>, AppError>) {
-        if matches!(self.imports.clicking, Some((current, _)) if current == pick) {
-            self.imports.clicking = None;
+        let key = match &self.imports.clicking {
+            Some((current, _)) if *current == pick => self.imports.clicking.take().map(|(_, key)| key),
+            _ => None,
+        };
+        if let (Some(key), Ok(imported)) = (key, &result)
+            && let Some(first) = imported.tracks.first()
+        {
+            self.link(key, first);
         }
-        // Chi ascolta ha scelto altro nel frattempo: l'ultima scelta vince.
+        // Whoever listens has chosen something else in the meantime: the last choice wins.
         if pick != self.imports.picks {
             return;
         }
@@ -693,7 +729,7 @@ impl External {
             Ok(imported) if !imported.tracks.is_empty() => {
                 let tracks: Arc<[Track]> = Arc::from(imported.tracks);
                 self.raise(ExternalEvent::Imported(Arc::clone(&tracks)));
-                // Il catalogo è cambiato: Home e Libreria si ricaricano alla prossima visita.
+                // The catalog has changed: Home and Library reload at the next visit.
                 self.catalog.push(CatalogCmd::Changed);
                 self.playback.push(PlaybackCmd::Play { tracks, start: 0 });
             }
@@ -702,44 +738,46 @@ impl External {
         }
     }
 
-    /// Il primo brano di «Riproduci» è arrivato: parte, e la fila riprende con il resto della coda.
+    /// The first track of "Riproduci" has arrived: it starts, and the line resumes with the rest of the queue.
     fn started(
         &mut self,
         play: u64,
         result: Result<Box<DiscoverImport>, AppError>,
         effects: &mut Vec<Effect>,
     ) {
-        // Una scelta più recente ha preso il suo posto.
+        // A more recent choice has taken its place.
         if !matches!(&self.imports.starting, Some((current, _)) if *current == play) {
             return;
         }
         let Some((_, item)) = self.imports.starting.take() else { return };
         if rate_limited(&result) {
-            // Torna il primo della coda: parte quando la fila riprende, dopo la pausa.
+            // The first of the queue comes back: it starts when the line resumes, after the pause.
             self.imports.queue.push_front(item);
             self.imports.start_queue = true;
             self.pause(effects);
             return;
         }
         let Some(track) = first_track(result) else {
-            // Non disponibile: parte il prossimo che arriva.
+            // Not available: the next one that arrives starts.
             self.imports.start_queue = true;
             return;
         };
+        self.link(Importing::Source(item.source, item.id), &track);
         self.raise(ExternalEvent::Imported(Arc::from(vec![track.clone()])));
         self.catalog.push(CatalogCmd::Changed);
         self.playback.push(PlaybackCmd::Play { tracks: Arc::from(vec![track]), start: 0 });
     }
 
-    /// Un brano della coda di «Riproduci» è arrivato: in coda, o a sostituirla se il primo non c'era.
+    /// A track of the "Riproduci" queue has arrived: in the queue, or replacing it if the first was missing.
     fn imported_to_queue(&mut self, source: SourceKind, id: &str, track: Option<Track>) {
         let imports = &mut self.imports;
-        // «Riproduci» premuto di nuovo nel frattempo: la coda è un'altra.
+        // "Riproduci" pressed again in the meantime: the queue is another one.
         if !imports.queue.front().is_some_and(|item| item.source == source && item.id == id) {
             return;
         }
         imports.queue.pop_front();
         let Some(track) = track else { return };
+        self.link(Importing::Source(source, id.to_owned()), &track);
         let start = std::mem::take(&mut self.imports.start_queue);
         self.raise(ExternalEvent::Imported(Arc::from(vec![track.clone()])));
         if start {
@@ -750,7 +788,7 @@ impl External {
         }
     }
 
-    /// Rifà la parte della vista che riguarda le importazioni, se è cambiata.
+    /// Redoes the part of the view that concerns the imports, if it has changed.
     fn publish_imports(&mut self) {
         let imports = &self.imports;
         let next = ImportsView {
@@ -765,9 +803,9 @@ impl External {
         }
     }
 
-    // ---------- Schede degli artisti ----------
+    // ---------- Artists' sheets ----------
 
-    /// Porta la scheda in fondo all'elenco d'uso; restituisce le schede che escono per fare posto.
+    /// Puts the sheet at the end of the use list; returns the sheets that go out to make room.
     fn touch(&mut self, id: Uuid) -> Vec<Uuid> {
         self.recency.retain(|seen| *seen != id);
         self.recency.push_back(id);
@@ -778,7 +816,7 @@ impl External {
         evicted
     }
 
-    /// Mette la scheda nella vista e fa uscire le più vecchie oltre il limite.
+    /// Puts the sheet in the view and lets the oldest go out beyond the limit.
     fn put_artist(&mut self, id: Uuid, load: Load<ArtistExtras>) {
         let evicted = self.touch(id);
         let artists = Arc::make_mut(&mut self.view_mut().artists);
@@ -788,8 +826,8 @@ impl External {
         }
     }
 
-    /// La scheda «Altro di …» dell'artista, una volta per sessione: se è già pronta o in arrivo non fa
-    /// niente (un errore si riprova alla prossima occasione).
+    /// The artist's "Altro di …" sheet, once per session: if it is already ready or on its way it does
+    /// nothing (an error is retried at the next chance).
     fn ensure_artist(&mut self, id: Uuid, name: String, effects: &mut Vec<Effect>) {
         if matches!(self.view.artists.get(&id), Some(load) if !load.needs_load()) {
             self.touch(id);
@@ -805,7 +843,7 @@ impl External {
             top: Arc::from(page.top),
             albums: Arc::from(page.albums),
         });
-        // Un artista seguito senza foto prende quella del catalogo ufficiale.
+        // A followed artist without a photo takes the one from the official catalog.
         if let Ok(extras) = &extras
             && let Some(photo) = &extras.artist.image_url
         {
@@ -828,12 +866,12 @@ impl External {
         }
     }
 
-    // ---------- Risposte ----------
+    // ---------- Replies ----------
 
     pub(crate) fn done(&mut self, done: Done, _now: Instant, effects: &mut Vec<Effect>) {
         match done {
             Done::Playlist { ticket, source, result } => {
-                // Una risposta per un'apertura superata, o per un'altra fonte, si ignora.
+                // A reply for a superseded opening, or for another source, is ignored.
                 if ticket != self.ticket {
                     return;
                 }
@@ -886,8 +924,8 @@ impl Job {
         }
     }
 
-    /// Se il lavoro va perso, l'esito è un errore di rete: il dominio non resta ad aspettare (una
-    /// playlist non resta «in caricamento» per sempre, e la fila delle importazioni va avanti).
+    /// If the job is lost, the outcome is a network error: the domain does not keep waiting (a
+    /// playlist does not stay "in caricamento" forever, and the import line goes on).
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::Playlist { ticket, source, .. } => {
@@ -962,8 +1000,8 @@ mod tests {
         Err(AppError::Api { status: 429, code: "rate_limited".into(), message: "Troppe richieste".into() })
     }
 
-    /// Lo stato di tutto il core con un orologio finto che si sposta a mano: il dominio gira con gli
-    /// altri, come nel core vero, perché il passo successivo di una playlist dipende dalla libreria.
+    /// The state of the whole core with a fake clock that is moved by hand: the domain runs with the
+    /// others, as in the real core, because the next step of a playlist depends on the library.
     struct Rig {
         state: CoreState,
         now: Instant,
@@ -994,7 +1032,7 @@ mod tests {
             self.input(Input::Done(effect::Done::External(done)))
         }
 
-        /// Un'importazione finita; `target` è quello del lavoro chiesto.
+        /// An import finished; `target` is that of the job asked for.
         fn imported(
             &mut self,
             target: ImportTarget,
@@ -1015,17 +1053,17 @@ mod tests {
             Arc::clone(&self.state.external.view)
         }
 
-        /// Gli eventi, dal più vecchio.
+        /// The events, from the oldest.
         fn events(&self) -> Vec<ExternalEvent> {
             self.view().events.iter().map(|raised| raised.event.clone()).collect()
         }
 
-        /// I brani nella coda di ascolto, in ordine.
+        /// The tracks in the listening queue, in order.
         fn queue(&self) -> Vec<Uuid> {
             self.state.playback.view.queue.tracks_in_order().into_iter().map(|t| t.id).collect()
         }
 
-        /// Chi ascolta fa partire questi brani (la coda è la loro).
+        /// Whoever listens starts these tracks (the queue is theirs).
         fn play(&mut self, tracks: Vec<Track>) {
             self.input(Input::Command(Command::Playback(PlaybackCmd::Play {
                 tracks: tracks.into(),
@@ -1037,7 +1075,7 @@ mod tests {
             self.state.library.view.playlists.iter().find(|p| p.id == id).cloned()
         }
 
-        /// Apre la playlist «Sera» con questi brani.
+        /// Opens the playlist "Sera" with these tracks.
         fn open(&mut self, items: Vec<SourceItem>) {
             let playlist = evening();
             self.cmd(ExternalCmd::OpenPlaylist(playlist.clone()));
@@ -1045,7 +1083,7 @@ mod tests {
             self.done(Done::Playlist { ticket, source: playlist.source, result: page(&playlist, items) });
         }
 
-        /// Apre e salva la playlist «Sera»: restituisce la playlist e gli effetti del salvataggio.
+        /// Opens and saves the playlist "Sera": returns the playlist and the save's effects.
         fn save(&mut self, items: Vec<SourceItem>) -> (Uuid, Vec<Effect>) {
             self.open(items);
             let playlist = id(100);
@@ -1064,7 +1102,7 @@ mod tests {
             .collect()
     }
 
-    /// Le importazioni chieste: dove vanno, che cosa, con il videoclip o no.
+    /// The imports asked for: where they go, what, with the music video or not.
     fn imports(effects: &[Effect]) -> Vec<(ImportTarget, Importing, bool)> {
         jobs(effects)
             .into_iter()
@@ -1089,9 +1127,9 @@ mod tests {
             .collect()
     }
 
-    // ---------- Importazioni di una playlist salvata ----------
+    // ---------- Imports of a saved playlist ----------
 
-    /// `imports_run_one_at_a_time`, e la correzione di BACKLOG 8: l'avviso finale concorda in numero.
+    /// `imports_run_one_at_a_time`, and the correction of BACKLOG 8: the final notice agrees in number.
     #[test]
     fn imports_run_one_at_a_time() {
         let mut rig = Rig::new();
@@ -1105,7 +1143,7 @@ mod tests {
         assert!(rig.view().importing(SourceKind::Deezer, "a"));
         assert_eq!(rig.playlist(playlist).map(|p| p.pending.len()), Some(3));
 
-        // Un altro ingresso, qualunque, non avvia una seconda richiesta.
+        // Another entry, whichever, does not start a second request.
         assert!(imports(&rig.library(LibraryCmd::MarkNewsSeen)).is_empty(), "una richiesta alla volta");
 
         assert_eq!(imports(&rig.imported(target, one(1))), [(target, deezer("b"), false)]);
@@ -1128,9 +1166,9 @@ mod tests {
         assert_eq!(ready.message(), Some("«Sera» è pronta: 2 brani, 1 non disponibile.".into()));
     }
 
-    /// Il passo 4.2 lo faceva aspettare la vista pubblicata; ora la playlist cambia nello stesso giro
-    /// in cui arriva il brano, e il prossimo parte senza che nessun frontend rilegga niente: mai due
-    /// volte lo stesso brano, mai uno saltato.
+    /// Step 4.2 made it wait for the published view; now the playlist changes in the same round
+    /// in which the track arrives, and the next starts without any frontend rereading anything: never twice
+    /// the same track, never one skipped.
     #[test]
     fn the_next_import_follows_in_the_same_turn_and_never_repeats() {
         let mut rig = Rig::new();
@@ -1156,15 +1194,15 @@ mod tests {
         assert!(imports(&rig.library(LibraryCmd::MarkNewsSeen)).is_empty(), "in pausa non parte nulla");
         assert_eq!(rig.playlist(playlist).map(|p| p.pending.len()), Some(2), "il brano resta da importare");
 
-        // Dopo venti secondi si riprende, dallo stesso brano.
+        // After twenty seconds it resumes, from the same track.
         rig.wait(RATE_LIMIT_PAUSE);
         let effects = rig.fire();
         assert_eq!(imports(&effects), [(target, deezer("a"), false)]);
         assert!(!rig.view().imports.paused);
     }
 
-    /// La playlist è sparita mentre un brano si importava: il suo arrivo non fa nulla e la fila passa
-    /// alle altre playlist.
+    /// The playlist vanished while a track was being imported: its arrival does nothing and the line passes
+    /// to the other playlists.
     #[test]
     fn a_playlist_deleted_while_importing_is_skipped() {
         let mut rig = Rig::new();
@@ -1180,7 +1218,7 @@ mod tests {
         );
     }
 
-    /// All'avvio le playlist con brani ancora da importare riprendono da dove erano.
+    /// At startup the playlists with tracks still to be imported resume from where they were.
     #[test]
     fn the_first_turn_resumes_a_saved_playlist_where_it_stopped() {
         let mut playlist = Playlist::new("Sera", Vec::new());
@@ -1192,7 +1230,7 @@ mod tests {
         assert_eq!(imports(&effects), [(ImportTarget::Playlist(playlist.id), deezer("b"), false)]);
     }
 
-    // ---------- Ascoltare una playlist ----------
+    // ---------- Listening to a playlist ----------
 
     #[test]
     fn listening_imports_the_first_track_at_once_and_queues_the_rest_one_by_one() {
@@ -1205,12 +1243,12 @@ mod tests {
         assert!(rig.view().importing(SourceKind::Deezer, "a"));
         let home = rig.state.catalog.home_epoch();
 
-        // Il primo arriva: suona, il catalogo è cambiato, e la fila riprende con il videoclip.
+        // The first arrives: it plays, the catalog has changed, and the line resumes with the music video.
         let effects = rig.imported(start, one(1));
         assert_eq!(rig.queue(), [id(1)]);
         assert_eq!(rig.state.catalog.home_epoch(), home + 1);
         assert_eq!(imports(&effects), [(ImportTarget::Queue, deezer("b"), true)]);
-        // Gli altri si accodano, in ordine, uno alla volta.
+        // The others queue up, in order, one at a time.
         let effects = rig.imported(ImportTarget::Queue, one(2));
         assert_eq!(rig.queue(), [id(1), id(2)]);
         assert_eq!(imports(&effects), [(ImportTarget::Queue, deezer("c"), true)]);
@@ -1231,7 +1269,7 @@ mod tests {
         assert_eq!(rig.view().imports.queued, 1);
     }
 
-    /// Se il primo non è disponibile parte il primo che arriva dopo di lui.
+    /// If the first is not available, the first one that arrives after it starts.
     #[test]
     fn an_unavailable_first_track_hands_the_start_to_the_next_one() {
         let mut rig = Rig::new();
@@ -1262,7 +1300,7 @@ mod tests {
         assert_eq!(rig.queue(), [id(1)], "il primo, arrivato dopo la pausa, suona");
     }
 
-    /// Un «Riproduci» più recente prende il posto del precedente: la risposta tardiva non suona.
+    /// A more recent "Riproduci" takes the previous one's place: the late reply does not play.
     #[test]
     fn the_last_pick_wins_over_a_late_answer() {
         let mut rig = Rig::new();
@@ -1296,7 +1334,7 @@ mod tests {
         assert_eq!(imports(&effects), [(ImportTarget::Start(1), deezer("t2"), false)]);
     }
 
-    // ---------- Suonare un risultato della ricerca ----------
+    // ---------- Playing a search result ----------
 
     #[test]
     fn a_pressed_result_is_imported_and_played_with_all_its_tracks() {
@@ -1306,7 +1344,7 @@ mod tests {
         let click = ImportTarget::Click(1);
         assert_eq!(imports(&effects), [(click, deezer("7"), true)]);
         assert!(rig.view().importing(SourceKind::Deezer, "7"));
-        // Finché uno è in corso, un altro play (o un item di Archive) aspetta.
+        // While one is in progress, another play (or an Archive item) waits.
         let effects =
             rig.cmd(ExternalCmd::PlaySource { source: SourceKind::Deezer, id: "8".into(), video: false });
         assert!(imports(&effects).is_empty());
@@ -1319,6 +1357,33 @@ mod tests {
         assert_eq!(rig.state.catalog.home_epoch(), home + 1, "il catalogo è cambiato");
         assert!(matches!(rig.events().last(), Some(ExternalEvent::Imported(tracks)) if tracks.len() == 2));
         assert_eq!(rig.view().imports, ImportsView::default());
+    }
+
+    /// A row of the catalogue finds the server track it became, whichever way it was imported.
+    #[test]
+    fn every_import_remembers_the_server_track_it_became() {
+        let mut rig = Rig::new();
+        rig.cmd(ExternalCmd::PlaySource { source: SourceKind::Deezer, id: "7".into(), video: false });
+        rig.imported(ImportTarget::Click(1), one(70));
+        assert_eq!(rig.view().links.track(&deezer("7")).map(|t| t.id), Some(id(70)));
+
+        rig.open(vec![item("a"), item("b")]);
+        rig.cmd(ExternalCmd::PlayPlaylist { start: 0, video: false });
+        rig.imported(ImportTarget::Start(2), one(1));
+        rig.imported(ImportTarget::Queue, missing());
+        assert_eq!(rig.view().links.track(&deezer("a")).map(|t| t.id), Some(id(1)));
+        assert_eq!(rig.view().links.track(&deezer("b")), None, "not available: no link");
+
+        rig.cmd(ExternalCmd::PlayArchive { identifier: "marea".into() });
+        rig.imported(ImportTarget::Click(3), one(9));
+        assert_eq!(rig.view().links.track(&Importing::Archive("marea".into())).map(|t| t.id), Some(id(9)));
+
+        let mut links = ImportLinks::default();
+        for n in 0..=LINKS {
+            links.put(deezer(&n.to_string()), &track(n as u128));
+        }
+        assert_eq!(links.track(&deezer("0")), None, "the oldest goes past the limit");
+        assert!(links.track(&deezer(&LINKS.to_string())).is_some());
     }
 
     #[test]
@@ -1362,8 +1427,8 @@ mod tests {
         );
     }
 
-    /// Chi preme altro mentre un brano si importa non se lo ritrova sopra: l'ultima scelta vince, e
-    /// «Apro…» sparisce comunque.
+    /// Whoever presses another while a track is being imported does not find it above: the last choice wins, and
+    /// "Apro…" disappears anyway.
     #[test]
     fn a_pressed_result_loses_to_a_later_pick() {
         let mut rig = Rig::new();
@@ -1377,7 +1442,7 @@ mod tests {
         assert_eq!(rig.queue(), [id(1)]);
     }
 
-    // ---------- Playlist aperta ----------
+    // ---------- Open playlist ----------
 
     #[test]
     fn opening_loads_once_and_late_answers_are_dropped() {
@@ -1395,7 +1460,7 @@ mod tests {
         assert!(matches!(rig.view().open.as_ref().map(|o| &o.items), Some(Load::Loading)));
         assert!(jobs(&rig.cmd(ExternalCmd::OpenPlaylist(first.clone()))).is_empty(), "già in arrivo");
 
-        // Un'altra playlist prende il posto: la risposta della prima non conta.
+        // Another playlist takes the place: the first one's reply does not count.
         let second = SourcePlaylist { id: "album/2".into(), title: "Mattino".into(), ..evening() };
         rig.cmd(ExternalCmd::OpenPlaylist(second.clone()));
         rig.done(Done::Playlist {
@@ -1413,7 +1478,7 @@ mod tests {
         assert_eq!(open.playlist.title, "Mattino");
         assert_eq!(open.items.ready().map(|items| items.len()), Some(1));
 
-        // Pronta: riaprirla non fa niente.
+        // Ready: reopening it does nothing.
         assert!(jobs(&rig.cmd(ExternalCmd::OpenPlaylist(second))).is_empty());
     }
 
@@ -1428,7 +1493,7 @@ mod tests {
 
         rig.done(Done::Playlist { ticket: 1, source: SourceKind::Deezer, result: Err(AppError::Timeout) });
         assert!(matches!(rig.view().open.as_ref().map(|o| &o.items), Some(Load::Failed(AppError::Timeout))));
-        // «Riprova»: di nuovo in caricamento, con un numero nuovo; la risposta vecchia non conta.
+        // "Riprova": loading again, with a new number; the old reply does not count.
         let effects = rig.cmd(ExternalCmd::RetryPlaylist);
         assert!(matches!(jobs(&effects).as_slice(), [Job::Playlist { ticket: 2, .. }]));
         rig.done(Done::Playlist { ticket: 1, source: SourceKind::Deezer, result: Err(AppError::Network) });
@@ -1441,8 +1506,8 @@ mod tests {
         assert!(rig.view().open.as_ref().is_some_and(|o| o.items.ready().is_some()));
     }
 
-    /// Salvare: la playlist nasce subito, con tutti i brani «in arrivo», e un avviso lo dice. Non
-    /// serve nulla se non c'è una playlist pronta, se è vuota o se la libreria è piena.
+    /// Saving: the playlist is born at once, with all the tracks "in arrivo", and a notice says so. Nothing
+    /// is needed if there is no playlist ready, if it is empty or if the library is full.
     #[test]
     fn saving_creates_the_playlist_with_every_track_pending() {
         let mut rig = Rig::new();
@@ -1473,7 +1538,7 @@ mod tests {
         assert!(rig.events().is_empty(), "niente avviso per ciò che non è successo");
     }
 
-    // ---------- «Altro di …» ----------
+    // ---------- "Altro di …" ----------
 
     fn extras_page(name: &str, image: Option<&str>) -> Result<Box<MetaArtistPage>, AppError> {
         Ok(Box::new(MetaArtistPage {
@@ -1493,7 +1558,7 @@ mod tests {
         })
     }
 
-    /// Mostra nel catalogo la pagina di un artista, come farebbe il dominio del catalogo.
+    /// Shows in the catalog the page of an artist, as the catalog domain would do.
     fn show(rig: &mut Rig, page: &Arc<ArtistPage>) {
         let view =
             CatalogView { artist: Some((page.id, Load::Ready(Arc::clone(page)))), ..CatalogView::default() };
@@ -1523,7 +1588,7 @@ mod tests {
         rig.done(Done::Artist { id: id(5), result: extras_page("Artista 5", None) });
         let extras = rig.view().artist(id(5)).and_then(|load| load.ready().cloned()).expect("pronta");
         assert_eq!((extras.top.len(), extras.albums.len()), (1, 1));
-        // La stessa pagina, o un suo aggiornamento in silenzio: niente di nuovo da chiedere.
+        // The same page, or a silent update of it: nothing new to ask for.
         show(&mut rig, &artist_page(5));
         assert!(artist_jobs(&rig.library(LibraryCmd::MarkNewsSeen)).is_empty());
     }
@@ -1541,7 +1606,7 @@ mod tests {
             "stessa pagina, nessun ciclo"
         );
 
-        // L'utente va altrove e torna: la pagina riappare, e si riprova.
+        // The user goes elsewhere and comes back: the page reappears, and it is retried.
         rig.state.catalog.view = Arc::new(CatalogView::default());
         rig.library(LibraryCmd::MarkNewsSeen);
         show(&mut rig, &page);
@@ -1563,7 +1628,7 @@ mod tests {
         assert!(view.artist(id(7)).is_some() && view.artist(id(total)).is_some());
     }
 
-    /// La scheda dell'artista dà la foto a chi lo segue e non ne ha: una volta, e solo se manca.
+    /// The artist's sheet gives the photo to whoever follows them and has none: once, and only if it is missing.
     #[test]
     fn the_official_photo_goes_to_a_followed_artist_without_one() {
         use crate::config::taste::FollowedArtist;
@@ -1588,7 +1653,7 @@ mod tests {
         assert_eq!(cover(&rig, 6).as_deref(), Some("mia.png"), "una foto già scelta resta");
     }
 
-    /// All'avvio e a ogni brano che parte: l'artista in corso e i seguiti senza foto, una volta.
+    /// At startup and at each track that starts: the artist playing and the followed ones without a photo, once.
     #[test]
     fn the_photos_of_the_playing_and_the_followed_artists_are_asked_at_start_and_per_track() {
         use crate::config::taste::FollowedArtist;
@@ -1607,10 +1672,10 @@ mod tests {
         let ids: Vec<Uuid> = asked.iter().map(|(id, _)| *id).collect();
         assert_eq!(ids, [track(1).artist.id, id(10), id(12)]);
 
-        // Un altro brano parte: il suo artista è già chiesto, i seguiti non si richiedono.
+        // Another track starts: its artist is already asked, the followed ones are not asked again.
         Arc::make_mut(&mut rig.state.playback.view).started += 1;
         assert!(artist_jobs(&rig.library(LibraryCmd::MarkNewsSeen)).is_empty());
-        // Un artista nuovo in corso invece sì.
+        // A new artist playing instead is asked.
         rig.play(vec![track(2)]);
         Arc::make_mut(&mut rig.state.playback.view).started += 1;
         let ids: Vec<Uuid> =
@@ -1618,10 +1683,10 @@ mod tests {
         assert_eq!(ids, [track(2).artist.id]);
     }
 
-    // ---------- Vista, eventi, lavori persi ----------
+    // ---------- View, events, lost jobs ----------
 
-    /// Prestazioni (come in 4.2-4.6): fermo, o con ingressi che non cambiano niente, il core non
-    /// pubblica; un passo di importazione è una pubblicazione sola.
+    /// Performance (as in 4.2-4.6): idle, or with entries that change nothing, the core does not
+    /// publish; an import step is a single publish.
     #[test]
     fn idle_publishes_nothing_and_an_import_step_publishes_once() {
         let mut rig = Rig::new();
@@ -1635,7 +1700,7 @@ mod tests {
         }
         assert!(rig.state.publish(&start).is_none(), "ingressi che non cambiano niente");
 
-        // Aprire è una pubblicazione, e la risposta un'altra.
+        // Opening is one publish, and the reply another.
         let evening = evening();
         rig.cmd(ExternalCmd::OpenPlaylist(evening.clone()));
         let opened = rig.state.publish(&start).expect("opened");
@@ -1648,16 +1713,16 @@ mod tests {
         let loaded = rig.state.publish(&opened).expect("loaded");
         assert_eq!((loaded.version, loaded.versions.external), (opened.version + 1, 2));
         assert!(rig.state.publish(&loaded).is_none());
-        // Una risposta uguale (la stessa pagina, aperta di nuovo) non cambia niente.
+        // An equal reply (the same page, opened again) changes nothing.
         rig.cmd(ExternalCmd::OpenPlaylist(evening));
         assert!(rig.state.publish(&loaded).is_none());
 
-        // Salvare: la playlist, l'avviso e la prima importazione sono un'istantanea sola.
+        // Saving: the playlist, the notice and the first import are a single snapshot.
         rig.cmd(ExternalCmd::SavePlaylist { id: id(100) });
         let saved: Snapshot = rig.state.publish(&loaded).expect("saved");
         assert_eq!(saved.version, loaded.version + 1);
         assert_eq!((saved.versions.library, saved.versions.external), (1, loaded.versions.external + 1));
-        // Un brano importato: la playlist (nella libreria) e la riga «Apro…» cambiano insieme, una volta.
+        // An imported track: the playlist (in the library) and the "Apro…" row change together, once.
         let target = ImportTarget::Playlist(id(100));
         rig.imported(target, one(1));
         let step = rig.state.publish(&saved).expect("step");
@@ -1680,7 +1745,7 @@ mod tests {
         assert_eq!(view.events.back().map(|r| r.seq), Some(u64::try_from(EVENTS + 8).expect("small")));
     }
 
-    /// Un lavoro perso (panic) non lascia niente «in caricamento» e non ferma la fila.
+    /// A lost job (panic) leaves nothing "in caricamento" and does not stop the line.
     #[test]
     fn a_lost_job_never_stalls_the_domain() {
         let mut rig = Rig::new();
@@ -1708,10 +1773,10 @@ mod tests {
         assert!(matches!(rig.view().artist(id(5)), Some(Load::Failed(AppError::Network))));
     }
 
-    // ---------- Avvisi (BACKLOG 8) ----------
+    // ---------- Notices (BACKLOG 8) ----------
 
-    /// I numeri concordano: «1 brano» e «2 brani», «1 non disponibile» e «2 non disponibili», e con un
-    /// brano solo la playlist non dice «i 1 brani».
+    /// The numbers agree: "1 brano" and "2 brani", "1 non disponibile" and "2 non disponibili", and with
+    /// a single track the playlist does not say "i 1 brani".
     #[test]
     fn the_summaries_agree_in_number() {
         assert_eq!(ready_message("Sera", 2, 1), "«Sera» è pronta: 2 brani, 1 non disponibile.");

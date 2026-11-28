@@ -1,18 +1,18 @@
-//! La pipeline di GStreamer del videoclip: solo il video (l'audio resta quello del core, che il video
-//! segue), ridotto ai pixel del riquadro e a 30 fotogrammi al secondo, in BGRA nel posto dell'ultimo
+//! The video's GStreamer pipeline: video only (the audio stays the core's, which the video
+//! follows), reduced to the pixels of the box and to 30 frames per second, in BGRA in the place of the last
 //! fotogramma (`slot`).
 //!
-//! `uridecodebin ! videorate (max 30 fps, solo scarti) ! videoscale ! videoconvert ! capsfilter (BGRA,
-//! misura) ! appsink (un buffer, scarta)`: la stessa famiglia di pipeline del client Iced
-//! (`iced_video_player`), ma la conversione in BGRA la fa la CPU, perché GPUI su Linux e Windows non
-//! accetta texture YUV (`05-video-spike.md`, opzione A). Ridurre prima di convertire costa meno: il
-//! mini player converte un decimo dei pixel.
+//! `uridecodebin ! videorate (max 30 fps, drops only) ! videoscale ! videoconvert ! capsfilter (BGRA,
+//! misura) ! appsink (un buffer, scarta)`: the same family of pipelines as the earlier client,
+//! but the conversion to BGRA is done by the CPU, because GPUI on Linux and Windows does not
+//! accept YUV textures (`05-video-spike.md`, option A). Reducing before converting costs less: the
+//! mini player converts a tenth of the pixels.
 //!
-//! I thread sono quelli di GStreamer (rete, demuxer, decoder): esistono finché esiste la pipeline.
-//! Aprire (fino a 5 secondi, la rete) e chiudere (`Null` può aspettare la rete) bloccano, quindi si fanno
-//! su un altro thread; pausa, salto e posizione sono veloci e li chiede la UI. Gli errori di GStreamer
-//! possono contenere l'indirizzo firmato: non si conservano mai, diventano solo «non si è aperto» o
-//! «si è fermato».
+//! The threads are GStreamer's (network, demuxer, decoders): they exist as long as the pipeline exists.
+//! Opening (up to 5 seconds, the network) and closing (`Null` can wait for the network) block, so they are done
+//! on another thread; pause, seek and position are fast and the UI asks for them. GStreamer's errors
+//! may contain the signed address: they are never kept, they become only "did not open" or
+//! "stopped".
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -29,14 +29,14 @@ use super::plan::Controls;
 use super::size::Size;
 use super::slot::{Frame, FrameSlot};
 
-/// Fotogrammi al secondo al massimo: un videoclip a 60 si dimezza nella pipeline (60 costa il doppio,
+/// Frames per second at most: a 60 fps video is halved in the pipeline (60 costs twice as much,
 /// `05-video-spike.md` §4.1).
 pub const MAX_FPS: u32 = 30;
-/// Quanto si aspetta che il primo fotogramma sia pronto (come `iced_video_player`).
+/// How long it waits for the first frame to be ready (as the earlier player did).
 const PREROLL: gst::ClockTime = gst::ClockTime::from_seconds(5);
 
-/// La pipeline completa; `src`, `size` e `frames` sono i nomi degli elementi che si toccano. L'indirizzo
-/// non sta qui: è una proprietà di `src`.
+/// The whole pipeline; `src`, `size` and `frames` are the names of the elements that are touched. The address
+/// is not here: it is a property of `src`.
 fn description() -> String {
     format!(
         "uridecodebin name=src ! videorate drop-only=true max-rate={MAX_FPS} ! videoscale ! videoconvert \
@@ -45,20 +45,20 @@ fn description() -> String {
     )
 }
 
-/// Con questa variabile d'ambiente, alla chiusura di ogni pipeline una riga su stderr: fotogrammi copiati
-/// e mostrati, misure, durata (per le misure di `docs/PERFORMANCE.md`). Mai l'indirizzo.
+/// With this environment variable, at the close of each pipeline one line on stderr: frames copied
+/// and shown, timings, duration (for the measures in `docs/PERFORMANCE.md`). Never the address.
 const STATS_VAR: &str = "PSYTIFY_VIDEO_STATS";
 
-/// Plugin dei decoder NVIDIA (NVDEC via CUDA): come nel client Iced, rango zero, così un portatile
-/// ibrido non sveglia la scheda dedicata (e ~130 MB di VRAM) per un videoclip a 360p o 720p.
+/// NVIDIA decoders (NVDEC via CUDA): as before, rank zero, so a hybrid laptop
+/// does not wake the dedicated card (and ~130 MB of VRAM) for a 360p or 720p video.
 const NVIDIA_DECODERS: &str = "nvcodec";
 
-/// Ciò che i thread di GStreamer e la UI si dicono: il posto del fotogramma, la sveglia e due segnali.
+/// What GStreamer's threads and the UI say to each other: the frame's place, the wake-up and two signals.
 #[derive(Debug, Default)]
 pub struct Shared {
     pub slot: FrameSlot,
-    /// Una sveglia per la UI: un fotogramma nuovo nel posto vuoto, un errore o la fine. Tiene al massimo
-    /// un permesso (`Notify`): le sveglie non si accumulano.
+    /// A wake-up for the UI: a new frame in the empty place, an error or the end. It holds at most
+    /// one permit (`Notify`): the wake-ups do not pile up.
     pub wake: Notify,
     failed: AtomicBool,
     ended: AtomicBool,
@@ -67,23 +67,23 @@ pub struct Shared {
 }
 
 impl Shared {
-    /// Lo stream si è fermato (errore di rete o del decoder).
+    /// The stream stopped (network or decoder error).
     pub fn failed(&self) -> bool {
         self.failed.load(Ordering::Acquire)
     }
 
-    /// Il video è arrivato in fondo.
+    /// The video reached the end.
     pub fn ended(&self) -> bool {
         self.ended.load(Ordering::Acquire)
     }
 
-    /// La UI ha preso un fotogramma dal posto (per la riga di `PSYTIFY_VIDEO_STATS`).
+    /// The UI took a frame from the place (for the `PSYTIFY_VIDEO_STATS` line).
     pub fn mark_shown(&self) {
         self.shown.fetch_add(1, Ordering::Relaxed);
     }
 }
 
-/// Copia un campione nel posto, riusando il buffer del fotogramma che la UI non ha preso.
+/// Copies a sample into the place, reusing the frame's buffer that the UI did not take.
 struct Copier {
     shared: Arc<Shared>,
     spare: Mutex<Option<Vec<u8>>>,
@@ -103,10 +103,10 @@ impl Copier {
         let bytes = map.as_slice();
         let row = width as usize * 4;
         let rows = height as usize;
-        // Di solito le righe sono contigue; se un allocatore le allinea si copia riga per riga.
+        // Usually the rows are contiguous; if an allocator aligns them, it copies row by row.
         let stride = bytes.len().checked_div(rows).unwrap_or(0);
         if row == 0 || stride < row {
-            // Un fotogramma che non si capisce si salta (non ferma il videoclip).
+            // A frame that cannot be understood is skipped (it does not stop the video).
             return Ok(gst::FlowSuccess::Ok);
         }
         let mut bgra = self.spare.lock().unwrap_or_else(PoisonError::into_inner).take().unwrap_or_default();
@@ -147,7 +147,7 @@ pub struct Pipeline {
 
 impl std::fmt::Debug for Pipeline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // L'indirizzo (firmato) non si stampa mai.
+        // The (signed) address is never printed.
         f.debug_struct("Pipeline")
             .field("native", &self.native)
             .field("target", &self.target)
@@ -156,14 +156,14 @@ impl std::fmt::Debug for Pipeline {
     }
 }
 
-/// I decoder NVIDIA a rango zero (vedi `NVIDIA_DECODERS`). Bloccante la prima volta: legge il registro.
+/// The NVIDIA decoders at rank zero (see `NVIDIA_DECODERS`). Blocking the first time: it reads the registry.
 fn demote_nvidia() {
     for feature in gst::Registry::get().features_by_plugin(NVIDIA_DECODERS) {
         feature.set_rank(gst::Rank::NONE);
     }
 }
 
-/// La misura negoziata all'uscita della pipeline (dopo il primo fotogramma).
+/// The measure negotiated at the pipeline's output (after the first frame).
 fn negotiated(sink: &gst_app::AppSink) -> Option<Size> {
     let caps = sink.static_pad("sink")?.current_caps()?;
     let structure = caps.structure(0)?;
@@ -186,9 +186,9 @@ fn caps_for(size: Option<Size>) -> gst::Caps {
 }
 
 impl Pipeline {
-    /// Apre `url` già alla posizione dell'audio (`clock`, proiettato in avanti mentre il video si
-    /// prepara), alla misura che `surface` chiede. Bloccante: va chiamata da un thread a parte. Ogni
-    /// errore è solo «non si è aperto» (quello di GStreamer può contenere l'indirizzo).
+    /// Opens `url` already at the audio's position (`clock`, projected forward while the video
+    /// prepares), at the size that `surface` asks for. Blocking: it must be called from a thread of its own. Every
+    /// error is only "did not open" (GStreamer's can contain the address).
     pub fn open(url: &str, clock: Clock, surface: Option<Size>, shared: Arc<Shared>) -> Result<Self, ()> {
         gst::init().map_err(|_| ())?;
         demote_nvidia();
@@ -219,7 +219,7 @@ impl Pipeline {
         );
         let bus = pipeline.bus().ok_or(())?;
         let signals = Arc::clone(&shared);
-        // I messaggi si leggono sul thread che li manda e non restano sul bus (nessuno lo svuota).
+        // The messages are read on the thread that sends them and do not stay on the bus (nobody empties it).
         bus.set_sync_handler(move |_, message| {
             match message.view() {
                 gst::MessageView::Error(_) => {
@@ -245,7 +245,7 @@ impl Pipeline {
             paused: true,
             opened_at: Instant::now(),
         };
-        // In pausa fino al primo fotogramma: allora si conosce la misura del videoclip.
+        // Paused until the first frame: then the video's size is known.
         opened.pipeline.set_state(gst::State::Paused).map_err(|_| ())?;
         let (prerolled, ..) = opened.pipeline.state(PREROLL);
         prerolled.map_err(|_| ())?;
@@ -264,8 +264,8 @@ impl Pipeline {
         opened.seek(clock.at(Instant::now()));
         if clock.playing {
             opened.set_paused(false);
-            // Come il client Iced: si aspetta un poco che il salto iniziale arrivi dove sta l'audio, così il
-            // primo fotogramma mostrato è già allineato.
+            // It waits a little for the initial seek to reach where the audio is, so the
+            // first frame shown is already aligned.
             let deadline = Instant::now() + SETTLE;
             while Instant::now() < deadline && opened.position().abs_diff(clock.at(Instant::now())) > DRIFT {
                 std::thread::sleep(Duration::from_millis(20));
@@ -274,8 +274,8 @@ impl Pipeline {
         if opened.shared.failed() { Err(()) } else { Ok(opened) }
     }
 
-    /// Chiede a GStreamer la misura per un riquadro di `surface` pixel fisici, se cambia abbastanza
-    /// (`size::worth_switching`): la pipeline la rinegozia senza fermarsi.
+    /// Asks GStreamer for the measure for a box of `surface` physical pixels, if it changes enough
+    /// (`size::worth_switching`): the pipeline renegotiates it without stopping.
     pub fn fit_to(&mut self, surface: Size) {
         let Some(wanted) = super::size::fit(self.native, surface) else { return };
         if !super::size::worth_switching(self.target, wanted) {
@@ -285,14 +285,14 @@ impl Pipeline {
         self.size.set_property("caps", caps_for(Some(wanted)));
     }
 
-    /// Dove si trova il video.
+    /// Where the video is.
     pub fn position(&self) -> Duration {
         self.pipeline
             .query_position::<gst::ClockTime>()
             .map_or(Duration::ZERO, |position| Duration::from_nanos(position.nseconds()))
     }
 
-    /// Ciò che il player misura di sé, per le regole di allineamento del core.
+    /// What the player measures of itself, for the core's alignment rules.
     pub fn measure(&self) -> Measure {
         Measure {
             position: self.position(),
@@ -307,8 +307,8 @@ impl Pipeline {
         &self.shared
     }
 
-    /// Chiude la pipeline su un thread a parte: fermarla può aspettare la rete. Senza un thread (risorse
-    /// esaurite) la chiusura avviene qui, quando `spawn` lascia la funzione che non ha eseguito.
+    /// Closes the pipeline on a thread of its own: stopping it can wait for the network. Without a thread (resources
+    /// exhausted) the closing happens here, when `spawn` leaves the function that did not run.
     pub fn discard(self) {
         let _ = std::thread::Builder::new().name("video-close".into()).spawn(move || drop(self));
     }
@@ -324,7 +324,7 @@ impl Controls for Pipeline {
 
     fn seek(&mut self, position: Duration) {
         let target = gst::ClockTime::from_nseconds(u64::try_from(position.as_nanos()).unwrap_or(u64::MAX));
-        // Un salto che non riesce lascia il video dov'è: il prossimo controllo dello scarto riprova.
+        // A seek that fails leaves the video where it is: the next drift check tries again.
         let _ = self.pipeline.seek_simple(gst::SeekFlags::FLUSH, target);
     }
 }
@@ -345,7 +345,7 @@ impl Drop for Pipeline {
                 self.target.height,
             );
         }
-        // Le callback tengono il posto e la sveglia: si staccano con la pipeline.
+        // The callbacks hold the place and the wake-up: they detach with the pipeline.
         if let Some(bus) = self.pipeline.bus() {
             bus.unset_sync_handler();
         }
@@ -360,7 +360,7 @@ mod tests {
     fn the_pipeline_keeps_one_frame_at_thirty_per_second_and_no_address() {
         let description = description();
         assert!(description.contains("max-rate=30") && description.contains("drop-only=true"));
-        // Un solo buffer nell'uscita, scartato se la UI non l'ha preso: mai una coda di fotogrammi.
+        // One buffer only in the output, dropped if the UI did not take it: never a queue of frames.
         assert!(description.contains("max-buffers=1 drop=true"));
         assert!(description.contains("format=BGRA"));
         assert!(!description.contains("uri="), "l'indirizzo è una proprietà, mai nel testo");
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn the_caps_ask_for_the_chosen_size() {
-        // Senza GStreamer installato non c'è niente da provare.
+        // Without GStreamer installed there is nothing to try.
         if gst::init().is_err() {
             return;
         }

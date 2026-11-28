@@ -1,18 +1,18 @@
-//! Login facoltativo con Clerk, dentro l'app e tutto in Rust: la schermata «Accedi a Psytify»
-//! parla con la Frontend API di Clerk in modalità nativa (`_is_native=1`), come le app mobili.
+//! Optional login with Clerk, inside the app and all in Rust: the «Accedi a Psytify» screen
+//! talks to Clerk's Frontend API in native mode (`_is_native=1`), like the mobile apps.
 //!
-//! - Email o nome utente e password; se Clerk chiede una conferma (dispositivo nuovo, secondo
-//!   fattore) manda un codice via email che si scrive nell'app.
-//! - Registrazione con email, nome utente e password, confermata dal codice via email.
-//! - GitHub, Google e Discord passano dal browser e tornano all'app su
-//!   `http://127.0.0.1:<porta>/callback`.
+//! - Email or username and password; if Clerk asks for a confirmation (new device, second
+//!   factor) it sends a code by email that is typed into the app.
+//! - Sign-up with email, username and password, confirmed by the code sent by email.
+//! - GitHub, Google and Discord go through the browser and return to the app on
+//!   `http://127.0.0.1:<port>/callback`.
 //!
-//! Clerk riconosce l'app da un token del client (header `Authorization` senza schema), che può
-//! cambiare a ogni risposta. Il token del client e l'id della sessione stanno in `session.json`,
-//! leggibile solo dall'utente, nella cartella dei dati del core (`ClerkApp::session_file`: dal passo
-//! 4.7 non c'è più una cartella per processo); il token di sessione da mandare al backend dura un
-//! minuto, resta in memoria e si rinnova da sé (`Session::bearer`). Nessun token finisce nei log o
-//! nei messaggi d'errore: `Session`, `CodeStep`, `Oauth` e `Secret` non li stampano.
+//! Clerk recognises the app by a client token (an `Authorization` header with no scheme), which can
+//! change with every reply. The client token and the session id are in `session.json`,
+//! readable only by the user, in the core's data folder (`ClerkApp::session_file`: since step
+//! 4.7 there is no per-process folder any more); the session token to send to the backend lasts
+//! a minute, stays in memory and renews itself (`Session::bearer`). No token ends up in logs or
+//! error messages: `Session`, `CodeStep`, `Oauth` and `Secret` do not print them.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,22 +25,22 @@ use tokio::sync::Mutex;
 
 use crate::error::AppError;
 
-/// Tempo concesso all'utente per completare il login nel browser.
+/// Time allowed to the user to complete the login in the browser.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
-/// La richiesta di callback del browser è una riga GET con qualche header.
+/// The browser's callback request is a GET line with a few headers.
 const MAX_CALLBACK_BYTES: usize = 16 * 1024;
-/// Il token di sessione vale un minuto: lo si rinnova un po' prima.
+/// The session token lasts a minute: it is renewed a little before.
 const SESSION_TOKEN_REUSE: Duration = Duration::from_secs(45);
 const CALLBACK_PAGE: &str = "<!doctype html><meta charset=\"utf-8\"><title>Psytify</title>\
 <body style=\"background:#000;color:#fff;font-family:sans-serif;padding:48px\">\
 <p style=\"color:#c6f432;font-weight:600\">Psytify</p>\
 <p>Accesso completato. Puoi tornare all'app.</p></body>";
 
-/// Una stringa che non si stampa: la password e il codice di conferma viaggiano nei comandi del core
-/// (che sono `Debug`), e l'indirizzo del browser negli effetti. `Debug` scrive solo `[redacted]`.
-/// Non si azzera in memoria quando cade: la crate `zeroize` non c'è nel grafo, e il testo è già in
-/// chiaro nel campo dell'interfaccia che l'ha scritto.
+/// A string that is not printed: the password and the confirmation code travel in the core's commands
+/// (which are `Debug`), and the browser address in the effects. `Debug` writes only `[redacted]`.
+/// It is not zeroed in memory when dropped: the `zeroize` crate is not in the graph, and the text is already
+/// in clear in the interface field that wrote it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
 
@@ -49,7 +49,7 @@ impl Secret {
         Self(value.into())
     }
 
-    /// Il testo, per chi deve mandarlo a Clerk o aprirlo nel browser.
+    /// The text, for whoever must send it to Clerk or open it in the browser.
     pub fn expose(&self) -> &str {
         &self.0
     }
@@ -65,15 +65,15 @@ impl std::fmt::Debug for Secret {
     }
 }
 
-/// L'istanza Clerk. Niente di segreto: la Frontend API è pubblica.
+/// The Clerk instance. Nothing secret: the Frontend API is public.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClerkApp {
-    /// Frontend API dell'istanza, per esempio `https://your-instance.clerk.accounts.dev`.
+    /// The instance's Frontend API, for example `https://your-instance.clerk.accounts.dev`.
     pub issuer: String,
-    /// Porta di loopback per il ritorno dal browser (GitHub, Google, Discord).
+    /// Loopback port for the return from the browser (GitHub, Google, Discord).
     pub port: u16,
-    /// Dove sta `session.json`: lo sceglie chi avvia il core (`<data_dir>/session.json`). Senza, la
-    /// sessione vive solo in memoria e al prossimo avvio si rientra a mano (i test).
+    /// Where `session.json` sits: whoever starts the core chooses it (`<data_dir>/session.json`). Without it, the
+    /// session lives only in memory and at the next start one signs in by hand (the tests).
     pub session_file: Option<PathBuf>,
 }
 
@@ -83,7 +83,7 @@ impl ClerkApp {
     }
 }
 
-/// Gli accessi che passano dal browser.
+/// The sign-ins that go through the browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
     GitHub,
@@ -111,7 +111,7 @@ impl Provider {
     }
 }
 
-/// L'utente di Clerk, quanto serve per proporre il profilo di Psytify.
+/// The Clerk user, as much as is needed to propose Psytify's profile.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClerkUser {
     pub username: Option<String>,
@@ -120,7 +120,7 @@ pub struct ClerkUser {
     pub image_url: Option<String>,
 }
 
-/// Una sessione di Clerk. Si clona a basso costo; `Debug` non stampa i token.
+/// A Clerk session. Cloning it is cheap; `Debug` does not print the tokens.
 #[derive(Clone)]
 pub struct Session {
     app: ClerkApp,
@@ -150,8 +150,8 @@ impl Session {
         Self { app, state: Arc::new(Mutex::new(SessionState { client, session_id, token: None })) }
     }
 
-    /// Una sessione per i test, con un token appena rinnovato: `bearer` lo restituisce senza
-    /// chiedere nulla a Clerk.
+    /// A session for the tests, with a token just renewed: `bearer` returns it without
+    /// asking Clerk anything.
     #[cfg(any(test, feature = "test-support"))]
     pub fn for_tests(app: ClerkApp) -> Self {
         let state = SessionState {
@@ -162,8 +162,8 @@ impl Session {
         Self { app, state: Arc::new(Mutex::new(state)) }
     }
 
-    /// Il token da mandare al backend come `Authorization: Bearer`. Rinnovato quando scade;
-    /// `AuthExpired` se Clerk ha chiuso la sessione.
+    /// The token to send to the backend as `Authorization: Bearer`. Renewed when it expires;
+    /// `AuthExpired` if Clerk has closed the session.
     pub async fn bearer(&self) -> Result<String, AppError> {
         let mut state = self.state.lock().await;
         if let Some((token, at)) = &state.token
@@ -188,8 +188,8 @@ impl Session {
         Ok(token.jwt)
     }
 
-    /// Chiude la sessione su Clerk e dimentica quella su disco. Un errore di rete non impedisce di
-    /// uscire.
+    /// Closes the session on Clerk and forgets the one on disk. A network error does not prevent
+    /// signing out.
     pub async fn sign_out(self) -> Result<(), AppError> {
         {
             let state = self.state.lock().await;
@@ -201,19 +201,19 @@ impl Session {
     }
 }
 
-/// Un passo del login: fatto, oppure serve un codice arrivato via email.
+/// A step of the login: done, or a code that arrived by email is needed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
     Done(Session, ClerkUser),
     Code(CodeStep),
 }
 
-/// Il codice da chiedere all'utente: dove l'ha ricevuto e a quale tentativo appartiene.
+/// The code to ask the user for: where they received it and which attempt it belongs to.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CodeStep {
     client: String,
     target: CodeTarget,
-    /// L'indirizzo, in parte nascosto da Clerk, a cui è arrivato il codice.
+    /// The address, partly hidden by Clerk, where the code arrived.
     pub sent_to: String,
 }
 
@@ -224,7 +224,7 @@ impl std::fmt::Debug for CodeStep {
 }
 
 impl CodeStep {
-    /// Un passo con il codice per i test: l'indirizzo a cui sarebbe arrivato.
+    /// A step with the code for the tests: the address it would have reached.
     #[cfg(any(test, feature = "test-support"))]
     pub fn for_tests(sent_to: &str) -> Self {
         Self {
@@ -242,9 +242,9 @@ enum CodeTarget {
     SecondFactor { sign_in: String, strategy: String },
 }
 
-// ---------- Risposte di Clerk ----------
+// ---------- Clerk's replies ----------
 
-/// Clerk manda `null` dove una lista è vuota (i fattori di un accesso già completo).
+/// Clerk sends `null` where a list is empty (the factors of an already complete sign-in).
 fn null_as_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -366,11 +366,11 @@ impl From<UserBody> for ClerkUser {
     }
 }
 
-// ---------- Errori ----------
+// ---------- Errors ----------
 
-/// Un errore della Frontend API, prima di diventare un `AppError` da mostrare.
+/// An error from the Frontend API, before it becomes an `AppError` to show.
 enum Failure {
-    /// Clerk ha risposto con un errore: il messaggio è già in italiano.
+    /// Clerk replied with an error: the message is already in Italian.
     Clerk(String),
     Status(u16),
     Other(AppError),
@@ -386,7 +386,7 @@ impl Failure {
     }
 }
 
-/// I codici d'errore di Clerk più comuni, in italiano; gli altri con il testo di Clerk.
+/// The most common Clerk error codes, in Italian; the others with Clerk's text.
 pub fn clerk_message(code: &str, fallback: Option<&str>) -> String {
     let known = match code {
         "form_password_incorrect" => "Password errata.",
@@ -429,8 +429,8 @@ fn http() -> Result<reqwest::Client, AppError> {
         .map_err(|_| AppError::Network)
 }
 
-/// Una chiamata alla Frontend API. `client` è il token del client: si manda e, se Clerk ne
-/// restituisce uno nuovo, si aggiorna.
+/// A call to the Frontend API. `client` is the client token: it is sent and, if Clerk
+/// returns a new one, it is updated.
 async fn call(
     app: &ClerkApp,
     method: reqwest::Method,
@@ -480,14 +480,14 @@ async fn call_as<T: serde::de::DeserializeOwned>(
     serde_json::from_value(body).map_err(|_| AppError::InvalidResponse)
 }
 
-/// Un client nuovo: il punto di partenza di ogni accesso.
+/// A new client: the starting point of every sign-in.
 async fn new_client(app: &ClerkApp) -> Result<String, AppError> {
     let mut client = String::new();
     call(app, reqwest::Method::POST, "/client", &mut client, &[]).await.map_err(Failure::into_error)?;
     if client.is_empty() { Err(AppError::AuthFailed) } else { Ok(client) }
 }
 
-/// La sessione appena creata, con l'utente: la si salva su disco.
+/// The session just created, with the user: it is saved to disk.
 async fn finish(app: &ClerkApp, mut client: String, session_id: &str) -> Result<Step, AppError> {
     let envelope: Envelope<ClientBody> =
         call_as(app, reqwest::Method::GET, "/client", &mut client, &[]).await?;
@@ -504,7 +504,7 @@ async fn finish(app: &ClerkApp, mut client: String, session_id: &str) -> Result<
     Ok(Step::Done(session, user))
 }
 
-/// Il fattore con un codice (prima l'email, poi il telefono) fra quelli che Clerk propone.
+/// The factor with a code (first email, then phone) among those Clerk proposes.
 fn code_factor(factors: &[FactorBody]) -> Option<&FactorBody> {
     factors
         .iter()
@@ -512,7 +512,7 @@ fn code_factor(factors: &[FactorBody]) -> Option<&FactorBody> {
         .or_else(|| factors.iter().find(|f| f.strategy == "phone_code"))
 }
 
-/// Prepara il codice per il fattore indicato e restituisce il passo da mostrare.
+/// Prepares the code for the given factor and returns the step to show.
 async fn ask_code(
     app: &ClerkApp,
     mut client: String,
@@ -543,14 +543,14 @@ async fn ask_code(
     Ok(Step::Code(CodeStep { client, target, sent_to }))
 }
 
-/// Dove porta lo stato di un tentativo di accesso.
+/// Where the state of a sign-in attempt leads.
 async fn after_sign_in(app: &ClerkApp, client: String, sign_in: SignInBody) -> Result<Step, AppError> {
     match sign_in.status.as_str() {
         "complete" => {
             let session = sign_in.created_session_id.ok_or(AppError::AuthFailed)?;
             finish(app, client, &session).await
         }
-        // Dispositivo nuovo o secondo fattore: Clerk manda un codice.
+        // New device or second factor: Clerk sends a code.
         "needs_second_factor" | "needs_client_trust" => {
             let factor = code_factor(&sign_in.supported_second_factors).ok_or(AppError::AuthFailed)?;
             ask_code(app, client, &sign_in.id, factor, true).await
@@ -585,9 +585,9 @@ async fn after_sign_up(app: &ClerkApp, client: String, sign_up: SignUpBody) -> R
     }
 }
 
-// ---------- Flussi ----------
+// ---------- Flows ----------
 
-/// Accesso con email o nome utente e password.
+/// Sign-in with email or username and password.
 pub async fn sign_in(app: ClerkApp, identifier: String, password: String) -> Result<Step, AppError> {
     let mut client = new_client(&app).await?;
     let form = [("strategy", "password"), ("identifier", identifier.trim()), ("password", password.as_str())];
@@ -596,7 +596,7 @@ pub async fn sign_in(app: ClerkApp, identifier: String, password: String) -> Res
     after_sign_in(&app, client, envelope.response).await
 }
 
-/// Registrazione: l'email si conferma con il codice che Clerk manda.
+/// Sign-up: the email is confirmed with the code Clerk sends.
 pub async fn sign_up(
     app: ClerkApp,
     email: String,
@@ -613,7 +613,7 @@ pub async fn sign_up(
     after_sign_up(&app, client, envelope.response).await
 }
 
-/// Il codice scritto dall'utente.
+/// The code typed by the user.
 pub async fn submit_code(app: ClerkApp, step: CodeStep, code: String) -> Result<Step, AppError> {
     let mut client = step.client;
     let code = code.trim();
@@ -642,7 +642,7 @@ pub async fn submit_code(app: ClerkApp, step: CodeStep, code: String) -> Result<
     }
 }
 
-/// Un nuovo codice per lo stesso passo.
+/// A new code for the same step.
 pub async fn resend_code(app: ClerkApp, step: CodeStep) -> Result<CodeStep, AppError> {
     let mut client = step.client.clone();
     let (path, strategy) = match &step.target {
@@ -660,9 +660,9 @@ pub async fn resend_code(app: ClerkApp, step: CodeStep) -> Result<CodeStep, AppE
     Ok(CodeStep { client, ..step })
 }
 
-/// Un accesso con GitHub, Google o Discord a metà: la porta di loopback è già in ascolto e Clerk ha
-/// già il tentativo, manca solo che l'utente passi dal browser. `Debug` non stampa niente: dentro ci
-/// sono il token del client e l'indirizzo del provider.
+/// A sign-in with GitHub, Google or Discord halfway: the loopback port is already listening and Clerk has
+/// already the attempt, only the user going through the browser is missing. `Debug` prints nothing: inside
+/// there are the client token and the provider's address.
 pub struct Oauth {
     listener: TcpListener,
     state: String,
@@ -672,13 +672,13 @@ pub struct Oauth {
 }
 
 impl Oauth {
-    /// L'indirizzo del provider da aprire nel browser.
+    /// The provider's address to open in the browser.
     pub fn url(&self) -> &Secret {
         &self.url
     }
 
-    /// Un accesso a metà per i test: il loopback sta su una porta libera scelta dal sistema e Clerk
-    /// non c'entra. Aspettarne il ritorno (`oauth_finish`) non è previsto.
+    /// A sign-in halfway for the tests: the loopback sits on a free port chosen by the system and Clerk
+    /// is not involved. Waiting for its return (`oauth_finish`) is not provided for.
     #[cfg(any(test, feature = "test-support"))]
     pub async fn for_tests(url: &str) -> Result<Self, AppError> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|_| AppError::AuthPortBusy(0))?;
@@ -698,9 +698,9 @@ impl std::fmt::Debug for Oauth {
     }
 }
 
-/// Primo tempo dell'accesso con il browser: mette la porta di loopback in ascolto (prima di aprire
-/// il browser, così il ritorno non trova nessuno) e chiede a Clerk l'indirizzo del provider. Aprirlo
-/// non spetta a noi: è un effetto del core (`platform::open_url`).
+/// First part of the browser sign-in: it puts the loopback port listening (before opening
+/// the browser, so the return finds no one) and asks Clerk for the provider's address. Opening it
+/// is not our job: it is an effect of the core (`platform::open_url`).
 pub async fn oauth_begin(app: &ClerkApp, provider: Provider) -> Result<Oauth, AppError> {
     let listener =
         TcpListener::bind(("127.0.0.1", app.port)).await.map_err(|_| AppError::AuthPortBusy(app.port))?;
@@ -718,8 +718,8 @@ pub async fn oauth_begin(app: &ClerkApp, provider: Provider) -> Result<Oauth, Ap
     Ok(Oauth { listener, state, client, sign_in: sign_in.id, url: Secret::new(url) })
 }
 
-/// Secondo tempo: aspetta il ritorno del browser (al più [`LOGIN_TIMEOUT`]) e chiude l'accesso. Un
-/// account nuovo viene registrato al volo (`transfer`).
+/// Second part: waits for the browser's return (at most [`LOGIN_TIMEOUT`]) and closes the sign-in. A
+/// new account is registered on the fly (`transfer`).
 pub async fn oauth_finish(app: ClerkApp, oauth: Oauth) -> Result<Step, AppError> {
     let Oauth { listener, state, mut client, sign_in, url: _ } = oauth;
     let nonce = tokio::time::timeout(LOGIN_TIMEOUT, receive_callback(&listener, &state))
@@ -736,7 +736,7 @@ pub async fn oauth_finish(app: ClerkApp, oauth: Oauth) -> Result<Step, AppError>
         let session = sign_in.created_session_id.ok_or(AppError::AuthFailed)?;
         return finish(&app, client, &session).await;
     }
-    // Il client può già avere la sessione anche se il tentativo non lo dice.
+    // The client may already have the session even if the attempt does not say so.
     if let Some(session) = envelope.client.and_then(|c| c.last_active_session_id) {
         return finish(&app, client, &session).await;
     }
@@ -751,7 +751,7 @@ pub async fn oauth_finish(app: ClerkApp, oauth: Oauth) -> Result<Step, AppError>
     after_sign_up(&app, client, envelope.response).await
 }
 
-/// All'avvio: la sessione salvata, se Clerk la considera ancora attiva.
+/// At startup: the saved session, if Clerk still considers it active.
 pub async fn restore(app: ClerkApp) -> Result<(Session, ClerkUser), AppError> {
     let stored = load_session(&app).ok_or(AppError::AuthExpired)?;
     let mut client = stored.client;
@@ -801,8 +801,8 @@ fn decode(value: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// Esito del ritorno dal browser: il nonce con cui Clerk rinnova il client (se c'è) quando lo
-/// `state` coincide, altrimenti un errore.
+/// Result of the return from the browser: the nonce with which Clerk renews the client (if there is one) when
+/// `state` matches, otherwise an error.
 pub fn parse_callback(request_line: &str, expected_state: &str) -> Result<Option<String>, AppError> {
     let target = request_line
         .strip_prefix("GET ")
@@ -821,7 +821,7 @@ pub fn parse_callback(request_line: &str, expected_state: &str) -> Result<Option
             _ => {}
         }
     }
-    // Uno state diverso è una callback che non abbiamo chiesto noi: si rifiuta.
+    // A different state is a callback we did not ask for: it is refused.
     if state.as_deref() != Some(expected_state) {
         return Err(AppError::AuthFailed);
     }
@@ -831,7 +831,7 @@ pub fn parse_callback(request_line: &str, expected_state: &str) -> Result<Option
     Ok(nonce)
 }
 
-/// Aspetta la callback giusta: altre richieste (per esempio `favicon.ico`) ricevono `404`.
+/// Waits for the right callback: other requests (for example `favicon.ico`) get a `404`.
 async fn receive_callback(listener: &TcpListener, state: &str) -> Result<Option<String>, AppError> {
     loop {
         let (mut socket, _) = listener.accept().await.map_err(|_| AppError::AuthFailed)?;
@@ -861,7 +861,7 @@ async fn receive_callback(listener: &TcpListener, state: &str) -> Result<Option<
     }
 }
 
-// ---------- Sessione su disco ----------
+// ---------- Session on disk ----------
 
 #[derive(Serialize, Deserialize)]
 struct StoredSession {
@@ -870,15 +870,15 @@ struct StoredSession {
 }
 
 impl ClerkApp {
-    /// C'è una sessione salvata da riprendere (il file esiste). Lettura sincrona: la fa chi avvia il
-    /// core, una volta, prima della prima istantanea.
+    /// There is a saved session to resume (the file exists). Synchronous read: it is done by whoever starts the
+    /// core, once, before the first snapshot.
     pub fn has_stored_session(&self) -> bool {
         self.session_file.as_deref().is_some_and(Path::exists)
     }
 }
 
-/// La sessione salvata, se c'è e si legge. Il file delle versioni con il login nel browser (un
-/// refresh token) non si legge più: si rientra una volta a mano.
+/// The saved session, if there is one and it can be read. The file from the versions with the browser login (a
+/// refresh token) is no longer read: one signs in once by hand.
 fn load_session(app: &ClerkApp) -> Option<StoredSession> {
     let text = std::fs::read_to_string(app.session_file.as_deref()?).ok()?;
     serde_json::from_str::<StoredSession>(&text)
@@ -886,14 +886,14 @@ fn load_session(app: &ClerkApp) -> Option<StoredSession> {
         .filter(|s| !s.client.is_empty() && !s.session.is_empty())
 }
 
-/// Salva la sessione; un errore di scrittura costa solo un nuovo accesso al prossimo avvio.
+/// Saves the session; a write error only costs a new sign-in at the next startup.
 async fn store(app: &ClerkApp, state: &SessionState) {
     let stored = StoredSession { client: state.client.clone(), session: state.session_id.clone() };
     let _ = write_session(app, &stored).await;
 }
 
-/// In un file leggibile solo dall'utente (0600 su Unix; su Windows la cartella del profilo è già
-/// privata). Senza `session_file` non si scrive niente.
+/// In a file readable only by the user (0600 on Unix; on Windows the profile folder is already
+/// private). Without `session_file` nothing is written.
 async fn write_session(app: &ClerkApp, stored: &StoredSession) -> Result<(), AppError> {
     let Some(path) = app.session_file.clone() else { return Ok(()) };
     let io = |_| AppError::Io(path.display().to_string());
@@ -910,7 +910,7 @@ async fn write_session(app: &ClerkApp, stored: &StoredSession) -> Result<(), App
     file.flush().await.map_err(io)
 }
 
-/// Toglie la sessione dal disco (e solo da lì: Clerk non si avvisa).
+/// Removes the session from disk (and only from there: Clerk is not told).
 pub async fn forget_session(app: &ClerkApp) -> Result<(), AppError> {
     let Some(path) = app.session_file.clone() else { return Ok(()) };
     match tokio::fs::remove_file(&path).await {
@@ -980,15 +980,15 @@ mod tests {
         );
     }
 
-    /// Contro un'istanza Clerk di sviluppo vera, con un account di test (`…+clerk_test@…`, il cui
-    /// codice è sempre `424242`): `PSYTIFY_LIVE_CLERK_ISSUER`, `PSYTIFY_LIVE_IDENTIFIER`,
-    /// `PSYTIFY_LIVE_PASSWORD`, `PSYTIFY_LIVE_SESSION_DIR` (una cartella vuota dove scrivere la
-    /// sessione) e, per provare il backend, `PSYTIFY_LIVE_API`.
+    /// Against a real development Clerk instance, with a test account (`…+clerk_test@…`, whose
+    /// code is always `424242`): `PSYTIFY_LIVE_CLERK_ISSUER`, `PSYTIFY_LIVE_IDENTIFIER`,
+    /// `PSYTIFY_LIVE_PASSWORD`, `PSYTIFY_LIVE_SESSION_DIR` (an empty folder where the
+    /// session is written) and, to try the backend, `PSYTIFY_LIVE_API`.
     #[tokio::test(flavor = "current_thread")]
     #[ignore = "needs a Clerk development instance and a test account"]
     async fn live_password_sign_in_with_a_code() {
         let env = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} is not set"));
-        // La sessione va in una cartella a parte (`PSYTIFY_LIVE_SESSION_DIR`), mai nei dati dell'utente.
+        // The session goes in a folder of its own (`PSYTIFY_LIVE_SESSION_DIR`), never in the user's data.
         let session_file = Some(PathBuf::from(env("PSYTIFY_LIVE_SESSION_DIR")).join("session.json"));
         let app = ClerkApp { issuer: env("PSYTIFY_LIVE_CLERK_ISSUER"), port: 53682, session_file };
         let mut step = sign_in(app.clone(), env("PSYTIFY_LIVE_IDENTIFIER"), env("PSYTIFY_LIVE_PASSWORD"))
@@ -1006,7 +1006,7 @@ mod tests {
         if let Ok(api) = std::env::var("PSYTIFY_LIVE_API") {
             let api = crate::api::ApiClient::new(&api).unwrap_or_else(|e| panic!("{e}"));
             let me = api.me(&token).await.unwrap_or_else(|e| panic!("{e}"));
-            // Niente dati dell'utente nel messaggio: l'output dei test finisce nei log.
+            // No user data in the message: the tests' output ends up in the logs.
             assert!(me.user_id.starts_with("user_"), "the backend did not recognise the session");
         }
         session.sign_out().await.unwrap_or_else(|e| panic!("{e}"));
@@ -1027,8 +1027,8 @@ mod tests {
         assert!(!format!("{step:?} {session:?}").contains("secret"));
     }
 
-    /// Il file della sessione sta dove lo dice `ClerkApp` (la cartella di un core, non una per processo),
-    /// è leggibile solo dall'utente, si rilegge e si dimentica; senza percorso non si scrive niente.
+    /// The session file sits where `ClerkApp` says (a core's folder, not one per process),
+    /// is readable only by the user, is reread and forgotten; without a path nothing is written.
     #[tokio::test(flavor = "current_thread")]
     async fn the_session_file_belongs_to_the_core_that_names_it() {
         let dir = std::env::temp_dir().join(format!("psytify-auth-test-{}", uuid::Uuid::new_v4()));
@@ -1059,7 +1059,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Un file senza sessione utilizzabile (vuoto, o del vecchio login con il refresh token) non vale.
+    /// A file without a usable session (empty, or from the old login with the refresh token) is not valid.
     #[test]
     fn an_unusable_session_file_is_not_restored() {
         let dir = std::env::temp_dir().join(format!("psytify-auth-test-{}", uuid::Uuid::new_v4()));

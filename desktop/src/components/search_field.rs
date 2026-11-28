@@ -1,23 +1,23 @@
 // Campo di testo portato da Zed: `crates/gpui/examples/input.rs` al rev
 // d31d1074a07b7bbaa43a52fef7847a00dd491baf del repository zed-industries/zed.
-// Copyright (c) Zed Industries, Inc. Licenza Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0).
-// Modifiche di Psytify: riga singola con aspetto pixel (token), caret da 1 AP che lampeggia solo
-// con il campo a fuoco, selezione con `LINE_STRONG`, tasti Ctrl (non Cmd), azione Esc, richiamo
-// `on_change`/`on_submit`, icona di ricerca, suggerimento `Ctrl K`, pulsante di cancellazione, stato
-// disabilitato e di caricamento; variante mascherata (password, codice), alta e con il filtro dei
-// caratteri.
+// Copyright (c) Zed Industries, Inc. License Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+// Psytify changes: single line with pixel look (tokens), a 1 AP caret that blinks only
+// with the field focused, selection with `LINE_STRONG`, Ctrl keys (not Cmd), Esc action, history recall
+// `on_change`/`on_submit`, search icon, `Ctrl K` hint, clear button, state
+// disabled and loading; masked variant (password, code), tall and with the filter for
+// characters.
 
-//! SearchField: campo di ricerca. Altezza `CONTROL_H`, fill `SURFACE_WELL`, bordo di 1 AP
-//! (`CONTROL_BORDER`, hover `CONTROL_BORDER_HOVER`, a fuoco `PURE_WHITE`), tacca 1. Esc cancella e poi
-//! sfoca; Invio chiama `on_submit`. La variante `plain` è il campo dei dialoghi (linee guida §22: senza
-//! icone), dove Esc chiude il dialogo.
+//! SearchField: search field. Height `CONTROL_H`, `SURFACE_WELL` fill, 1 AP border
+//! (`CONTROL_BORDER`, hover `CONTROL_BORDER_HOVER`, focused `PURE_WHITE`), notch 1. Esc clears and then
+//! blurs; Enter calls `on_submit`. The `plain` variant is the dialogs' field (guidelines §22: without
+//! icons), where Esc closes the dialog.
 //!
-//! La variante `masked` è il campo di una password o di un codice: mostra un pallino per carattere, non
-//! copia né taglia negli appunti, non dà il testo vero al sistema di input (le richieste di contesto
-//! ricevono i pallini) e il suo `Debug` non lo stampa. Il testo si prende con [`SearchField::take`], che
-//! svuota il campo nello stesso momento: chi lo manda al core lo avvolge subito in `Secret`. `large` è il
-//! campo da 40 dp dei moduli (`CONTROL_H_LARGE`); `sanitize` e `max_chars` filtrano ciò che si scrive o si
-//! incolla (il nome utente: minuscole, cifre e `_`).
+//! The `masked` variant is the field of a password or a code: it shows one dot per character, does not
+//! copy or cut to the clipboard, does not give the real text to the input system (context requests
+//! get the dots) and its `Debug` does not print it. The text is taken with [`SearchField::take`], which
+//! empties the field at the same moment: whoever sends it to the core wraps it in `Secret` at once. `large` is the
+//! 40 dp field of the forms (`CONTROL_H_LARGE`); `sanitize` and `max_chars` filter what is typed or
+//! pasted (the username: lower case, digits and `_`).
 
 use std::ops::Range;
 use std::rc::Rc;
@@ -69,7 +69,7 @@ actions!(
 
 const CONTEXT: &str = "PsytifyTextInput";
 
-/// Scorciatoie del campo; da registrare una volta all'avvio.
+/// Shortcuts of the field; to register once at start-up.
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, Some(CONTEXT)),
@@ -92,15 +92,15 @@ pub fn bind_keys(cx: &mut App) {
 type OnText = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 type OnKey = Rc<dyn Fn(&mut Window, &mut App)>;
 
-/// Il carattere che un campo mascherato mostra al posto di ognuno dei suoi.
+/// The character a masked field shows in place of each of its own.
 const MASK: char = '•';
 
-/// Il testo da disegnare: quello vero, o un pallino per carattere.
+/// The text to draw: the real one, or a dot per character.
 fn shown_text(content: &str, masked: bool) -> SharedString {
     if masked { MASK.to_string().repeat(content.chars().count()).into() } else { content.to_owned().into() }
 }
 
-/// Da una posizione nel testo vero (byte) alla stessa posizione nel testo disegnato.
+/// From a position in the real text (bytes) to the same position in the drawn text.
 fn to_display(content: &str, offset: usize, masked: bool) -> usize {
     if !masked {
         return offset;
@@ -108,7 +108,7 @@ fn to_display(content: &str, offset: usize, masked: bool) -> usize {
     content.get(..offset).map_or(0, |head| head.chars().count()) * MASK.len_utf8()
 }
 
-/// Da una posizione nel testo disegnato (byte) a quella nel testo vero, sempre su un confine di carattere.
+/// From a position in the drawn text (bytes) to that in the real text, always on a character boundary.
 fn from_display(content: &str, offset: usize, masked: bool) -> usize {
     if !masked {
         return offset;
@@ -117,7 +117,7 @@ fn from_display(content: &str, offset: usize, masked: bool) -> usize {
     content.char_indices().nth(chars).map_or(content.len(), |(at, _)| at)
 }
 
-/// Il testo da inserire dopo il filtro del campo e il limite di caratteri (contando quelli che restano).
+/// The text to insert after the field's filter and the character limit (counting the ones that remain).
 fn admitted(
     new_text: &str,
     sanitize: Option<fn(&str) -> String>,
@@ -134,7 +134,7 @@ fn admitted(
     }
 }
 
-/// Ciò che il `Debug` di un campo dice del suo testo: un campo mascherato dice solo quanti caratteri ha.
+/// What the `Debug` of a field says about its text: a masked field says only how many characters it has.
 fn describe(content: &str, masked: bool) -> String {
     if masked { format!("[{} caratteri nascosti]", content.chars().count()) } else { format!("{content:?}") }
 }
@@ -156,10 +156,10 @@ pub struct SearchField {
     show_hint: bool,
     on_change: Option<OnText>,
     on_submit: Option<OnText>,
-    /// Campo di un dialogo: niente icona di ricerca né suggerimento `Ctrl K`, ed Esc chiama `on_escape`.
+    /// A dialog's field: no search icon nor `Ctrl K` hint, and Esc calls `on_escape`.
     plain: bool,
     on_escape: Option<OnKey>,
-    /// Password o codice: pallini al posto dei caratteri, niente appunti, `Debug` senza il testo.
+    /// Password or code: dots in place of the characters, no clipboard, `Debug` without the text.
     masked: bool,
     /// Alto `CONTROL_H_LARGE` (i moduli di accesso e del profilo).
     large: bool,
@@ -185,8 +185,8 @@ impl SearchField {
     ) -> Self {
         Self {
             id: id.into(),
-            // Il Tab di GPUI legge il segno sulla maniglia, non quello dell'elemento (`track_focus` con una
-            // maniglia data ignora `.tab_stop` dell'elemento): senza, Tab non arriva mai al campo.
+            // GPUI's Tab reads the sign on the handle, not the element's (`track_focus` with a given handle
+            // ignores the element's `.tab_stop`): without it, Tab never reaches the field.
             focus_handle: cx.focus_handle().tab_stop(true),
             content: SharedString::default(),
             placeholder: placeholder.into(),
@@ -211,13 +211,13 @@ impl SearchField {
         }
     }
 
-    /// Senza il suggerimento `Ctrl K`, che appartiene solo alla ricerca della barra del titolo.
+    /// Without the `Ctrl K` hint, which belongs only to the title bar's search.
     pub fn without_hint(mut self) -> Self {
         self.show_hint = false;
         self
     }
 
-    /// Il campo di una password o di un codice (senza icone, come `plain`): vedi la testa del modulo.
+    /// The field of a password or a code (no icons, as `plain`): see the module's header.
     pub fn masked(mut self) -> Self {
         self.masked = true;
         self.plain = true;
@@ -225,26 +225,26 @@ impl SearchField {
         self
     }
 
-    /// Alto `CONTROL_H_LARGE` (40 dp), come i campi dei moduli.
+    /// Height `CONTROL_H_LARGE` (40 dp), as the forms' fields.
     pub fn large(mut self) -> Self {
         self.large = true;
         self
     }
 
-    /// Un filtro per ciò che si scrive o si incolla (toglie o cambia i caratteri).
+    /// A filter for what is typed or pasted (removes or changes characters).
     pub fn sanitize(mut self, filter: fn(&str) -> String) -> Self {
         self.sanitize = Some(filter);
         self
     }
 
-    /// Al più `max` caratteri.
+    /// At most `max` characters.
     pub fn max_chars(mut self, max: usize) -> Self {
         self.max_chars = Some(max);
         self
     }
 
-    /// Prende il testo e svuota il campo nello stesso momento, senza chiamare `on_change` (chi lo prende sa
-    /// che ora è vuoto). Per la password e il codice: chi lo riceve lo avvolge subito in `Secret`.
+    /// Takes the text and empties the field at the same moment, without calling `on_change` (whoever takes it knows
+    /// that it is now empty). For the password and the code: whoever receives it wraps it in `Secret` at once.
     pub fn take(&mut self, cx: &mut Context<Self>) -> String {
         let text = self.content.to_string();
         self.content = SharedString::default();
@@ -256,23 +256,23 @@ impl SearchField {
         text
     }
 
-    /// Vuota il campo senza chiamare `on_change` (un modulo che cambia scheda).
+    /// Empties the field without calling `on_change` (a form that changes tab).
     pub fn reset(&mut self, cx: &mut Context<Self>) {
         let _ = self.take(cx);
     }
 
-    /// Il campo ha del testo (senza darlo a chi chiede: per un campo mascherato basta sapere questo).
+    /// The field has text (without giving it to whoever asks: for a masked field this is enough to know).
     pub fn is_empty(&self) -> bool {
         self.content.is_empty()
     }
 
-    /// Quanti caratteri ha il campo.
+    /// How many characters the field has.
     pub fn char_count(&self) -> usize {
         self.content.chars().count()
     }
 
-    /// Il campo di testo di un dialogo (il nome di una playlist): senza icona di ricerca, senza
-    /// suggerimento e senza il tasto per cancellare; Esc chiama `on_escape` (chiude il dialogo).
+    /// A dialog's text field (the name of a playlist): no search icon, no
+    /// hint and no clear key; Esc calls `on_escape` (closes the dialog).
     pub fn plain(mut self) -> Self {
         self.plain = true;
         self.show_hint = false;
@@ -284,7 +284,7 @@ impl SearchField {
         self
     }
 
-    /// Il testo intero selezionato: scrivere lo sostituisce (il nome proposto di una playlist).
+    /// The whole text selected: typing replaces it (the proposed name of a playlist).
     pub fn select_all_text(mut self) -> Self {
         self.selected_range = 0..self.content.len();
         self.selection_reversed = false;
@@ -309,7 +309,7 @@ impl SearchField {
         self
     }
 
-    /// Accende o spegne l'indicatore di attesa (la ricerca è in corso) anche a campo già creato.
+    /// Turns the waiting indicator on or off (the search is in progress), even when the field already exists.
     pub fn set_loading(&mut self, loading: bool, cx: &mut Context<Self>) {
         if self.loading != loading {
             self.loading = loading;
@@ -317,8 +317,8 @@ impl SearchField {
         }
     }
 
-    /// Sostituisce il testo a campo già creato (cursore in fondo), senza chiamare `on_change`: chi lo
-    /// cambia manda da sé la ricerca.
+    /// Replaces the text of an existing field (caret at the end), without calling `on_change`: whoever
+    /// changes it sends the search itself.
     pub fn set_text(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.content = text.into();
         let end = self.content.len();
@@ -337,13 +337,13 @@ impl SearchField {
         self
     }
 
-    /// Il testo del campo; un campo mascherato non lo dà mai (vuoto): si prende solo con [`Self::take`].
+    /// The field's text; a masked field never gives it (empty): it is taken only with [`Self::take`].
     pub fn text(&self) -> &str {
         if self.masked { "" } else { &self.content }
     }
 
-    /// `on_change` riceve il testo; da un campo mascherato riceve sempre una stringa vuota (chi ascolta sa
-    /// solo che è cambiato: [`Self::char_count`] dice quanto è lungo).
+    /// `on_change` receives the text; from a masked field it always receives an empty string (whoever listens knows
+    /// only that it changed: [`Self::char_count`] says how long it is).
     fn changed(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(f) = self.on_change.clone() {
             f(self.text(), window, cx);
@@ -409,7 +409,7 @@ impl SearchField {
         self.replace_text_in_range(None, "", window, cx)
     }
 
-    /// Esc: prima cancella il testo, poi (campo già vuoto) toglie il focus.
+    /// Esc: first clears the text, then (field already empty) removes the focus.
     fn escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(f) = self.on_escape.clone() {
             f(window, cx);
@@ -466,7 +466,7 @@ impl SearchField {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        // Una password non va negli appunti.
+        // A password does not go to the clipboard.
         if !self.selected_range.is_empty() && !self.masked {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -585,7 +585,7 @@ impl EntityInputHandler for SearchField {
         let range = self.range_from_utf16(&range_utf16);
         actual_range.replace(self.range_to_utf16(&range));
         let text = self.content.get(range)?;
-        // Al sistema di input un campo mascherato dà i pallini, mai il testo vero.
+        // To the input system a masked field gives dots, never the real text.
         Some(if self.masked { shown_text(text, true).to_string() } else { text.to_owned() })
     }
 
@@ -741,7 +741,7 @@ impl EntityInputHandler for SearchField {
     }
 }
 
-/// Elemento che disegna testo, selezione e caret.
+/// Element that draws text, selection and caret.
 struct TextElement {
     input: Entity<SearchField>,
 }
@@ -789,7 +789,7 @@ impl gpui::Element for TextElement {
         let input = self.input.read(cx);
         let content = input.content.clone();
         let masked = input.masked;
-        // Le posizioni si disegnano sul testo mostrato: per un campo mascherato, i pallini.
+        // Positions are drawn over the shown text: for a masked field, the dots.
         let selected_range = to_display(&content, input.selected_range.start, masked)
             ..to_display(&content, input.selected_range.end, masked);
         let cursor = to_display(&content, input.cursor_offset(), masked);
@@ -832,6 +832,15 @@ impl gpui::Element for TextElement {
             vec![run]
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
+        // A placeholder wider than the field ends in an ellipsis instead of a clipped glyph.
+        let (display_text, runs) = if content.is_empty() {
+            let mut wrapper = window.text_system().line_wrapper(style.font(), font_size);
+            let (text, runs) =
+                wrapper.truncate_line(display_text, bounds.size.width, "…", &runs, gpui::TruncateFrom::End);
+            (text, runs.into_owned())
+        } else {
+            (display_text, runs)
+        };
         let line = window.text_system().shape_line(display_text, font_size, &runs, None);
         let cursor_pos = line.x_for_index(cursor);
         let ap = Ap::of(window);
@@ -876,13 +885,13 @@ impl gpui::Element for TextElement {
             window.paint_quad(selection)
         }
         if let Some(line) = prepaint.line.take() {
-            // Un errore di disegno del testo non ha rimedio qui: si salta il frame del campo.
+            // A text drawing error has no remedy here: the field's frame is skipped.
             let _ = line.paint(bounds.origin, window.line_height(), gpui::TextAlign::Left, None, window, cx);
             if focus_handle.is_focused(window)
                 && let Some(cursor) = prepaint.cursor.take()
             {
-                // Caret a scatti: 530 ms acceso, 530 spento. Il ridisegno si programma solo a fuoco. Con il
-                // movimento ridotto il caret resta acceso e non c'è nessun timer.
+                // Stepped caret: 530 ms on, 530 ms off. The redraw is scheduled only when focused. With
+                // reduced motion the caret stays on and there is no timer.
                 let period = u64::from(CARET_BLINK_ON_MS + CARET_BLINK_OFF_MS);
                 let store = cx.global::<SpriteStore>();
                 let (now, steady) = (store.elapsed_ms(), store.reduce_motion());
@@ -1022,12 +1031,12 @@ mod tests {
         assert_eq!(shown.chars().count(), 5);
         assert!(shown.chars().all(|c| c == MASK));
         assert_eq!(shown_text(secret, false), secret);
-        // Ogni confine di carattere del testo vero ha il suo posto fra i pallini, e torna indietro uguale.
+        // Every character boundary of the real text has its place among the dots, and goes back the same.
         for (at, _) in secret.char_indices().chain(std::iter::once((secret.len(), ' '))) {
             let shown_at = to_display(secret, at, true);
             assert_eq!(from_display(secret, shown_at, true), at);
         }
-        // Un punto a metà di un pallino cade sul carattere che lo comincia.
+        // A point halfway through a dot falls on the character that starts it.
         assert_eq!(from_display(secret, 1, true), 0);
         assert_eq!(to_display(secret, 3, false), 3);
     }

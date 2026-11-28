@@ -1,15 +1,15 @@
-//! L'indice dei brani scaricati sul dispositivo (passo 4.6b). Ogni brano salvato ha una voce con ciò
-//! che serve a suonarlo senza rete e a riconoscere un file cambiato: il brano (titolo, artista,
-//! copertina: l'elenco dei Scaricati non chiede niente al server), il percorso, il formato, il peso
-//! e l'SHA-256 del contenuto, calcolato mentre il file veniva scritto.
+//! The index of tracks downloaded to the device (step 4.6b). Each saved track has an entry with what
+//! is needed to play it without network and to recognise a changed file: the track (title, artist,
+//! cover: the Downloads list asks the server for nothing), the path, the format, the weight
+//! and the SHA-256 of the content, computed while the file was being written.
 //!
-//! L'indice sta in `config.json` (chiave `downloaded`), non in un file a parte: la scrittura è già
-//! atomica, unica e con la chiusura che aspetta il disco (`state::settings`), e un secondo file
-//! avrebbe due scrittori e due punti in cui perdersi. Costa una voce di circa mezzo chilobyte per
-//! brano, come i brani piaciuti.
+//! The index lives in `config.json` (key `downloaded`), not in a separate file: the write is already
+//! atomic, single and with the close waiting for the disk (`state::settings`), and a second file
+//! would have two writers and two points where things can get lost. It costs an entry of about half a kilobyte per
+//! track, like the liked tracks.
 //!
-//! Un file che manca o che pesa diverso all'avvio non si cancella e non si toglie dall'indice: lo si
-//! segna ([`Lost`]) e il brano si ascolta dalla rete finché l'utente non lo scarica di nuovo o lo
+//! A file that is missing or has a different weight at startup is neither deleted nor removed from the index: it is
+//! marked ([`Lost`]) and the track plays from the network until the user downloads it again or removes it.
 //! toglie.
 
 use std::io::Read;
@@ -22,67 +22,67 @@ use uuid::Uuid;
 use crate::api::{DownloadQuality, Track};
 use crate::player::stream::StreamBuffer;
 
-/// Un brano scaricato: dove sta e che file è.
+/// A downloaded track: where it is and what file it is.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedTrack {
     pub track: Track,
     pub path: PathBuf,
-    /// L'estensione del file (`flac`, `m4a`, …).
+    /// The file extension (`flac`, `m4a`, …).
     pub format: String,
-    /// La qualità che il server ha dato davvero, se l'ha detta.
+    /// The quality the server actually gave, if it said so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quality: Option<DownloadQuality>,
-    /// Il peso del file in byte, com'era a fine scrittura.
+    /// The file's weight in bytes, as it was at the end of writing.
     pub size: u64,
-    /// SHA-256 del contenuto, in esadecimale, calcolato mentre si scriveva.
+    /// SHA-256 of the content, in hexadecimal, computed while it was written.
     pub sha256: String,
 }
 
 impl SavedTrack {
-    /// Il file da cui suonare, con il peso che deve avere.
+    /// The file to play from, with the weight it must have.
     pub fn local(&self) -> LocalFile {
         LocalFile { path: self.path.clone(), size: self.size }
     }
 }
 
-/// Un file da cui suonare: il percorso e il peso che l'indice ricorda.
+/// A file to play from: the path and the weight the index remembers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalFile {
     pub path: PathBuf,
     pub size: u64,
 }
 
-/// Perché un file dell'indice non è più quello di prima.
+/// Why an index file is no longer what it was before.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LostReason {
-    /// Il file non c'è più (spostato o cancellato fuori dall'app).
+    /// The file is gone (moved or deleted outside the app).
     Missing,
-    /// C'è, ma pesa diverso (o, alla verifica profonda, ha un altro contenuto).
+    /// It is there, but its weight differs (or, on the deep check, it has other content).
     Changed,
 }
 
-/// Un brano dell'indice il cui file non è a posto.
+/// A track in the index whose file is not in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lost {
     pub id: Uuid,
     pub reason: LostReason,
 }
 
-/// Il file c'è e pesa quanto deve: un controllo da un metadato, senza leggerlo.
+/// The file is there and weighs what it must: a check from a metadata, without reading it.
 pub fn check_size(file: &LocalFile) -> Result<(), LostReason> {
     match std::fs::metadata(&file.path) {
         Ok(meta) if meta.is_file() && meta.len() == file.size => Ok(()),
         Ok(_) => Err(LostReason::Changed),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(LostReason::Missing),
-        // Un errore che non sia «non c'è» (permessi, disco): non si dà per perso un file che forse c'è.
+        // An error other than "not there" (permissions, disk): a file that may be there is not given up for lost.
         Err(_) => Ok(()),
     }
 }
 
-/// Apre il file di un brano scaricato per suonarlo dal disco. `Err(Some(motivo))`: il file non è più
-/// quello dell'indice (manca o pesa diverso), e l'indice lo segna; `Err(None)`: non si è potuto aprire
-/// per un altro motivo (un permesso, il disco), che non dice nulla sul file. In tutti e due i casi si
-/// ripiega sulla rete. Legge il disco: va chiamata fuori dal riduttore.
+/// Opens a downloaded track's file to play it from disk. `Err(Some(reason))`: the file is no longer
+/// the index's (it is missing or weighs differently), and the index marks it; `Err(None)`: it could not be opened
+/// for another reason (a permission, the disk), which says nothing about the file. In both cases it
+/// falls back to the network. It reads the disk: it must be called outside the reducer.
 pub fn open_local(file: &LocalFile) -> Result<StreamBuffer, Option<LostReason>> {
     match StreamBuffer::open_file(&file.path, file.size) {
         Ok(stream) => Ok(stream),
@@ -94,7 +94,7 @@ pub fn open_local(file: &LocalFile) -> Result<StreamBuffer, Option<LostReason>> 
     }
 }
 
-/// L'SHA-256 del contenuto di `path`, in esadecimale, letto a blocchi (mai tutto in memoria).
+/// The SHA-256 of the content of `path`, in hexadecimal, read in blocks (never all in memory).
 pub fn hash_file(path: &Path) -> std::io::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
@@ -120,9 +120,9 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
     out
 }
 
-/// Controlla le voci dell'indice e dice quali file non sono a posto. Senza `deep` guarda solo che il
-/// file ci sia e pesi quanto deve (è quello che si fa all'avvio: una `stat` per brano); con `deep`
-/// rilegge ogni file e ne confronta l'SHA-256. Legge il disco: va chiamata fuori dal riduttore.
+/// Checks the index entries and says which files are not in order. Without `deep` it only checks that the
+/// file is there and weighs what it must (this is what is done at startup: one `stat` per track); with `deep`
+/// it rereads each file and compares its SHA-256. It reads the disk: it must be called outside the reducer.
 pub fn verify(entries: &[(Uuid, LocalFile, String)], deep: bool) -> Vec<Lost> {
     entries
         .iter()
@@ -162,7 +162,7 @@ mod tests {
         assert_eq!(check_size(&LocalFile { size: 7, ..file.clone() }), Err(LostReason::Changed));
         std::fs::remove_file(&path).unwrap();
         assert_eq!(check_size(&file), Err(LostReason::Missing));
-        // Una cartella al posto del file non è il file.
+        // A folder in place of the file is not the file.
         std::fs::create_dir(&path).unwrap();
         assert_eq!(check_size(&file), Err(LostReason::Changed));
         let _ = std::fs::remove_dir_all(dir);

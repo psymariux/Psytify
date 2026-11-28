@@ -1,20 +1,18 @@
-//! La pagina «Scaricati»: i download in corso e i brani sul dispositivo, che suonano anche senza rete.
-//! Tutto viene da `DownloadsView` e ogni gesto è un `DownloadsCmd` (o un `PlaybackCmd` per suonare): la
-//! pagina non tocca il disco e non calcola niente nel disegno, come la pagina Iced
-//! (`client/src/ui/pages/downloads.rs`).
+//! «Scaricati»: the running downloads and the tracks on the device, which play without network. Everything
+//! comes from `DownloadsView` and every gesture is a `DownloadsCmd` (or a `PlaybackCmd` to play): the page
+//! touches no disk and computes nothing while drawing, like the rest of the page.
 //!
-//! In cima il titolo con il conteggio e lo spazio occupato, la cartella e la qualità, e i pulsanti
-//! Riproduci, Casuale, «Apri cartella» e «Controlla i file» (il controllo a fondo, `DownloadsCmd::Verify`).
-//! Sotto, una sola `uniform_list` di righe da 48 dp: «In corso» (stato, barra a dieci passi, Annulla;
-//! Riprova e «Togli dall'elenco» per un download fallito) e «Sul dispositivo» (formato e peso, o «File
-//! mancante»/«File cambiato» in tinta d'errore con «Scarica di nuovo»; «Rimuovi dal dispositivo» al
-//! passaggio del mouse, con il menu «Altro» del brano). Doppio clic o Invio su un brano lo suona, con la
-//! coda dei brani sul dispositivo. Vuota, «Scopri il catalogo» apre la Home (il catalogo dalla A alla Z).
-//! Gli avvisi (salvato, rimosso, controllo finito) sono eventi del core e li mostra `Shell`.
+//! At the top the title with the count and the space used, the folder and the quality, and the buttons
+//! Riproduci, Casuale, «Apri cartella» and «Controlla i file» (the deep check, `DownloadsCmd::Verify`). Below,
+//! one `uniform_list` of 48 dp rows at the frame margins: «In corso» (state, ten-step bar, cancel; retry and
+//! «Togli dall'elenco» for a failed one) and «Sul dispositivo» (format and size, or «File mancante» / «File
+//! cambiato» in the error tint with «Scarica di nuovo»; «Rimuovi dal dispositivo» and «Altro» on hover).
+//! Double click or Enter plays a track, with the device tracks as the queue. Empty, «Scopri il catalogo» opens
+//! the Home. The notices (saved, removed, check done) are core events that `Shell` shows. The page enters
+//! with the page-enter move.
 //!
-//! I testi delle righe si rifanno quando cambia la vista dei download: quelli dei brani sul dispositivo
-//! solo se cambia l'indice o l'elenco dei file persi (possono essere centinaia), quelli della coda a ogni
-//! pubblicazione (pochi, e l'avanzamento cambia di un punto alla volta).
+//! Row texts are rebuilt when the downloads view changes: the device tracks only when the index or the lost
+//! files change (there may be hundreds), the queue on every publish (a few rows).
 
 use std::sync::Arc;
 
@@ -27,24 +25,27 @@ use psytify_core::command::{DownloadsCmd, PlaybackCmd};
 use psytify_core::snapshot::{DownloadsView, Item, ItemState, LostReason, SavedTrack};
 use psytify_design::sprite;
 use psytify_design::tokens::color::{SURFACE_CANVAS, TEXT_SECONDARY};
+use psytify_design::tokens::size::TRACK_ROW_H;
 use psytify_design::tokens::space::SPACE_3;
 use psytify_design::tokens::type_::TYPE_BODY;
 use uuid::Uuid;
 
+use super::page_frame::PageFrame;
 use super::track_menu::TrackMenu;
 use super::{Page, PageEvent, play_state};
 use crate::components::button::Button;
+use crate::components::frame::Frame;
 use crate::components::icon_button::IconButton;
 use crate::components::indicators::PlayState;
 use crate::components::list_row::{ListRow, RowArt};
 use crate::components::overlay::EmptyState;
 use crate::components::playing_spot::PlayingSpot;
-use crate::components::section::{PageTitle, note, section_heading};
+use crate::components::section::{PageTitle, note_at, section_heading_at};
 use crate::core_model::{Changed, CoreModel};
 use crate::format;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Le due sezioni.
+/// The two sections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Section {
     InProgress,
@@ -60,20 +61,20 @@ impl Section {
     }
 }
 
-/// Una riga della lista, nell'ordine in cui si disegna. Gli indici sono nelle liste del core.
+/// A row of the list, in the order it is drawn. The indices are into the core's lists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Heading(Section),
-    /// Un download della coda (`DownloadsView::items`).
+    /// A download of the queue (`DownloadsView::items`).
     Item(usize),
-    /// Niente sul dispositivo, ma qualcosa in corso: una frase al posto della sezione.
+    /// Nothing on the device, but something in progress: a sentence in place of the section.
     NothingSaved,
-    /// Un brano sul dispositivo (`DownloadsView::saved`).
+    /// A track on the device (`DownloadsView::saved`).
     Saved(usize),
 }
 
-/// Quali righe mostrare: prima i download in corso, poi i brani sul dispositivo. Vuoto se non c'è né
-/// l'una né l'altra cosa (la pagina mostra allora il suo stato vuoto). Pura.
+/// Which rows to show: first the downloads in progress, then the tracks on the device. Empty if there is neither
+/// of the two (the page then shows its empty state). Pure.
 fn plan(items: usize, saved: usize) -> Vec<Row> {
     let mut rows = Vec::with_capacity(items + saved + 2);
     if items > 0 {
@@ -89,14 +90,14 @@ fn plan(items: usize, saved: usize) -> Vec<Row> {
     rows
 }
 
-/// I testi di un download della coda.
+/// The texts of a queued download.
 #[derive(Clone, Debug, PartialEq)]
 struct ItemText {
     id: Uuid,
     title: SharedString,
     status: SharedString,
     failed: bool,
-    /// La barra a dieci passi, finché il download è vivo.
+    /// The ten-step bar, as long as the download is alive.
     steps: Option<f32>,
     cover_url: Option<SharedString>,
 }
@@ -122,7 +123,7 @@ impl ItemText {
     }
 }
 
-/// I testi di un brano sul dispositivo: «Artista · FLAC · 12,3 MB», o il problema del suo file.
+/// The texts of a track on the device: «Artista · FLAC · 12,3 MB», or the problem with its file.
 #[derive(Clone, Debug, PartialEq)]
 struct SavedText {
     id: Uuid,
@@ -157,7 +158,7 @@ impl SavedText {
     }
 }
 
-/// La riga sotto il titolo: quanti brani e quanto pesano, o che il controllo è in corso.
+/// The line under the title: how many tracks and how much they weigh, or that the check is in progress.
 fn summary(view: &DownloadsView) -> String {
     if view.verifying {
         "Controllo dei file…".to_owned()
@@ -174,14 +175,15 @@ pub struct DownloadsPage {
     rows: Vec<Row>,
     items: Vec<ItemText>,
     saved: Vec<SavedText>,
-    /// I brani sul dispositivo come coda da suonare: si rifà solo quando l'indice cambia.
+    /// The device tracks as a queue to play: rebuilt only when the index changes.
     tracks: Arc<[Track]>,
     summary: SharedString,
     folder: SharedString,
-    /// Il brano in corso e come mostrarlo.
+    /// The playing track and how to show it.
     now: Option<(Uuid, PlayState)>,
     scroll: UniformListScrollHandle,
-    /// Il posto dell'equalizzatore del brano in corso: lo dipinge `Shell` (BACKLOG 23).
+    frame: PageFrame,
+    /// The equaliser spot of the playing track: `Shell` paints it (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
@@ -189,7 +191,7 @@ pub struct DownloadsPage {
 impl EventEmitter<PageEvent> for DownloadsPage {}
 
 impl DownloadsPage {
-    /// Il posto dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// The equaliser spot of this view, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -208,6 +210,7 @@ impl DownloadsPage {
             folder: SharedString::default(),
             now: now_playing(&snapshot.playback),
             scroll: UniformListScrollHandle::new(),
+            frame: PageFrame::default(),
             core,
             spot: PlayingSpot::new(),
             _changes: changes,
@@ -235,8 +238,8 @@ impl DownloadsPage {
         }
     }
 
-    /// Prende la vista nuova e rifà i testi: quelli dei brani sul dispositivo solo se l'indice o i file
-    /// persi sono cambiati (o la prima volta).
+    /// Takes the new view and rebuilds the texts: those of the device tracks only if the index or the lost
+    /// files changed (or the first time).
     fn take(&mut self, view: &Arc<DownloadsView>, first: bool) {
         let saved_changed = first || !view.saved.same(&self.view.saved) || !view.lost.same(&self.view.lost);
         if saved_changed {
@@ -265,7 +268,7 @@ impl DownloadsPage {
         self.core.read(cx).downloads(command);
     }
 
-    /// Doppio clic o Invio su un brano sul dispositivo: suona (o mette in pausa se è già lui).
+    /// Double click or Enter on a device track: plays it (or pauses if it is already the one).
     fn play(&self, position: usize, cx: &gpui::App) {
         let Some(text) = self.saved.get(position) else { return };
         let core = self.core.read(cx);
@@ -276,20 +279,47 @@ impl DownloadsPage {
         }
     }
 
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame != self.frame.frame {
+            self.frame.frame = frame;
+            cx.notify();
+        }
+    }
+
+    /// List row `ix` at the frame margins, in its enter move (one step per section).
+    fn line(&self, ix: usize, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let element = match self.rows.get(ix)? {
+            Row::Heading(_) | Row::NothingSaved => self.row(ix, cx)?,
+            _ => self.frame.row(self.row(ix, cx)?),
+        };
+        let section = 1 + self.rows.iter().take(ix + 1).filter(|row| matches!(row, Row::Heading(_))).count();
+        let element = div().h(dp(TRACK_ROW_H)).w_full().child(element).into_any_element();
+        Some(self.frame.wrap(element, section, window))
+    }
+
     fn row(&self, ix: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let margin = self.frame.margin();
         Some(match *self.rows.get(ix)? {
             Row::Heading(section) => {
                 let count = match section {
                     Section::InProgress => self.items.len(),
                     Section::OnDevice => self.saved.len(),
                 };
-                section_heading(section.title().into(), format::tracks(count).into()).into_any_element()
+                section_heading_at(section.title().into(), format::tracks(count).into(), margin)
+                    .into_any_element()
             }
-            Row::NothingSaved => note(
+            Row::NothingSaved => note_at(
                 div()
                     .type_role(TYPE_BODY)
                     .text_color(col(TEXT_SECONDARY))
                     .child("Niente sul dispositivo, per ora: i brani arrivano qui appena scaricati."),
+                margin,
             )
             .into_any_element(),
             Row::Item(position) => {
@@ -300,6 +330,7 @@ impl DownloadsPage {
                     RowArt::Cover(text.cover_url.clone()),
                     text.title.clone(),
                 )
+                .inset(SPACE_3)
                 .detail(text.status.clone())
                 .detail_error(text.failed);
                 if let Some(progress) = text.steps {
@@ -341,7 +372,7 @@ impl DownloadsPage {
                 .detail(text.detail.clone())
                 .detail_error(text.lost)
                 .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                    // Come le righe di brano: un clic non fa niente; doppio clic o Invio suonano.
+                    // As track rows: a click does nothing; double click or Enter plays.
                     if event.click_count() >= 2 || matches!(event, ClickEvent::Keyboard(_)) {
                         this.play(position, cx);
                     }
@@ -363,7 +394,7 @@ impl DownloadsPage {
                             })),
                     );
                 }
-                // Il menu «Altro» del brano, come il tasto destro sulla riga del client Iced.
+                // The track's «Altro» menu, like a right click on a row.
                 let menu_track = self.tracks.get(position).cloned();
                 row.hover_action(
                     IconButton::new(("dl-more", position), sprite::ICON_MORE)
@@ -392,7 +423,10 @@ impl DownloadsPage {
 
     fn title(&self, cx: &mut Context<Self>) -> PageTitle {
         let has_saved = !self.tracks.is_empty();
-        let mut title = PageTitle::screen("Scaricati").meta(self.summary.clone()).detail(self.folder.clone());
+        let mut title = PageTitle::screen("Scaricati")
+            .margin(self.frame.margin())
+            .meta(self.summary.clone())
+            .detail(self.folder.clone());
         if has_saved {
             let tracks = Arc::clone(&self.tracks);
             let shuffled = Arc::clone(&self.tracks);
@@ -433,10 +467,11 @@ fn now_playing(view: &psytify_core::snapshot::PlaybackView) -> Option<(Uuid, Pla
 }
 
 impl Render for DownloadsPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Il posto si segna di nuovo nel paint di questo fotogramma, se la riga in corso è visibile.
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The spot is marked again in this frame's paint, if the playing row is visible.
         self.spot.clear();
-        let title = self.title(cx);
+        self.frame.begin(window, None);
+        let title = self.frame.wrap(self.title(cx).into_any_element(), 0, window);
         let body: AnyElement = if self.rows.is_empty() {
             div()
                 .flex_1()
@@ -448,7 +483,7 @@ impl Render for DownloadsPage {
                         "Niente sul dispositivo",
                         "I brani che scarichi stanno qui e suonano anche senza rete. Il tasto Scarica sta accanto ai brani che la licenza lascia tenere.",
                     )
-                    // Come nel client Iced; il catalogo dalla A alla Z del desktop sta nella Home.
+                    // The desktop's A to Z catalogue is on the Home.
                     .action(Button::new("dl-discover", "Scopri il catalogo").on_click(cx.listener(
                         |_, _: &ClickEvent, _, cx| cx.emit(PageEvent::Open(Page::Home)),
                     ))),
@@ -458,15 +493,23 @@ impl Render for DownloadsPage {
             let list = uniform_list(
                 "downloads-list",
                 self.rows.len(),
-                cx.processor(|this: &mut Self, range: std::ops::Range<usize>, _window, cx| {
-                    range.filter_map(|ix| this.row(ix, cx)).collect::<Vec<_>>()
+                cx.processor(|this: &mut Self, range: std::ops::Range<usize>, window, cx| {
+                    range.filter_map(|ix| this.line(ix, window, cx)).collect::<Vec<_>>()
                 }),
             )
             .track_scroll(&self.scroll)
             .size_full();
             div().flex_1().min_h_0().pt(dp(SPACE_3)).child(list).into_any_element()
         };
-        div().size_full().flex().flex_col().bg(col(SURFACE_CANVAS)).child(title).child(body)
+        div()
+            .relative()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(col(SURFACE_CANVAS))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame))
+            .child(title)
+            .child(body)
     }
 }
 

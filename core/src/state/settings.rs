@@ -1,13 +1,13 @@
-//! Impostazioni e salvataggio di `config.json` (passo 4.1). Il core è l'unico a scrivere il file: i
-//! frontend mandano le modifiche, il dominio le tiene nella sua vista e le scrive al più tardi dopo
-//! [`SAVE_DELAY`], una scrittura alla volta e sempre con lo stato più recente. Alla chiusura aspetta
-//! la scrittura in corso, scrive subito ciò che manca e solo allora lascia fermare il core.
+//! Settings and saving of `config.json` (step 4.1). The core is the only one that writes the file: the
+//! frontends send the changes, the domain keeps them in its view and writes them at the latest after
+//! [`SAVE_DELAY`], one write at a time and always with the most recent state. At closing it waits for
+//! the write in progress, writes at once what is missing, and only then lets the core stop.
 //!
-//! I campi dei domini ancora nel frontend arrivano tutti insieme con [`SettingsCmd::Store`]; un
-//! dominio che passa nel core li consegna da sé (la libreria, con [`Settings::store_library`], la
-//! riproduzione con [`Settings::store_playback`], il catalogo con [`Settings::store_query`], i
-//! download con [`Settings::store_downloads`]) e il frontend smette di mandarli: `Store` non tocca
-//! più i campi che un dominio del core possiede.
+//! The fields of the domains still in the frontend all arrive together with [`SettingsCmd::Store`]; a
+//! domain that moves into the core hands them over itself (the library, with [`Settings::store_library`],
+//! playback with [`Settings::store_playback`], the catalog with [`Settings::store_query`], the
+//! downloads with [`Settings::store_downloads`]) and the frontend stops sending them: `Store` no longer touches
+//! the fields that a core domain owns.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,103 +20,103 @@ use crate::effect::{self, Effect, TimerKey};
 use crate::error::AppError;
 use crate::system_motion::SystemMotion;
 
-/// Quanto aspetta una modifica prima di finire sul disco: quelle che arrivano nel frattempo vanno
-/// nella stessa scrittura. Una modifica nuova non rinvia la scrittura già in attesa.
+/// How long a change waits before reaching the disk: those that arrive meanwhile go into the
+/// same write. A new change does not postpone the write already waiting.
 pub(crate) const SAVE_DELAY: Duration = Duration::from_millis(500);
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone)]
 pub enum SettingsCmd {
-    /// I campi del core come li tiene il frontend, finché i loro domini non passano nel core
-    /// (passi 4.3-4.9). Si scrivono solo se sono cambiati. I campi della libreria (passo 4.2) li
-    /// tiene il suo dominio: quelli di questo valore si ignorano.
+    /// The core's fields as the frontend keeps them, until their domains move into the core
+    /// (steps 4.3-4.9). They are written only if they have changed. The library's fields (step 4.2) are
+    /// kept by its domain: those of this value are ignored.
     Store(Box<CoreConfig>),
-    /// Le preferenze di un frontend: ogni chiave sostituisce quella salvata, `null` la toglie, le
+    /// A frontend's preferences: each key replaces the saved one, `null` removes it, the
     /// altre restano ([`config::merge_ui`]).
     SaveUiPrefs(Map<String, Value>),
-    /// Ascolta (o smette di ascoltare) che cosa il sistema chiede del movimento: il frontend lo
-    /// accende quando la sua preferenza segue il sistema. La lettura arriva in
-    /// [`SettingsView::system_motion`]; spento, l'host chiude il collegamento e la vista torna a
+    /// Listens to (or stops listening to) what the system asks about motion: the frontend
+    /// turns it on when its preference follows the system. The reading arrives in
+    /// [`SettingsView::system_motion`]; off, the host closes the link and the view goes back to
     /// «nessuna preferenza».
     WatchSystemMotion(bool),
-    /// Scrive subito ciò che aspetta [`SAVE_DELAY`], senza fermare il core: il frontend lo manda
-    /// quando l'app va in background (Android la può chiudere in ogni momento, BACKLOG 12). Senza
-    /// modifiche non fa niente; con una scrittura in corso, la prossima parte appena finisce.
+    /// Writes at once what waits for [`SAVE_DELAY`], without stopping the core: the frontend sends it
+    /// when the app goes to the background (Android can close it at any moment, BACKLOG 12). Without
+    /// changes it does nothing; with a write in progress, the next starts as soon as it ends.
     SaveNow,
 }
 
-/// Ciò che i frontend vedono del dominio. Si pubblica solo quando un valore cambia davvero.
+/// What the frontends see of the domain. It is published only when a value really changes.
 #[derive(Debug, Clone, Default)]
 pub struct SettingsView {
     /// I campi del core in `config.json`: quelli letti all'avvio, poi quelli dell'ultimo
-    /// [`SettingsCmd::Store`]. I domini ancora nel frontend partono da qui.
+    /// [`SettingsCmd::Store`]. The domains still in the frontend start from here.
     pub config: Arc<CoreConfig>,
-    /// Le altre chiavi del file: le preferenze dei frontend e quelle che questa versione non conosce.
+    /// The other keys of the file: the frontends' preferences and those this version does not know.
     pub ui: Arc<Map<String, Value>>,
-    /// Perché l'ultima scrittura non è riuscita; `None` dopo una riuscita. Intanto il file resta
-    /// quello di prima, intero, e si riprova alla prossima modifica e alla chiusura.
+    /// Why the last write did not succeed; `None` after a successful one. Meanwhile the file stays
+    /// the previous one, whole, and it is retried at the next change and at closing.
     pub save_error: Option<AppError>,
-    /// Che cosa il sistema chiede del movimento (accessibilità, risparmio energetico), finché un
-    /// frontend lo ascolta con [`SettingsCmd::WatchSystemMotion`]. Non si salva: è del sistema.
+    /// What the system asks about motion (accessibility, power saving), for as long as a
+    /// frontend listens with [`SettingsCmd::WatchSystemMotion`]. It is not saved: it belongs to the system.
     pub system_motion: SystemMotion,
 }
 
-/// I timer del dominio.
+/// The domain's timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Timer {
-    /// È ora di scrivere le modifiche raccolte.
+    /// Time to write the collected changes.
     Save,
 }
 
-/// I lavori asincroni del dominio.
+/// The domain's async jobs.
 #[derive(Debug)]
 pub(crate) enum Job {
     /// Scrive `config.json` in `path` ([`config::write`]), direttamente dalla vista: niente copie.
     Write { path: PathBuf, core: Arc<CoreConfig>, ui: Arc<Map<String, Value>> },
 }
 
-/// L'esito di un [`Job`].
+/// The outcome of a [`Job`].
 #[derive(Debug)]
 pub(crate) enum Done {
     Written(Result<(), AppError>),
 }
 
-/// A che punto è la chiusura, per il salvataggio.
+/// Where the closing is, for the save.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum Closing {
-    /// Il core è in funzione.
+    /// The core is running.
     #[default]
     No,
-    /// Il core si ferma: si aspetta l'esito della scrittura partita prima.
+    /// The core is stopping: it waits for the outcome of the write started before.
     Requested,
-    /// La scrittura in corso è l'ultima: se fallisce, il core si ferma lo stesso e lo dice.
+    /// The write in progress is the last: if it fails, the core stops all the same and says so.
     LastWrite,
 }
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug, Default)]
 pub(crate) struct Settings {
     pub(crate) view: Arc<SettingsView>,
-    /// Dove sta `config.json`. Senza, la configurazione resta in memoria e non si scrive mai (i
-    /// test, un frontend senza cartella dei dati).
+    /// Where `config.json` sits. Without it, the configuration stays in memory and is never written (the
+    /// tests, a frontend without a data folder).
     path: Option<PathBuf>,
-    /// La vista ha modifiche che il file non ha.
+    /// The view has changes the file does not have.
     dirty: bool,
-    /// Il timer [`Timer::Save`] è armato.
+    /// The timer [`Timer::Save`] is armed.
     scheduled: bool,
-    /// Una scrittura è in corso. La prossima parte solo dopo il suo esito: due scritture non si
-    /// sovrappongono mai, e mai due usano insieme `config.json.tmp`.
+    /// A write is in progress. The next starts only after its outcome: two writes do not
+    /// overlap, and two never use `config.json.tmp` at the same time.
     writing: bool,
     closing: Closing,
-    /// Un frontend ascolta il movimento chiesto dal sistema: l'host tiene il collegamento.
+    /// A frontend listens to the motion requested by the system: the host holds the link.
     watching_motion: bool,
-    /// [`SettingsCmd::SaveNow`] è arrivato durante una scrittura: ciò che resta si scrive al suo
-    /// esito, senza aspettare il timer.
+    /// [`SettingsCmd::SaveNow`] arrived during a write: what remains is written at its
+    /// outcome, without waiting for the timer.
     hurry: bool,
 }
 
 impl Settings {
-    /// Il dominio con la configurazione letta all'avvio, da riscrivere in `path`.
+    /// The domain with the configuration read at startup, to be rewritten in `path`.
     pub(crate) fn new(config: Config, path: Option<PathBuf>) -> Self {
         let view = SettingsView {
             config: Arc::new(config.core),
@@ -157,15 +157,15 @@ impl Settings {
         }
     }
 
-    /// Una lettura del sistema. Si pubblica solo se cambia, e solo mentre qualcuno ascolta: una
-    /// lettura arrivata dopo lo spegnimento si butta.
+    /// A reading from the system. It is published only if it changes, and only while someone listens: a
+    /// reading that arrives after switching off is thrown away.
     pub(crate) fn system_motion(&mut self, motion: SystemMotion) {
         if self.watching_motion && self.view.system_motion != motion {
             Arc::make_mut(&mut self.view).system_motion = motion;
         }
     }
 
-    /// Sostituisce i campi del core, se sono cambiati: uguali, non si pubblica e non si scrive.
+    /// Replaces the core's fields, if they have changed: equal, nothing is published or written.
     pub(crate) fn store(&mut self, core: CoreConfig, effects: &mut Vec<Effect>) {
         if *self.view.config != core {
             Arc::make_mut(&mut self.view).config = Arc::new(core);
@@ -173,8 +173,8 @@ impl Settings {
         }
     }
 
-    /// Sostituisce i campi della libreria, se sono cambiati. Il confronto guarda i puntatori delle
-    /// liste (`Shared`), non gli elementi, e l'`Arc` della configurazione si copia solo allora.
+    /// Replaces the library's fields, if they have changed. The comparison looks at the pointers of the
+    /// lists (`Shared`), not the elements, and the configuration's `Arc` is copied only then.
     pub(crate) fn store_library(&mut self, fields: LibraryFields, effects: &mut Vec<Effect>) {
         if self.view.config.library() != fields {
             Arc::make_mut(&mut Arc::make_mut(&mut self.view).config).set_library(fields);
@@ -182,7 +182,7 @@ impl Settings {
         }
     }
 
-    /// Sostituisce i campi dei download, se sono cambiati.
+    /// Replaces the download fields, if they have changed.
     pub(crate) fn store_downloads(&mut self, fields: DownloadsFields, effects: &mut Vec<Effect>) {
         if self.view.config.downloads() != fields {
             Arc::make_mut(&mut Arc::make_mut(&mut self.view).config).set_downloads(fields);
@@ -190,7 +190,7 @@ impl Settings {
         }
     }
 
-    /// Sostituisce il testo cercato per ultimo, se è cambiato.
+    /// Replaces the text searched last, if it has changed.
     pub(crate) fn store_query(&mut self, query: String, effects: &mut Vec<Effect>) {
         if self.view.config.last_query != query {
             Arc::make_mut(&mut Arc::make_mut(&mut self.view).config).last_query = query;
@@ -198,7 +198,7 @@ impl Settings {
         }
     }
 
-    /// Sostituisce i campi della riproduzione, se sono cambiati (la coda si confronta per puntatore).
+    /// Replaces the playback fields, if they have changed (the queue is compared by pointer).
     pub(crate) fn store_playback(&mut self, fields: PlaybackFields, effects: &mut Vec<Effect>) {
         if self.view.config.playback() != fields {
             Arc::make_mut(&mut Arc::make_mut(&mut self.view).config).set_playback(fields);
@@ -220,8 +220,8 @@ impl Settings {
             Done::Written(result) => {
                 self.writing = false;
                 if result.is_err() {
-                    // Il file non ha queste modifiche: si riprova alla prossima o alla chiusura, mai
-                    // da soli a vuoto mentre l'app è ferma.
+                    // The file does not have these changes: it is retried at the next one or at closing, never
+                    // on its own to nothing while the app is idle.
                     self.dirty = true;
                 }
                 let error = result.as_ref().err();
@@ -229,7 +229,7 @@ impl Settings {
                     Arc::make_mut(&mut self.view).save_error = error.cloned();
                 }
                 match self.closing {
-                    // Chiesta subito durante la scrittura: si scrive ora ciò che è cambiato intanto.
+                    // Asked for right during the write: what has changed meanwhile is written now.
                     Closing::No if std::mem::take(&mut self.hurry) && self.dirty && result.is_ok() => {
                         self.write(effects);
                     }
@@ -242,8 +242,8 @@ impl Settings {
         }
     }
 
-    /// Il core si ferma: niente più attese. Si scrive subito ciò che manca, dopo l'esito della
-    /// scrittura in corso se ce n'è una; poi [`Effect::Flushed`] lascia fermare il core.
+    /// The core stops: no more waits. What is missing is written at once, after the outcome of the
+    /// write in progress if there is one; then [`Effect::Flushed`] lets the core stop.
     pub(crate) fn close(&mut self, effects: &mut Vec<Effect>) {
         if std::mem::take(&mut self.scheduled) {
             effects.push(Effect::CancelTimer(TimerKey::Settings(Timer::Save)));
@@ -254,8 +254,8 @@ impl Settings {
         }
     }
 
-    /// Scrive ora ciò che aspetta il timer: il timer non serve più. Con una scrittura in corso, lo fa
-    /// [`Settings::done`] al suo esito. Durante la chiusura ci pensa già [`Settings::close`].
+    /// Writes now what the timer awaits: the timer is no longer needed. With a write in progress, it does
+    /// [`Settings::done`] at its outcome. During closing [`Settings::close`] already takes care of it.
     fn save_now(&mut self, effects: &mut Vec<Effect>) {
         if self.closing != Closing::No || !self.dirty {
             return;
@@ -270,7 +270,7 @@ impl Settings {
         }
     }
 
-    /// Alla chiusura, senza scritture in corso: l'ultima scrittura, se manca qualcosa, o la fine.
+    /// At closing, with no writes in progress: the last write, if something is missing, or the end.
     fn flush(&mut self, effects: &mut Vec<Effect>) {
         if self.write(effects) {
             self.closing = Closing::LastWrite;
@@ -279,7 +279,7 @@ impl Settings {
         }
     }
 
-    /// La vista è cambiata: il file va riscritto.
+    /// The view has changed: the file must be rewritten.
     fn changed(&mut self, effects: &mut Vec<Effect>) {
         if self.path.is_some() {
             self.dirty = true;
@@ -287,8 +287,8 @@ impl Settings {
         }
     }
 
-    /// Arma il timer, se non è già armato e nessuna scrittura è in corso: in quel caso lo riarma
-    /// [`Settings::done`], se nel frattempo è cambiato qualcosa. Durante la chiusura non serve.
+    /// Arms the timer, if it is not already armed and no write is in progress: in that case it re-arms
+    /// [`Settings::done`], if something has changed meanwhile. During closing it is not needed.
     fn schedule(&mut self, effects: &mut Vec<Effect>) {
         if self.scheduled || self.writing || self.closing != Closing::No {
             return;
@@ -297,7 +297,7 @@ impl Settings {
         effects.push(Effect::Timer { key: TimerKey::Settings(Timer::Save), after: SAVE_DELAY });
     }
 
-    /// Scrive ora, se c'è qualcosa da scrivere e nessuna scrittura è in corso. Dice se è partita.
+    /// Writes now, if there is something to write and no write is in progress. Says whether one started.
     fn write(&mut self, effects: &mut Vec<Effect>) -> bool {
         let Some(path) = &self.path else { return false };
         if self.writing || !self.dirty {
@@ -322,7 +322,7 @@ impl Job {
         }
     }
 
-    /// Se il lavoro va perso, il file non è stato scritto.
+    /// If the job is lost, the file was not written.
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::Write { path, .. } => Done::Written(Err(AppError::Io(path.display().to_string()))),
@@ -330,9 +330,9 @@ impl Job {
     }
 }
 
-/// I passi 0 di questo dominio (`saves_do_not_overlap_and_the_last_state_wins`,
-/// `close_flushes_before_exit`), portati sul riduttore: il tempo è finto, i timer scadono quando lo
-/// dice il test e le scritture finiscono quando il test consegna il loro esito.
+/// This domain's step 0 (`saves_do_not_overlap_and_the_last_state_wins`,
+/// `close_flushes_before_exit`), brought to the reducer: the time is fake, the timers expire when
+/// the test says and the writes finish when the test hands over their outcome.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,8 +360,8 @@ mod tests {
         effects
     }
 
-    /// Il movimento del sistema: l'ascolto si accende e si spegne una volta sola, una lettura cambia
-    /// la vista solo se è diversa e solo mentre si ascolta, e niente di tutto questo si salva.
+    /// The system's motion: listening is turned on and off once, a reading changes
+    /// the view only if it is different and only while listening, and none of this is saved.
     #[test]
     fn the_system_motion_is_published_only_on_a_real_change_while_watched() {
         let reduced = SystemMotion { reduced_motion: Some(false), power_saver: Some(true) };
@@ -412,7 +412,7 @@ mod tests {
         AppError::Io("/dati/psytify/config.json".into())
     }
 
-    /// Le ultime ricerche che gli effetti scrivono su disco, nell'ordine.
+    /// The last searches that the effects write to disk, in order.
     fn writes(effects: &[Effect]) -> Vec<String> {
         effects
             .iter()
@@ -433,7 +433,7 @@ mod tests {
     fn changes_are_written_once_after_the_delay_with_the_last_state() {
         let mut settings = settings();
         assert!(arms_the_timer(&send(&mut settings, [query("a")])));
-        // Altre modifiche prima della scadenza: nessun timer nuovo, la scrittura non si rinvia.
+        // Other changes before the deadline: no new timer, the write is not postponed.
         assert!(send(&mut settings, [query("b"), query("c")]).is_empty());
         assert_eq!(writes(&fire(&mut settings)), ["c"]);
         assert!(written(&mut settings, Ok(())).is_empty(), "nothing left to write");
@@ -462,18 +462,18 @@ mod tests {
         let mut settings = settings();
         send(&mut settings, [query("a")]);
         assert_eq!(writes(&fire(&mut settings)), ["a"]);
-        // La scrittura è in volo: niente timer e niente seconda scrittura accanto alla prima.
+        // The write is in flight: no timer and no second write next to the first.
         assert!(send(&mut settings, [query("b"), query("c")]).is_empty());
         assert!(fire(&mut settings).is_empty(), "a stray timer starts no second write");
-        // Arrivato il suo esito, si riparte con lo stato di adesso.
+        // Once its outcome has arrived, one starts again with the state of now.
         assert!(arms_the_timer(&written(&mut settings, Ok(()))));
         assert_eq!(writes(&fire(&mut settings)), ["c"]);
         assert!(written(&mut settings, Ok(())).is_empty());
     }
 
-    /// BACKLOG 12: l'app va in background e Android la può chiudere. `SaveNow` scrive subito ciò che
-    /// aspetta il timer (e lo spegne), non fa niente senza modifiche, e durante una scrittura fa
-    /// partire la prossima al suo esito, senza il timer.
+    /// BACKLOG 12: the app goes to the background and Android can close it. `SaveNow` writes at once what
+    /// waits for the timer (and turns it off), does nothing without changes, and during a write starts
+    /// the next one at its outcome, without the timer.
     #[test]
     fn save_now_writes_what_waits_without_the_delay() {
         let mut settings = settings();
@@ -488,13 +488,13 @@ mod tests {
         assert_eq!(writes(&effects), ["a"]);
         assert!(fire(&mut settings).is_empty(), "il timer spento non scrive di nuovo");
 
-        // Una modifica e `SaveNow` mentre la scrittura è in volo: la prossima parte al suo esito.
+        // A change and `SaveNow` while the write is in flight: the next starts at its outcome.
         assert!(send(&mut settings, [query("b"), SettingsCmd::SaveNow]).is_empty());
         assert_eq!(writes(&written(&mut settings, Ok(()))), ["b"], "subito, non dopo il timer");
         assert!(written(&mut settings, Ok(())).is_empty());
         assert!(send(&mut settings, [SettingsCmd::SaveNow]).is_empty(), "tutto scritto");
 
-        // Dopo, le modifiche tornano ad aspettare il timer.
+        // Afterwards, the changes go back to waiting for the timer.
         assert!(arms_the_timer(&send(&mut settings, [query("c")])));
     }
 
@@ -542,7 +542,7 @@ mod tests {
         assert!(matches!(written(&mut settings, Ok(())).as_slice(), [Effect::Flushed(Ok(()))]));
     }
 
-    /// `docs/transformation/BACKLOG.md`, 7: la chiusura non scrive accanto a una scrittura in corso.
+    /// `docs/transformation/BACKLOG.md`, 7: closing does not write next to a write in progress.
     #[test]
     fn close_waits_for_the_write_in_flight_then_writes_the_rest() {
         let mut settings = settings();
@@ -566,9 +566,9 @@ mod tests {
         send(&mut settings, [query("a")]);
         fire(&mut settings);
         close(&mut settings);
-        // Fallisce la scrittura partita prima della chiusura: se ne tenta un'ultima.
+        // The write started before closing fails: one last attempt is made.
         assert_eq!(writes(&written(&mut settings, Err(io_error()))), ["a"]);
-        // Fallisce anche l'ultima: il core si ferma e dice perché.
+        // The last one fails too: the core stops and says why.
         let effects = written(&mut settings, Err(io_error()));
         assert!(
             matches!(effects.as_slice(), [Effect::Flushed(Err(err))] if *err == io_error()),

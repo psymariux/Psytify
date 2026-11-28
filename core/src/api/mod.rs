@@ -1,4 +1,4 @@
-//! Accesso al backend: client HTTP, modelli e flussi che combinano più richieste.
+//! Access to the backend: HTTP client, models and flows that combine several requests.
 
 pub mod client;
 pub mod models;
@@ -27,13 +27,13 @@ use crate::error::AppError;
 use crate::player::decoder;
 use crate::player::stream::{StreamBuffer, WARM_BYTES};
 
-/// Nome senza spazi né punteggiatura, in minuscolo, per confrontare titoli e artisti.
+/// A name without spaces or punctuation, in lowercase, to compare titles and artists.
 fn compact(text: &str) -> String {
     text.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
-/// Fra i brani del catalogo, quello che è lo stesso del brano salvato: stesso artista e titolo, e
-/// la durata più vicina (entro 15 secondi, se la conosce).
+/// Among the catalog's tracks, the one that is the same as the saved track: same artist and title, and
+/// the closest duration (within 15 seconds, if it knows it).
 pub fn best_match<'a>(track: &Track, found: &'a [SourceItem]) -> Option<&'a SourceItem> {
     let (artist, title) = (compact(&track.artist.name), compact(&track.title));
     found
@@ -46,8 +46,8 @@ pub fn best_match<'a>(track: &Track, found: &'a [SourceItem]) -> Option<&'a Sour
         .min_by_key(|item| item.duration_ms.map_or(0, |ms| ms.abs_diff(track.duration_ms)))
 }
 
-/// Un brano salvato che il server non conosce più (database ricreato): lo ritrova nel catalogo
-/// ufficiale e lo fa importare di nuovo. Restituisce il brano nuovo, con il suo identificatore.
+/// A saved track that the server no longer knows (database recreated): it finds it again in the
+/// official catalog and has it imported again. Returns the new track, with its identifier.
 pub async fn heal_track(api: ApiClient, track: Track) -> Result<Track, AppError> {
     let query = format!("{} {}", track.artist.name, track.title);
     let found = api.meta_search(&query).await?;
@@ -56,8 +56,8 @@ pub async fn heal_track(api: ApiClient, track: Track) -> Result<Track, AppError>
     imported.tracks.into_iter().next().ok_or(AppError::InvalidResponse)
 }
 
-/// Richiede un URL firmato e lo usa. Se lo storage risponde 401 o 403 l'URL è scaduto: ne
-/// richiede uno nuovo e riprova una sola volta.
+/// Requests a signed URL and uses it. If the storage answers 401 or 403 the URL has expired: it
+/// requests a new one and retries only once.
 pub async fn with_fresh_url<T, U, UF, F, FF>(mut request_url: U, mut use_url: F) -> Result<T, AppError>
 where
     U: FnMut() -> UF,
@@ -75,9 +75,9 @@ where
     }
 }
 
-/// Apre l'ascolto progressivo di un brano nella qualità scelta: il buffer ha già i primi byte e
-/// continua a riempirsi. Un MP4 (M4A) con l'indice in fondo va letto dalla fine: se il server
-/// non ha detto la lunghezza, si aspetta il file intero.
+/// Opens the progressive listening of a track in the chosen quality: the buffer already has the first bytes and
+/// keeps filling. An MP4 (M4A) with the index at the end must be read from the end: if the server
+/// did not say the length, the whole file is waited for.
 pub async fn stream_audio(
     api: ApiClient,
     track_id: Uuid,
@@ -86,8 +86,8 @@ pub async fn stream_audio(
     open_audio(api, track_id, quality, None).await
 }
 
-/// Apre un brano che forse si ascolterà: scarica solo la testata (`WARM_BYTES`) e si ferma. Se
-/// poi parte, `StreamBuffer::release` (o il primo byte letto oltre la testata) lo fa continuare.
+/// Opens a track that may be listened to: it downloads only the head (`WARM_BYTES`) and stops. If
+/// it then plays, `StreamBuffer::release` (or the first byte read beyond the head) makes it continue.
 pub async fn warm_audio(api: ApiClient, track_id: Uuid, quality: Quality) -> Result<StreamBuffer, AppError> {
     open_audio(api, track_id, quality, Some(WARM_BYTES)).await
 }
@@ -113,9 +113,9 @@ async fn open_audio(
         && stream.ready(decoder::SNIFF_BYTES).await
         && decoder::is_mp4(&stream.head(decoder::SNIFF_BYTES))
     {
-        // Un M4A senza lunghezza si decodifica solo a file intero: niente testata sola.
+        // An M4A without a length decodes only with the whole file: no lone head.
         stream.release();
-        // `ready(usize::MAX)` aspetta la fine del download, o `false` se è fallito.
+        // `ready(usize::MAX)` waits for the end of the download, or `false` if it failed.
         if !stream.ready(usize::MAX).await {
             return Err(AppError::AudioDecode);
         }
@@ -123,7 +123,7 @@ async fn open_audio(
     Ok(stream)
 }
 
-/// Byte audio di un brano nella qualità scelta, tutti in memoria (test sul server vivo).
+/// Audio bytes of a track in the chosen quality, all in memory (tests against the live server).
 #[cfg(test)]
 pub async fn load_audio(api: ApiClient, track_id: Uuid, quality: Quality) -> Result<Arc<[u8]>, AppError> {
     let bytes = with_fresh_url(
@@ -140,35 +140,35 @@ pub async fn load_audio(api: ApiClient, track_id: Uuid, quality: Quality) -> Res
     Ok(Arc::from(bytes))
 }
 
-/// Quante volte si richiede una versione in preparazione prima di arrendersi: il server ricodifica
-/// al massimo per tre minuti.
+/// How many times a version being prepared is requested before giving up: the server re-encodes
+/// for three minutes at most.
 const PREPARE_ATTEMPTS: usize = 90;
 
-/// Un brano scaricato: dove è finito, che qualità ha davvero e che file è (peso e SHA-256 del
-/// contenuto, calcolato mentre si scriveva: serve a riconoscere un file cambiato o danneggiato).
+/// A downloaded track: where it ended up, what quality it really has and what file it is (weight and SHA-256 of the
+/// content, computed while it was written: it serves to recognise a changed or damaged file).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Downloaded {
     pub path: PathBuf,
     pub size: u64,
-    /// SHA-256 del contenuto, in esadecimale.
+    /// SHA-256 of the content, in hexadecimal.
     pub sha256: String,
-    /// L'estensione del file che il server ha dato.
+    /// The file extension the server gave.
     pub format: String,
-    /// La qualità che il server ha dato; `None` se non l'ha detta (un server più vecchio).
+    /// The quality the server gave; `None` if it did not say (an older server).
     pub delivered: Option<DownloadQuality>,
-    /// La qualità chiesta.
+    /// The quality requested.
     pub asked: DownloadQuality,
 }
 
 impl Downloaded {
-    /// Il brano non ha la qualità chiesta (un file con perdita non si migliora): è arrivata la più vicina.
+    /// The track does not have the quality requested (a lossy file is not improved): the nearest one came.
     pub fn is_lower_than_asked(&self) -> bool {
         self.delivered.is_some_and(|got| got != self.asked)
     }
 }
 
-/// Chiede l'URL di download nella qualità scelta, aspettando che il server finisca di preparare la
-/// versione se serve una ricodifica.
+/// Requests the download URL in the chosen quality, waiting for the server to finish preparing the
+/// version if a re-encoding is needed.
 async fn ready_download_url(
     api: &ApiClient,
     id: Uuid,
@@ -183,10 +183,10 @@ async fn ready_download_url(
     Err(AppError::Timeout)
 }
 
-/// Scarica un brano nella cartella indicata, nella qualità chiesta, e restituisce il percorso del
-/// file. L'estensione è quella del file che il server dà davvero (una versione ricodificata è m4a).
-/// `progress` dice a che punto è. Il file nasce con un nome temporaneo unico e prende il suo solo a
-/// scaricamento finito, senza mai coprire un file esistente.
+/// Downloads a track into the given folder, in the requested quality, and returns the path of the
+/// file. The extension is that of the file the server really gives (a re-encoded version is m4a).
+/// `progress` says where it is. The file is born with a unique temporary name and takes its own only at the
+/// end of the download, without ever covering an existing file.
 pub async fn download_track(
     api: ApiClient,
     track: Track,
@@ -227,8 +227,8 @@ fn is_known_extension(extension: &str) -> bool {
     matches!(extension, "flac" | "mp3" | "ogg" | "wav" | "m4a")
 }
 
-/// Stessa regola del server: lettere e cifre ASCII, spazi, trattini e underscore, al massimo
-/// 100 caratteri; se resta vuoto `track`.
+/// Same rule as the server: ASCII letters and digits, spaces, hyphens and underscores, at most
+/// 100 characters; if it stays empty, `track`.
 pub fn download_filename(title: &str, ext: &str) -> String {
     let filtered: String = title
         .chars()
@@ -241,7 +241,7 @@ pub fn download_filename(title: &str, ext: &str) -> String {
     format!("{}.{ext}", if stem.is_empty() { "track" } else { stem })
 }
 
-/// Non sovrascrive mai un file esistente: aggiunge " (2)", " (3)", ...
+/// Never overwrites an existing file: it adds " (2)", " (3)", ...
 pub(crate) async fn unique_path(dir: &Path, filename: &str) -> PathBuf {
     let candidate = dir.join(filename);
     if !tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
@@ -300,7 +300,7 @@ mod tests {
         }
     }
 
-    /// Simula backend e storage: conta le richieste e risponde con gli esiti indicati, in ordine.
+    /// Simulates backend and storage: counts the requests and answers with the outcomes given, in order.
     async fn run(outcomes: Vec<Result<u8, AppError>>) -> (Result<u8, AppError>, usize, usize) {
         let url_requests = AtomicUsize::new(0);
         let fetches = AtomicUsize::new(0);
@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(download_filename("城市", "ogg"), "track.ogg");
     }
 
-    // ---------- Test contro un server reale (cargo test -- --ignored) ----------
+    // ---------- Tests against a real server (cargo test -- --ignored) ----------
 
     fn live_api() -> ApiClient {
         let url = std::env::var("PSYTIFY_TEST_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
@@ -434,7 +434,7 @@ mod tests {
         let started = std::time::Instant::now();
         let warm = warm_audio(api.clone(), warm_track.id, Quality::Lossless).await.unwrap();
         let warming = started.elapsed();
-        // Il clic arriva dopo: la testata è già in memoria.
+        // The click comes later: the head is already in memory.
         tokio::time::sleep(Duration::from_millis(300)).await;
         let started = std::time::Instant::now();
         warm.release();
@@ -490,7 +490,7 @@ mod tests {
                 async move {
                     let mut url = api.stream_url(track.id, Quality::Lossless).await?;
                     if n == 0 {
-                        // Firma alterata: lo storage risponde 403 come per un URL scaduto.
+                        // Altered signature: the storage answers 403 as for an expired URL.
                         url.url = url.url.replace("X-Amz-Signature=", "X-Amz-Signature=00");
                     }
                     Ok(url)
@@ -514,7 +514,7 @@ mod tests {
         let track = live_tracks(&api).await.remove(0);
         let results = api.search(&track.title).await.unwrap();
         assert!(results.top.is_some() && !results.tracks.is_empty(), "{results:?}");
-        // Un refuso nel nome dell'artista trova comunque i suoi brani.
+        // A typo in the artist's name still finds their tracks.
         let typo = format!("{}x", track.artist.name);
         let results = api.search(&typo).await.unwrap();
         assert!(!results.tracks.is_empty(), "{typo}: {results:?}");
@@ -547,7 +547,7 @@ mod tests {
         let first = download(api.clone()).await.unwrap().path;
         let second = download(api.clone()).await.unwrap().path;
 
-        // Il download è la piena qualità: lo stesso file dell'ascolto lossless.
+        // The download is full quality: the same file as the lossless listening.
         let expected = load_audio(api, track.id, Quality::Lossless).await.unwrap();
         assert_eq!(std::fs::read(&first).unwrap(), expected.to_vec());
         assert_ne!(first, second, "the second download must not overwrite the first");

@@ -110,6 +110,8 @@ jobs:
   android:
     name: Android APK
     uses: ./.github/workflows/android.yml
+    with:
+      release: true
     secrets: inherit
 
   publish:

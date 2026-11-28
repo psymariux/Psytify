@@ -16,11 +16,11 @@ use crate::theme::{Ap, TypeStyle, cased, col, dp};
 pub enum BadgeKind {
     /// `MP3 320`, licenza.
     Neutral,
-    /// `LOSSLESS`, `FLAC 24/96`: non è lime, la qualità non è uno stato.
+    /// `LOSSLESS`, `FLAC 24/96`: not lime, quality is not a state.
     Quality,
-    /// Conteggio non letto: fill chiaro.
+    /// Unread count: light fill.
     Count,
-    /// Quadratino lime di 2 x 2 AP più testo.
+    /// 2 x 2 AP lime square plus text.
     Live,
     Error,
 }

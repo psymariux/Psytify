@@ -1,11 +1,11 @@
-//! Un backend finto per i test dell'host: risponde come il vero agli URL firmati di ascolto e di
-//! download e serve un solo file audio, con le richieste `Range` che il lettore progressivo fa; a
-//! `/v1/cover` risponde con un PNG 8 x 8 (le copertine passano dal backend) e, se il test gliela
-//! dà, a `POST /v1/meta/tracks/{id}/resolve` con la risposta di importazione e, per i videoclip, a
-//! `GET /v1/tracks/{id}/video-url` con le altezze che il test sceglie (una per richiesta, l'ultima si
-//! ripete) e a `POST /v1/tracks/{id}/video/prepare` con un «fatto». Gira
-//! sul runtime del test, su una porta locale; ogni richiesta resta in un elenco, così un test dice
-//! se il core è andato in rete o ha suonato dal disco.
+//! A fake backend for the host tests: it answers like the real one to the signed listening and download
+//! URLs and serves a single audio file, with the `Range` requests that the progressive reader makes; at
+//! `/v1/cover` it answers with an 8 x 8 PNG (covers pass through the backend) and, if the test gives it,
+//! to `POST /v1/meta/tracks/{id}/resolve` with the import reply and, for music videos, to
+//! `GET /v1/tracks/{id}/video-url` with the heights the test chooses (one per request, the last repeats)
+//! and to `POST /v1/tracks/{id}/video/prepare` with a "done". It runs on the test's runtime, on a local port;
+//! every request stays in a list, so a test can say
+//! whether the core went to the network or played from disk.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -13,30 +13,30 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-/// Il backend finto in ascolto.
+/// The fake backend listening.
 pub(crate) struct FakeBackend {
-    /// `http://127.0.0.1:<porta>`, da scrivere in `server` nella configurazione del core.
+    /// `http://127.0.0.1:<port>`, to write as `server` in the core configuration.
     pub(crate) url: String,
     hits: Arc<Mutex<Vec<String>>>,
-    /// Le altezze dei videoclip da servire: una per richiesta di `video-url`, l'ultima resta.
+    /// The heights of the music videos to serve: one per `video-url` request; the last one stays.
     #[cfg_attr(not(feature = "video"), expect(dead_code, reason = "lo leggono solo i test dei videoclip"))]
     heights: Arc<Mutex<VecDeque<u32>>>,
     accepting: tokio::task::JoinHandle<()>,
 }
 
 impl FakeBackend {
-    /// Spegne il backend: la porta si chiude e ogni richiesta nuova fallisce, come senza rete.
+    /// Turns the backend off: the port closes and every new request fails, as without network.
     pub(crate) fn stop(&self) {
         self.accepting.abort();
     }
 
-    /// Le richieste ricevute finora, nell'ordine, come «GET /percorso» senza la query.
+    /// The requests received so far, in order, as "GET /path" without the query.
     pub(crate) fn hits(&self) -> Vec<String> {
         self.hits.lock().map(|hits| hits.clone()).unwrap_or_default()
     }
 
-    /// Le altezze che `video-url` darà alle richieste che seguono (senza altezze, un videoclip
-    /// completo): la prima richiesta la prima, e così via; l'ultima si ripete.
+    /// The heights `video-url` will give to the requests that follow (without heights, a complete music
+    /// video): the first request gets the first, and so on; the last repeats.
     #[cfg_attr(not(feature = "video"), expect(dead_code, reason = "lo usano solo i test dei videoclip"))]
     pub(crate) fn serve_video_heights(&self, heights: &[u32]) {
         if let Ok(mut queue) = self.heights.lock() {
@@ -44,19 +44,19 @@ impl FakeBackend {
         }
     }
 
-    /// Quante richieste hanno questo percorso come inizio.
+    /// How many requests have this path as a start.
     pub(crate) fn count(&self, prefix: &str) -> usize {
         self.hits().iter().filter(|hit| hit.starts_with(&format!("GET {prefix}"))).count()
     }
 }
 
-/// Avvia il backend: serve `audio` (di formato `format`) per ogni brano.
+/// Starts the backend: serves `audio` (of format `format`) for each track.
 pub(crate) async fn start(audio: Vec<u8>, format: &'static str) -> FakeBackend {
     start_with(audio, format, String::new()).await
 }
 
-/// Come [`start`], e a `/v1/meta/tracks/{id}/resolve` risponde con `resolve` (il JSON di un
-/// `DiscoverImport`): è ciò che il server dà quando importa un brano del catalogo ufficiale.
+/// As [`start`], and to `/v1/meta/tracks/{id}/resolve` it answers with `resolve` (the JSON of a
+/// `DiscoverImport`): what the server gives when it imports a track of the official catalog.
 pub(crate) async fn start_with(audio: Vec<u8>, format: &'static str, resolve: String) -> FakeBackend {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("a free local port");
     let url = format!("http://{}", listener.local_addr().expect("a local address"));

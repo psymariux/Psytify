@@ -1,8 +1,8 @@
-//! Copertine decodificate: dai byte scaricati a un quadrato RGBA ritagliato al centro e ridotto, con
-//! il colore medio per la tinta. Le fasce nere che una fonte aggiunge per fare quadrata un'immagine che
-//! non lo è (Deezer: `…/1000x1000-000000-…` riempie di nero) si tolgono prima del ritaglio, così la
-//! copertina riempie la sua forma (quadrato o cerchio) invece di mostrare due bordi piatti. Nessun tipo di framework grafico: i pixel viaggiano come `Bytes`,
-//! che Iced (`image::Handle::from_rgba`) prende senza copiarli.
+//! Decoded covers: from the downloaded bytes to a square RGBA cropped at the centre and reduced, with
+//! the average colour for the tint. The black bands a source adds to square off an image that is not
+//! square (Deezer: `…/1000x1000-000000-…` fills it with black) are removed before the crop, so the
+//! cover fills its shape (square or circle) instead of showing two flat edges. No graphics framework type:
+//! the pixels travel as `Bytes`, which the frontends' image handles take without copying them.
 
 use std::num::NonZero;
 use std::sync::LazyLock;
@@ -10,39 +10,41 @@ use std::sync::LazyLock;
 use bytes::Bytes;
 use tokio::sync::Semaphore;
 
-/// Lato massimo di una copertina decodificata: basta per la carta più grande su schermi 2x.
+/// The default side of a decoded cover.
 pub const COVER_SIDE: u32 = 256;
-/// Dimensioni massime accettate prima della decodifica (niente immagini "bomba").
+/// The largest side a frontend may ask for ([`fetch_side`]): a header cover at 2x and zoom.
+pub const COVER_SIDE_MAX: u32 = 512;
+/// Maximum size accepted before decoding (no "bomb" images).
 const MAX_SOURCE_SIDE: u32 = 4096;
 const MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Un canale fino a questo valore conta come nero di riempimento (il JPEG sporca un poco il nero pieno).
+/// A channel up to this value counts as fill black (JPEG dirties full black a little).
 const BAR_MAX: u8 = 16;
-/// Una fascia conta come riempimento solo da questa frazione del lato in su: una cornice sottile resta.
+/// A band counts as fill only from this fraction of the side up: a thin frame stays.
 const BAR_MIN_SHARE: f32 = 0.02;
-/// Quel che resta dopo aver tolto le fasce deve essere almeno questa frazione del lato: un'immagine quasi
-/// tutta nera con una scritta nel mezzo è il disegno, non un riempimento.
+/// What remains after removing the bands must be at least this fraction of the side: an image almost
+/// all black with a caption in the middle is the artwork, not fill.
 const CONTENT_MIN_SHARE: f32 = 0.4;
 
-/// Scaricamenti di copertine insieme al massimo: una pagina che ne chiede cento non apre cento
-/// connessioni verso il backend (le altre aspettano il loro turno).
+/// Cover downloads at most at once: a page that asks for a hundred does not open a hundred
+/// connections to the backend (the others wait their turn).
 const MAX_FETCHES: usize = 6;
 
-/// Decodifiche insieme al massimo: una per core, quante ne giravano prima sui worker del runtime.
-/// Ognuna tiene in memoria l'immagine intera: una pagina che chiede cento copertine non apre cento
-/// thread bloccanti né somma cento immagini.
+/// Decodes at most at once: one per core, as many as ran before on the runtime's workers.
+/// Each keeps the whole image in memory: a page that asks for a hundred covers does not open a hundred
+/// blocking threads nor add up a hundred images.
 static DECODES: LazyLock<Semaphore> =
     LazyLock::new(|| Semaphore::new(std::thread::available_parallelism().map_or(4, NonZero::get)));
 
-/// Scaricamenti in corso, al massimo [`MAX_FETCHES`] (vedi [`fetch`]).
+/// Downloads in progress, at most [`MAX_FETCHES`] (see [`fetch`]).
 static FETCHES: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(MAX_FETCHES));
 
-/// Copertina decodificata: quadrato RGBA di lato `side`.
+/// Decoded cover: a square RGBA of side `side`.
 #[derive(Clone)]
 pub struct CoverPixels {
     pub side: u32,
     pub rgba: Bytes,
-    /// Il colore medio (RGB), per la tinta delle pagine e del pannello.
+    /// The average colour (RGB), for the tint of pages and the panel.
     pub tint: [u8; 3],
 }
 
@@ -52,27 +54,42 @@ impl std::fmt::Debug for CoverPixels {
     }
 }
 
-/// Scarica la copertina `url` dal backend (`/v1/cover`, mai direttamente dalla fonte) e la decodifica.
-/// `None` se l'indirizzo non è ammesso, se il backend non risponde o se l'immagine non è valida: il
-/// frontend resta sulla copertina disegnata. Al più [`MAX_FETCHES`] richieste insieme.
+/// Downloads the cover `url` from the backend (`/v1/cover`, never directly from the source) and decodes it.
+/// `None` if the address is not allowed, if the backend does not answer or if the image is not valid: the
+/// frontend stays on the drawn cover. At most [`MAX_FETCHES`] requests at once.
 pub async fn fetch(api: &crate::api::ApiClient, url: &str) -> Option<CoverPixels> {
+    fetch_side(api, url, COVER_SIDE).await
+}
+
+/// [`fetch`] reduced to at most `side` pixels (clamped to [`COVER_SIDE_MAX`]).
+pub async fn fetch_side(api: &crate::api::ApiClient, url: &str, side: u32) -> Option<CoverPixels> {
     let bytes = {
         let _permit = FETCHES.acquire().await.ok()?;
         api.cover(url).await.ok()?
     };
-    decode(bytes).await
+    decode_side(bytes, side).await
 }
 
-/// Decodifica una copertina scaricata su un thread bloccante del runtime: né il thread della UI né
-/// un worker asincrono restano fermi sull'immagine. `None` come [`decode_square`].
+/// Decodes a downloaded cover on a blocking thread of the runtime: neither the UI thread nor an
+/// async worker stays stuck on the image. `None` as for [`decode_square`].
 pub async fn decode(bytes: Vec<u8>) -> Option<CoverPixels> {
-    let _permit = DECODES.acquire().await.ok()?;
-    tokio::task::spawn_blocking(move || decode_square(&bytes)).await.ok().flatten()
+    decode_side(bytes, COVER_SIDE).await
 }
 
-/// Decodifica un'immagine, ne ritaglia il quadrato centrale e lo riduce a [`COVER_SIDE`]. `None`
-/// se il formato non è supportato, se l'immagine è vuota o troppo grande.
+/// [`decode`] reduced to at most `side` pixels (clamped to [`COVER_SIDE_MAX`]).
+pub async fn decode_side(bytes: Vec<u8>, side: u32) -> Option<CoverPixels> {
+    let _permit = DECODES.acquire().await.ok()?;
+    tokio::task::spawn_blocking(move || decode_square_max(&bytes, side)).await.ok().flatten()
+}
+
+/// Decodes an image, crops its central square and reduces it to [`COVER_SIDE`]. `None`
+/// if the format is not supported, if the image is empty or too large.
 pub fn decode_square(bytes: &[u8]) -> Option<CoverPixels> {
+    decode_square_max(bytes, COVER_SIDE)
+}
+
+/// [`decode_square`] reduced to at most `max_side` pixels (between 1 and [`COVER_SIDE_MAX`]).
+pub fn decode_square_max(bytes: &[u8], max_side: u32) -> Option<CoverPixels> {
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(MAX_SOURCE_SIDE);
     limits.max_image_height = Some(MAX_SOURCE_SIDE);
@@ -86,18 +103,18 @@ pub fn decode_square(bytes: &[u8]) -> Option<CoverPixels> {
     let (left, top, width, height) = content_box(&decoded);
     let side = width.min(height);
     let square = decoded.crop_imm(left + (width - side) / 2, top + (height - side) / 2, side, side);
-    let target = side.min(COVER_SIDE);
+    let target = side.min(max_side.clamp(1, COVER_SIDE_MAX));
     let resized = square.resize_exact(target, target, image::imageops::FilterType::Triangle);
     let rgba = resized.to_rgba8().into_raw();
-    // Un quadrato di lato almeno 1 ha sempre un pixel: la media c'è.
+    // A square of side at least 1 always has a pixel: the average exists.
     let tint = average(&rgba)?;
     Some(CoverPixels { side: target, rgba: Bytes::from(rgba), tint })
 }
 
-/// Il riquadro dell'immagine senza le fasce nere di riempimento: `(x, y, larghezza, altezza)`. Si tolgono
-/// solo fasce su un asse (sopra e sotto, o ai lati), lunghe almeno [`BAR_MIN_SHARE`] del lato, e solo se
-/// resta almeno [`CONTENT_MIN_SHARE`]: una cornice nera su tutti e quattro i lati, o un'immagine quasi tutta
-/// nera, è il disegno e resta com'è.
+/// The image's box without the black fill bands: `(x, y, width, height)`. Bands are removed
+/// only on one axis (top and bottom, or the sides), at least [`BAR_MIN_SHARE`] of the side long, and only if
+/// at least [`CONTENT_MIN_SHARE`] remains: a black frame on all four sides, or an image almost all
+/// black, is the artwork and stays as it is.
 fn content_box(image: &image::DynamicImage) -> (u32, u32, u32, u32) {
     use image::GenericImageView;
     let (width, height) = image.dimensions();
@@ -122,7 +139,7 @@ fn content_box(image: &image::DynamicImage) -> (u32, u32, u32, u32) {
     }
 }
 
-/// Colore medio dei pixel (si guarda un pixel ogni quattro: basta e costa poco). `None` senza pixel.
+/// Average colour of the pixels (one pixel in four is looked at: enough, and cheap). `None` without pixels.
 fn average(rgba: &[u8]) -> Option<[u8; 3]> {
     let (mut r, mut g, mut b, mut n) = (0u64, 0u64, 0u64, 0u64);
     for pixel in rgba.as_chunks::<4>().0.iter().step_by(4) {
@@ -156,7 +173,7 @@ mod tests {
         assert_eq!((pixels.side, pixels.rgba.len()), (100, 100 * 100 * 4));
     }
 
-    /// Un'immagine `width` x `height` nera con un riquadro grigio chiaro `(x, y, w, h)`.
+    /// A `width` x `height` black image with a light grey box `(x, y, w, h)`.
     fn framed(width: u32, height: u32, content: (u32, u32, u32, u32)) -> Vec<u8> {
         let (cx, cy, cw, ch) = content;
         let image = image::RgbImage::from_fn(width, height, |x, y| {
@@ -176,24 +193,24 @@ mod tests {
 
     #[test]
     fn black_bars_that_make_a_wide_image_square_are_cropped_away() {
-        // Come Deezer: 200 x 200 con una foto 200 x 110 dentro e il nero sopra e sotto (non al centro).
+        // As Deezer: 200 x 200 with a 200 x 110 photo inside and black above and below (not centred).
         let pixels = decode_square(&framed(200, 200, (0, 20, 200, 110))).unwrap();
         assert_eq!(pixels.side, 110);
         assert_eq!(dark_pixels(&pixels), 0, "niente fasce nere dentro la forma");
-        // Lo stesso ai lati.
+        // The same on the sides.
         let pixels = decode_square(&framed(200, 200, (40, 0, 120, 200))).unwrap();
         assert_eq!((pixels.side, dark_pixels(&pixels)), (120, 0));
     }
 
     #[test]
     fn a_black_frame_or_a_mostly_black_cover_is_the_artwork() {
-        // Nero su tutti e quattro i lati: è il disegno, si tiene intero.
+        // Black on all four sides: it is the artwork, kept whole.
         let pixels = decode_square(&framed(200, 200, (60, 80, 80, 40))).unwrap();
         assert_eq!(pixels.side, 200);
-        // Una striscia nel mezzo di una copertina nera: troppo poco per essere la foto.
+        // A strip in the middle of a black cover: too little to be the photo.
         let pixels = decode_square(&framed(200, 200, (0, 90, 200, 20))).unwrap();
         assert_eq!(pixels.side, 200);
-        // Un filo nero di un pixel non è un riempimento.
+        // A one-pixel black line is not fill.
         let pixels = decode_square(&framed(200, 200, (0, 1, 200, 199))).unwrap();
         assert_eq!(pixels.side, 200);
     }
@@ -208,6 +225,10 @@ mod tests {
     #[test]
     fn large_images_are_scaled_down() {
         assert_eq!(decode_square(&png(1000, 800)).unwrap().side, COVER_SIDE);
+        assert_eq!(decode_square_max(&png(1000, 800), 512).unwrap().side, 512);
+        assert_eq!(decode_square_max(&png(1000, 800), 4096).unwrap().side, COVER_SIDE_MAX, "clamped");
+        assert_eq!(decode_square_max(&png(300, 300), 512).unwrap().side, 300, "never enlarged");
+        assert_eq!(decode_square_max(&png(300, 300), 0).unwrap().side, 1);
     }
 
     #[test]

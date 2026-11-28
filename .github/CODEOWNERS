@@ -1,4 +1,4 @@
 # Who reviews what. One line per path; the last matching line wins.
 *                 @psymariux
 /.github/         @psymariux
-/android/         @psymariux
+/android-app/     @psymariux

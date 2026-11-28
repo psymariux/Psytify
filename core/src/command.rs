@@ -1,6 +1,6 @@
-//! I comandi che un frontend manda al core con [`Core::send`](crate::Core::send). Ogni dominio ha
-//! il suo enum, dichiarato nel suo modulo dello stato: un dominio che arriva aggiunge varianti solo
-//! lì, mai qui.
+//! The commands a frontend sends to the core with [`Core::send`](crate::Core::send). Each domain has
+//! its own enum, declared in its module of the state: a new domain adds variants only there,
+//! never here.
 
 #[cfg(feature = "video")]
 pub use crate::state::video::VideoCmd;
@@ -16,11 +16,11 @@ pub use crate::state::{
     system::Artwork,
 };
 
-/// Un comando per il core, diviso per dominio.
+/// A command for the core, split by domain.
 #[derive(Debug, Clone)]
 pub enum Command {
     Settings(SettingsCmd),
-    /// Nello heap: un comando della libreria porta brani interi e farebbe pesare così ogni `Command`.
+    /// On the heap: a library command carries whole tracks, and would otherwise make every `Command` heavy.
     Library(Box<LibraryCmd>),
     Playback(PlaybackCmd),
     Catalog(CatalogCmd),
@@ -33,7 +33,7 @@ pub enum Command {
 }
 
 impl Command {
-    /// Un comando della libreria.
+    /// A library command.
     pub fn library(command: LibraryCmd) -> Self {
         Self::Library(Box::new(command))
     }

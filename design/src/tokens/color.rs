@@ -1,16 +1,16 @@
-//! Palette (sezione 1 del documento dei token): dodici valori e l'unico colore traslucido (`SCRIM`).
+//! Palette (section 1 of the token document): twelve values and the only translucent colour (`SCRIM`).
 
-/// Colore sRGB non premoltiplicato, byte `[R, G, B, A]`.
+/// Non-premultiplied sRGB colour, bytes `[R, G, B, A]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Rgba(pub [u8; 4]);
 
 impl Rgba {
-    /// Colore opaco da tre canali.
+    /// Opaque colour from three channels.
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self([r, g, b, 255])
     }
 
-    /// Stesso colore con un altro alfa (0 = trasparente, 255 = opaco).
+    /// Same colour with another alpha (0 = transparent, 255 = opaque).
     pub const fn with_alpha(self, alpha: u8) -> Self {
         Self([self.0[0], self.0[1], self.0[2], alpha])
     }
@@ -31,47 +31,47 @@ impl Rgba {
         self.0[3]
     }
 
-    /// I quattro byte `[R, G, B, A]`.
+    /// The four bytes `[R, G, B, A]`.
     pub const fn bytes(self) -> [u8; 4] {
         self.0
     }
 
-    /// Valore `0xRRGGBB` senza alfa (comodo per i framework che usano `u32` esadecimali).
+    /// Value `0xRRGGBB` without alpha (handy for frameworks that use hex `u32`).
     pub const fn hex(self) -> u32 {
         ((self.0[0] as u32) << 16) | ((self.0[1] as u32) << 8) | self.0[2] as u32
     }
 }
 
-// Otto grigi che portano la gerarchia, dal più scuro al più chiaro.
-/// Tela del contenuto, pozzetti (fill dei campi), ombre flottanti, testo su fill chiari.
+// Eight greys that carry the hierarchy, from darkest to lightest.
+/// Content canvas, wells (field fills), floating shadows, text on light fills.
 pub const DEEP_BLACK: Rgba = Rgba::rgb(0, 0, 0);
-/// Chrome: barra del titolo, laterale, pannello, barra del player, tab bar del telefono.
+/// Chrome: title bar, sidebar, panel, player bar, phone tab bar.
 pub const NEAR_BLACK: Rgba = Rgba::rgb(14, 13, 12);
-/// Hover, card, menu, tooltip, dialoghi, campo del segnaposto copertina.
+/// Hover, cards, menus, tooltips, dialogs, cover placeholder field.
 pub const GRAPHITE: Rgba = Rgba::rgb(26, 25, 23);
-/// Riga selezionata, fill premuto, separatori di regione, binario dello slider, ledge secondario.
+/// Selected row, pressed fill, region separators, slider track, secondary ledge.
 pub const CHARCOAL: Rgba = Rgba::rgb(42, 40, 38);
-/// Bordo dei livelli flottanti, separatore forte, ombreggiatura degli sprite (solo decorativo).
+/// Border of floating layers, strong separator, sprite shading (decorative only).
 pub const IRON: Rgba = Rgba::rgb(61, 58, 55);
-/// Bordi dei controlli (>= 3:1), testo e icone disabilitati, ledge primario, equalizzatore a riposo.
+/// Control borders (>= 3:1), disabled text and icons, primary ledge, equaliser at rest.
 pub const STONE: Rgba = Rgba::rgb(120, 116, 109);
-/// Testo terziario: metadati, durate, segnaposto, numeri di traccia.
+/// Tertiary text: metadata, durations, placeholders, track numbers.
 pub const MEDIUM_GREY: Rgba = Rgba::rgb(154, 149, 141);
-/// Testo secondario: artisti, icone a riposo, etichette di navigazione a riposo.
+/// Secondary text: artists, icons at rest, navigation labels at rest.
 pub const SOFT_GREY: Rgba = Rgba::rgb(189, 184, 175);
-/// Testo primario, fill del pulsante primario, icone attive, riempimento del seek.
+/// Primary text, primary button fill, active icons, seek fill.
 pub const WARM_WHITE: Rgba = Rgba::rgb(236, 232, 224);
-/// Anello di focus, cursore del testo, hover del pulsante primario, pomello del seek, riflessi.
+/// Focus ring, text caret, primary button hover, seek knob, highlights.
 pub const PURE_WHITE: Rgba = Rgba::rgb(255, 255, 255);
-/// Solo stato semantico (sezione 1.3): riproduzione attiva, navigazione selezionata, toggle accesi, live.
+/// Semantic state only (section 1.3): playback active, selected navigation, toggles on, live.
 pub const LIME: Rgba = Rgba::rgb(198, 242, 78);
-/// Solo errori e azioni distruttive.
+/// Errors and destructive actions only.
 pub const ERROR: Rgba = Rgba::rgb(255, 107, 94);
 
-/// Sfondo di dialoghi e sheet: `DEEP_BLACK` al 72 % (alfa 184). Unico colore traslucido.
+/// Background of dialogs and sheets: `DEEP_BLACK` at 72 % (alpha 184). The only translucent colour.
 pub const SCRIM: Rgba = DEEP_BLACK.with_alpha(184);
 
-// Alias semantici (sezione 1.1).
+// Semantic aliases (section 1.1).
 pub const SURFACE_CANVAS: Rgba = DEEP_BLACK;
 pub const SURFACE_CHROME: Rgba = NEAR_BLACK;
 pub const SURFACE_RAISED: Rgba = GRAPHITE;
@@ -84,6 +84,8 @@ pub const CONTROL_BORDER_HOVER: Rgba = SOFT_GREY;
 pub const FOCUS_RING: Rgba = PURE_WHITE;
 pub const LEDGE_PRIMARY: Rgba = STONE;
 pub const SHADOW_FLOAT: Rgba = DEEP_BLACK;
+/// The hard ledge under a hovered tile (desktop v2 §3): on the black canvas it reads as a step.
+pub const SHADOW_HARD: Rgba = IRON;
 pub const TEXT_PRIMARY: Rgba = WARM_WHITE;
 pub const TEXT_SECONDARY: Rgba = SOFT_GREY;
 pub const TEXT_TERTIARY: Rgba = MEDIUM_GREY;
@@ -97,10 +99,10 @@ pub const STATE_ON: Rgba = LIME;
 pub const LEDGE_SECONDARY: Rgba = CHARCOAL;
 pub const CARET: Rgba = PURE_WHITE;
 
-/// Le quattro superfici su cui appare il testo (sezione 1.2), dalla più scura alla più chiara.
+/// The four surfaces the text appears on (section 1.2), from darkest to lightest.
 pub const SURFACES: [Rgba; 4] = [SURFACE_CANVAS, SURFACE_CHROME, SURFACE_RAISED, SURFACE_SELECTED];
 
-/// I dodici colori grezzi della palette, nell'ordine della tabella.
+/// The twelve raw palette colours, in the order of the table.
 pub const PALETTE: [(&str, Rgba); 12] = [
     ("DEEP_BLACK", DEEP_BLACK),
     ("NEAR_BLACK", NEAR_BLACK),

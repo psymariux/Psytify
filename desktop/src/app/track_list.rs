@@ -1,6 +1,6 @@
-//! I pezzi comuni alle pagine che elencano brani del catalogo (raccolte, album, artista): i testi di una
-//! riga già pronti, lo stato del download di un brano, l'etichetta di «Scarica tutto» e il conteggio del
-//! lotto, il brano in corso. Funzioni pure sulle viste del core.
+//! Common pieces of the pages that list catalogue tracks (collections, album, artist): the texts of a
+//! row already ready, the download state of a track, the label of «Scarica tutto» and the count of the
+//! batch, the track playing. Pure functions on the core's views.
 
 use gpui::{ClickEvent, Context, EventEmitter, SharedString};
 use psytify_core::api::Track;
@@ -13,7 +13,7 @@ use crate::components::indicators::{DownloadState, PlayState};
 use crate::components::track_row::TrackRow;
 use crate::format;
 
-/// I testi di una riga, pronti: la vista non formatta né alloca stringhe a ogni disegno.
+/// A row's texts, ready: the view does not format or allocate strings at every draw.
 #[derive(Clone, Debug)]
 pub struct RowText {
     pub title: SharedString,
@@ -38,9 +38,9 @@ impl RowText {
     }
 }
 
-/// Lo stato del download di un brano, come la cella del client Iced: prima la coda (in coda, in corso,
-/// fallito: anche un brano già sul dispositivo che si sta riscaricando), poi l'indice (sul dispositivo, o
-/// il file perso: da scaricare di nuovo), poi se si può scaricare.
+/// A track's download state, like a track cell: first the queue (queued, running,
+/// failed: also a track already on the device that is being downloaded again), then the index (on the device, or
+/// the lost file: to download again), then whether it can be downloaded.
 pub fn download_state(downloads: &DownloadsView, track: &Track) -> DownloadState {
     if let Some(item) = downloads.item(track.id) {
         return match item.state {
@@ -59,8 +59,8 @@ pub fn download_state(downloads: &DownloadsView, track: &Track) -> DownloadState
     if track.downloadable { DownloadState::Available } else { DownloadState::NotDownloadable }
 }
 
-/// Il comando del clic sulla cella del download: «Riprova» per un download fallito (con la qualità che
-/// aveva, come nel client Iced), altrimenti «Scarica» (anche un file perso, che il core sostituisce).
+/// The click command on the download cell: «Riprova» for a failed download (with the quality it
+/// had), otherwise «Scarica» (also a lost file, which the core replaces).
 pub fn download_command(downloads: &DownloadsView, track: &Track) -> DownloadsCmd {
     match download_state(downloads, track) {
         DownloadState::Error => DownloadsCmd::Retry(track.id),
@@ -68,7 +68,7 @@ pub fn download_command(downloads: &DownloadsView, track: &Track) -> DownloadsCm
     }
 }
 
-/// «Scarica tutto» o «Scarica i brani disponibili»; `None` se nessuno si può scaricare.
+/// «Scarica tutto» or «Scarica i brani disponibili»; `None` if none can be downloaded.
 pub fn download_all_label(tracks: &[Track]) -> Option<&'static str> {
     let downloadable = tracks.iter().filter(|t| t.downloadable).count();
     match downloadable {
@@ -78,17 +78,17 @@ pub fn download_all_label(tracks: &[Track]) -> Option<&'static str> {
     }
 }
 
-/// Il conteggio di «Scarica tutto» mentre il lotto scarica («3/10»).
+/// The «Scarica tutto» count while the batch downloads («3/10»).
 pub fn batch_label(view: &DownloadsView) -> Option<SharedString> {
     view.batch_progress().map(|(done, total)| format!("{done}/{total}").into())
 }
 
-/// Il brano in corso e come mostrarlo (equalizzatore lime solo mentre suona).
+/// The playing track and how to show it (the equaliser lime only while it plays).
 pub fn now_playing(view: &PlaybackView) -> Option<(Uuid, PlayState)> {
     play_state(view).and_then(|state| view.queue.current().map(|track| (track.id, state)))
 }
 
-/// Il nome dell'artista e il titolo dell'album della riga aprono le loro pagine (un singolo non ha album).
+/// The artist's name and the album's title on the row open their pages (a single has no album).
 pub fn with_links<T: EventEmitter<PageEvent>>(row: TrackRow, track: &Track, cx: &mut Context<T>) -> TrackRow {
     let artist = track.artist.id;
     let row = row.on_artist(
@@ -102,7 +102,7 @@ pub fn with_links<T: EventEmitter<PageEvent>>(row: TrackRow, track: &Track, cx: 
     }
 }
 
-/// Doppio clic o Invio: il gesto che suona una riga (un clic solo non fa niente).
+/// Double click or Enter: the gesture that plays a row (a single click does nothing).
 pub fn plays(event: &ClickEvent) -> bool {
     event.click_count() >= 2 || matches!(event, ClickEvent::Keyboard(_))
 }
@@ -140,7 +140,7 @@ mod tests {
         assert_eq!(download_state(&view, &closed), DownloadState::NotDownloadable);
         assert!(matches!(download_command(&view, &open), DownloadsCmd::Download(_)));
 
-        // Sul dispositivo; poi il file sparisce: si scarica di nuovo.
+        // On the device; then the file disappears: it is downloaded again.
         let saved = SavedTrack {
             track: open.clone(),
             path: "/dati/Download/a.flac".into(),
@@ -156,7 +156,7 @@ mod tests {
         assert_eq!(download_state(&view, &open), DownloadState::Lost);
         assert!(matches!(download_command(&view, &open), DownloadsCmd::Download(_)));
 
-        // Mentre si riscarica conta la coda; un download fallito si riprova.
+        // While it downloads again the queue counts; a failed download is retried.
         let item = |state| Item {
             track: Arc::new(open.clone()),
             quality: DownloadQuality::High,

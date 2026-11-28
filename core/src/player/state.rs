@@ -1,5 +1,5 @@
-//! Stato di riproduzione. Lo tiene il dominio `state/playback.rs` del core e lo pubblica nella sua
-//! vista; ogni transizione avviene in risposta a un comando, all'esito di un lavoro o a un battito.
+//! Playback state. The `state/playback.rs` domain of the core holds it and publishes it in its
+//! view; each transition happens in response to a command, to the outcome of a job, or to a tick.
 
 use uuid::Uuid;
 
@@ -20,7 +20,7 @@ impl PlaybackState {
         *self == Self::Playing
     }
 
-    /// C'è un brano che suona o è in pausa.
+    /// There is a track playing or paused.
     pub fn is_active(&self) -> bool {
         matches!(self, Self::Playing | Self::Paused)
     }

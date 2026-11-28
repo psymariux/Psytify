@@ -1,15 +1,13 @@
-//! Il profilo di una persona (`Page::Profile`), anche il proprio, come da `PSYTIFY_ART_DIRECTION.md`
-//! («Profile») e dal client Iced (`client/src/ui/pages/profile.rs`): la testa con l'avatar `AVATAR_M` 96 nel
-//! cerchio pixel, il nome in `TYPE_DISPLAY`, «@nome · N amici» e il pulsante della relazione (Modifica
-//! profilo, Amici, Accetta la richiesta, Richiesta inviata, Aggiungi agli amici); la carta «Sta ascoltando»
-//! (una `Card` con la copertina 48 e «Ascolta»); gli artisti più ascoltati come classifica (righe con il
-//! numero, niente pillole); gli ascolti recenti come righe di brano (`TrackRow`); le playlist pubbliche, che
-//! aprono la loro pagina; gli amici in comune. L'attività di chi non è amico è privata e lo si dice.
+//! A person's profile (`Page::Profile`), your own too (`PSYTIFY_ART_DIRECTION.md` «Profile»): the head with the avatar in the pixel circle, the name in
+//! `TYPE_DISPLAY`, «@name · N amici» and the relation button (Modifica profilo, Amici, Accetta la richiesta,
+//! Richiesta inviata, Aggiungi agli amici); the «Sta ascoltando» card (a `Card` with the cover and
+//! «Ascolta»); the most played artists as a ranking (numbered rows); the recent listens as track rows
+//! (`TrackRow`); the public playlists, which open their page; the mutual friends. A stranger's activity is
+//! private and the page says so. Everything sits at the frame margins and enters with the page-enter move.
 //!
-//! La vista sociale ne tiene uno aperto (`SocialView::open`): `Shell` chiede `OpenProfile` quando la pagina si
-//! apre, e la pagina mostra il profilo solo se è quello del suo nome utente (altrimenti lo scheletro). I testi
-//! si rifanno quando cambia il profilo aperto o una richiesta per lui; un ascolto o un cuore altrove
-//! notificano solo le righe. `render` non legge l'istantanea.
+//! The social view keeps one open (`SocialView::open`): `Shell` asks for `OpenProfile` when the page opens,
+//! and the page shows it only if it is its handle's (else the skeleton). Texts are rebuilt when the open
+//! profile or a request for it changes. `render` does not read the snapshot.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -25,14 +23,15 @@ use psytify_core::command::{LibraryCmd, PlaybackCmd, SocialCmd};
 use psytify_core::snapshot::{DownloadsView, OpenProfile, SocialView};
 use psytify_design::sprite;
 use psytify_design::tokens::color::{SURFACE_CANVAS, TEXT_PRIMARY, TEXT_SECONDARY};
-use psytify_design::tokens::size::{BP_RAIL, cover::COVER_S};
-use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_5, SPACE_6, SPACE_9};
+use psytify_design::tokens::size::cover::ART_SHORTCUT;
+use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_5, SPACE_9};
 use psytify_design::tokens::type_::{TYPE_ARTIST, TYPE_BODY, TYPE_HEADING, TYPE_TRACK_TITLE};
 use uuid::Uuid;
 
 use super::Page;
 use super::PageEvent;
 use super::album_page::failure;
+use super::page_frame::PageFrame;
 use super::page_list::{new_list, remeasure_header, set_rows, to_top};
 use super::people::{at, friends, plays};
 use super::playlist_dialog::DialogRequest;
@@ -43,17 +42,23 @@ use super::track_menu::TrackMenu;
 use crate::components::badge::{Badge, BadgeKind};
 use crate::components::button::Button;
 use crate::components::card::Card;
+use crate::components::frame::{Frame, measure};
 use crate::components::indicators::PlayState;
 use crate::components::list_row::{ListRow, RowArt};
 use crate::components::overlay::EmptyState;
 use crate::components::page_header::{HeaderArt, PageHeader};
 use crate::components::person_row::{PersonRow, Status};
 use crate::components::playing_spot::PlayingSpot;
-use crate::components::section::{note, section_heading};
+use crate::components::section::{note_at, section_heading_at};
 use crate::components::tile::Cover;
 use crate::components::track_row::{TrackData, TrackRow};
 use crate::core_model::{Changed, CoreModel};
 use crate::theme::{TypeStyle, col, dp};
+
+/// The album column of the recent listens shows from this inner width (dp) up.
+const ALBUM_COLUMN_MIN: f32 = 640.0;
+/// The «Sta ascoltando» card keeps a readable width on a wide canvas.
+const PRESENCE_MAX_W: f32 = 640.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Section {
@@ -81,7 +86,7 @@ impl Section {
     }
 }
 
-/// Una riga dopo la testa, nell'ordine del client Iced.
+/// One row after the head, in display order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Presence,
@@ -89,13 +94,13 @@ enum Row {
     Artist(usize),
     Recent(usize),
     NoListens,
-    /// L'attività è solo per gli amici.
+    /// The activity is for friends only.
     Private,
     Playlist(usize),
     Mutual(usize),
 }
 
-/// Le righe del profilo. Pura.
+/// The profile's rows. Pure.
 fn plan(page: &UserPage, recent: usize) -> Vec<Row> {
     let mut rows = Vec::new();
     match &page.activity {
@@ -127,17 +132,17 @@ fn plan(page: &UserPage, recent: usize) -> Vec<Row> {
     rows
 }
 
-/// Che cosa fa il pulsante della relazione.
+/// What the relation button does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RelationClick {
-    /// Chiede l'amicizia (`true`) o ritira la richiesta (`false`) subito.
+    /// Asks for friendship (`true`) or withdraws the request (`false`) at once.
     Send(bool),
-    /// Toglie un amico, ma prima chiede conferma (decisione del proprietario: un clic solo era troppo poco).
+    /// Removes a friend, but asks for confirmation first (the owner's decision: one click was too little).
     ConfirmUnfriend,
 }
 
-/// Il pulsante della relazione nella testa: il testo, l'icona e che cosa fa. `None` per il proprio profilo
-/// (lì c'è «Modifica profilo»).
+/// The relation button in the head: the text, the icon and what it does. `None` for one's own profile
+/// (there is «Modifica profilo»).
 fn relation_action(relation: Relation) -> Option<(&'static str, Option<&'static str>, RelationClick)> {
     match relation {
         Relation::Me => None,
@@ -148,7 +153,7 @@ fn relation_action(relation: Relation) -> Option<(&'static str, Option<&'static 
     }
 }
 
-/// Cosa mostra la pagina del profilo di `handle`, dalla vista sociale.
+/// What the profile page of `handle` shows, from the social view.
 #[derive(Clone, Debug)]
 enum Shown {
     Loading,
@@ -171,7 +176,7 @@ fn shown(view: &SocialView, handle: &str) -> Shown {
     }
 }
 
-/// Lo stesso stato (per non rifare i testi): lo stesso profilo pubblicato, o lo stesso caricamento.
+/// The same state (so the texts are not redone): the same published profile, or the same load.
 fn same(a: &Shown, b: &Shown) -> bool {
     match (a, b) {
         (Shown::Ready(a), Shown::Ready(b)) => Arc::ptr_eq(a, b),
@@ -181,7 +186,7 @@ fn same(a: &Shown, b: &Shown) -> bool {
     }
 }
 
-/// I testi pronti di un profilo.
+/// A profile's ready texts.
 #[derive(Clone, Debug, Default)]
 struct Texts {
     meta: SharedString,
@@ -247,7 +252,7 @@ pub struct ProfilePage {
     core: Entity<CoreModel>,
     handle: String,
     shown: Shown,
-    /// Una richiesta di amicizia per questa persona è in volo.
+    /// A friendship request for this person is in flight.
     busy: bool,
     rows: Vec<Row>,
     texts: Texts,
@@ -255,6 +260,7 @@ pub struct ProfilePage {
     liked: Arc<HashSet<Uuid>>,
     now: Option<(Uuid, PlayState)>,
     list: ListState,
+    frame: PageFrame,
     spot: PlayingSpot,
     _changes: Subscription,
 }
@@ -276,18 +282,32 @@ impl ProfilePage {
             liked: core.read(cx).liked(),
             now: now_playing(&snapshot.playback),
             list: new_list(0),
+            frame: PageFrame::default(),
             spot: PlayingSpot::new(),
             core,
             _changes: changes,
         }
     }
 
-    /// Il posto dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// This view's equalizer spot, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
 
-    /// Mostra il profilo di `handle` e lo chiede al core (che non fa niente se è già aperto e pronto).
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame != self.frame.frame {
+            self.frame.frame = frame;
+            cx.notify();
+        }
+    }
+
+    /// Shows `handle`'s profile and asks the core for it (nothing happens if it is open and ready).
     pub fn show(&mut self, handle: &str, cx: &mut Context<Self>) {
         self.core.read(cx).social(SocialCmd::OpenProfile(handle.to_owned()));
         if handle == self.handle {
@@ -300,7 +320,7 @@ impl ProfilePage {
         cx.notify();
     }
 
-    /// Prende la vista nuova; `true` se ciò che si vede è cambiato.
+    /// Takes the new view; `true` if what is shown has changed.
     fn take(&mut self, view: &SocialView) -> bool {
         let next = shown(view, &self.handle);
         let busy = view.pending.contains(&self.handle);
@@ -365,6 +385,7 @@ impl ProfilePage {
     fn header(&self, open: &OpenProfile, cx: &mut Context<Self>) -> AnyElement {
         let mut header =
             PageHeader::new(HeaderArt::Avatar(self.texts.avatar.clone()), "Profilo", self.texts.name.clone())
+                .margin(self.frame.margin())
                 .meta(self.texts.meta.clone());
         let relation = open.page.relation;
         match relation_action(relation) {
@@ -420,7 +441,7 @@ impl ProfilePage {
                 .flex()
                 .items_center()
                 .gap(dp(SPACE_5))
-                .child(Cover::new(COVER_S).url(text.cover_url.clone()))
+                .child(Cover::new(ART_SHORTCUT).url(text.cover_url.clone()))
                 .child(
                     div()
                         .flex_1()
@@ -428,7 +449,7 @@ impl ProfilePage {
                         .flex()
                         .flex_col()
                         .gap(dp(SPACE_2))
-                        // Il badge resta della sua larghezza, a sinistra: in colonna si allargherebbe.
+                        // The badge keeps its width, on the left: in a column it would stretch.
                         .child(div().flex().child(badge))
                         .child(
                             div()
@@ -454,7 +475,13 @@ impl ProfilePage {
                     ),
                 ),
         );
-        Some(div().px(dp(SPACE_6)).py(dp(SPACE_3)).child(card).into_any_element())
+        Some(
+            div()
+                .px(dp(self.frame.margin()))
+                .py(dp(SPACE_3))
+                .child(div().max_w(dp(PRESENCE_MAX_W)).child(card))
+                .into_any_element(),
+        )
     }
 
     fn recent(&self, ix: usize, wide: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -499,10 +526,11 @@ impl ProfilePage {
         {
             row = row.playing_at(state, &self.spot);
         }
-        Some(row.into_any_element())
+        Some(self.frame.row(row))
     }
 
-    /// Doppio clic su un ascolto: la coda diventa gli ascolti recenti, da lì; sul brano in corso, play o pausa.
+    /// Double click on a listen: the queue becomes the recent listens from there; on the playing track,
+    /// play or pause.
     fn play_recent(&self, start: usize, cx: &gpui::App) {
         let Some(open) = self.open() else { return };
         let core = self.core.read(cx);
@@ -513,30 +541,32 @@ impl ProfilePage {
     }
 
     fn row(&self, row: Row, wide: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let margin = self.frame.margin();
         Some(match row {
             Row::Presence => return self.presence(cx),
             Row::Heading(section) => {
-                section_heading(section.title().into(), section.meta().into()).into_any_element()
+                section_heading_at(section.title().into(), section.meta().into(), margin).into_any_element()
             }
             Row::Artist(ix) => {
                 let (id, name, detail) = self.texts.artists.get(ix)?.clone();
-                ListRow::new(("profile-artist", ix), RowArt::None, name)
+                let row = ListRow::new(("profile-artist", ix), RowArt::None, name)
                     .index(u32::try_from(ix + 1).unwrap_or(u32::MAX))
                     .detail(detail)
                     .on_click(
                         cx.listener(move |_, _: &ClickEvent, _, cx| {
                             cx.emit(PageEvent::Open(Page::Artist(id)))
                         }),
-                    )
-                    .into_any_element()
+                    );
+                self.frame.row(row)
             }
             Row::Recent(ix) => return self.recent(ix, wide, cx),
-            Row::NoListens => note(
+            Row::NoListens => note_at(
                 div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child("Ancora nessun ascolto."),
+                margin,
             )
             .into_any_element(),
             Row::Private => div()
-                .px(dp(SPACE_6))
+                .px(dp(margin))
                 .py(dp(SPACE_5))
                 .flex()
                 .flex_col()
@@ -547,28 +577,31 @@ impl ProfilePage {
                         .text_color(col(TEXT_PRIMARY))
                         .child("L'attività è per gli amici"),
                 )
-                .child(div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(
+                .child(div().max_w(measure(TYPE_BODY)).type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(
                     "Quando siete amici vedi cosa ascolta, gli ascolti recenti e i suoi artisti preferiti.",
                 ))
                 .into_any_element(),
             Row::Playlist(ix) => {
                 let (id, name, detail) = self.texts.playlists.get(ix)?.clone();
                 let handle = self.handle.clone();
-                ListRow::new(("profile-playlist", ix), RowArt::Sprite(sprite::ICON_LIST), name)
-                    .detail(detail)
-                    .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                        cx.emit(PageEvent::OpenFriendPlaylist { handle: handle.clone(), id })
-                    }))
-                    .into_any_element()
+                self.frame.row(
+                    ListRow::new(("profile-playlist", ix), RowArt::Sprite(sprite::ICON_LIST), name)
+                        .inset(SPACE_3)
+                        .detail(detail)
+                        .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                            cx.emit(PageEvent::OpenFriendPlaylist { handle: handle.clone(), id })
+                        })),
+                )
             }
             Row::Mutual(ix) => {
                 let (handle, name, avatar) = self.texts.mutual.get(ix)?.clone();
-                PersonRow::new(("profile-mutual", ix), name, Status::Plain(at(&handle)))
-                    .avatar(avatar)
-                    .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-                        cx.emit(PageEvent::OpenProfile(handle.clone()))
-                    }))
-                    .into_any_element()
+                self.frame.row(
+                    PersonRow::new(("profile-mutual", ix), name, Status::Plain(at(&handle)))
+                        .avatar(avatar)
+                        .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
+                            cx.emit(PageEvent::OpenProfile(handle.clone()))
+                        })),
+                )
             }
         })
     }
@@ -577,20 +610,32 @@ impl ProfilePage {
         let element = match ix.checked_sub(1) {
             None => self.open().cloned().map(|open| self.header(&open, cx)),
             Some(row) => {
-                let wide = f32::from(window.viewport_size().width) >= BP_RAIL;
+                let wide = self.frame.frame.inner >= ALBUM_COLUMN_MIN;
                 self.rows.get(row).copied().and_then(|row| self.row(row, wide, cx))
             }
         };
-        element.unwrap_or_else(|| div().into_any_element())
+        let element = element.unwrap_or_else(|| div().into_any_element());
+        // The head, then one step per section.
+        let section = ix.checked_sub(1).map_or(0, |row| {
+            1 + self.rows.iter().take(row + 1).filter(|row| matches!(row, Row::Heading(_))).count()
+        });
+        self.frame.wrap(element, section, window)
     }
 }
 
 impl Render for ProfilePage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.spot.clear();
-        let page = div().size_full().flex().flex_col().bg(col(SURFACE_CANVAS));
+        self.frame.begin(window, Some(&self.list));
+        let page = div()
+            .relative()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(col(SURFACE_CANVAS))
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame));
         match &self.shown {
-            Shown::Loading => page.child(PageHeader::loading_person()),
+            Shown::Loading => page.child(PageHeader::loading_person(self.frame.margin())),
             Shown::Missing => page.child(
                 div().flex_1().flex().justify_center().pt(dp(SPACE_9)).child(
                     EmptyState::crate_(

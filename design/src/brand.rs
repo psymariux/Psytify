@@ -1,7 +1,7 @@
-//! I marchi dei provider di accesso (GitHub, Google, Discord) come SVG monocromi: l'unica eccezione
-//! vettoriale alla regola dei pixel (direzione artistica, «Sign-in logos»). Fonte e licenza in
-//! `design/assets/brands/README.md` (Simple Icons, CC0 1.0). Il frontend li tinge con il colore
-//! dell'etichetta del pulsante.
+//! Access provider brands (GitHub, Google, Discord) as monochrome SVG: the only vector exception
+//! to the pixel rule (art direction, «Sign-in logos»). Source and licence in
+//! `design/assets/brands/README.md` (Simple Icons, CC0 1.0). The frontend tints them with the colour
+//! of the button label.
 
 pub const GITHUB: &[u8] = include_bytes!("../assets/brands/github.svg");
 pub const GOOGLE: &[u8] = include_bytes!("../assets/brands/google.svg");

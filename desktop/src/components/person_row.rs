@@ -1,12 +1,12 @@
-//! PersonRow: la riga di 48 dp (`TRACK_ROW_H`, pronta per `uniform_list`) di una persona, come da
-//! `PSYTIFY_ART_DIRECTION.md` («Friends»): l'avatar `AVATAR_S` 32 nel cerchio pixel (`Cover::circle`), il
-//! nome e sotto lo stato: «Sta ascoltando …» con il punto lime del badge dal vivo (2 x 2 AP, uno spazio di
-//! 1 AP, il testo; niente bordo) mentre l'amico ascolta, «In pausa: …» senza punto, altrimenti `@nome`.
-//! A destra le azioni (Accetta secondario, Rifiuta ghost, Aggiungi…), che non fanno partire il gesto della
-//! riga.
+//! PersonRow: the 48 dp row (`TRACK_ROW_H`, `uniform_list`-ready) of a person (`PSYTIFY_ART_DIRECTION.md`,
+//! «Friends»): the avatar on the row art size (`ART_ROW` 40) in the pixel circle, the name and the status
+//! under it: «Sta ascoltando …» with the lime dot of the live badge (2 x 2 AP, 1 AP gap, the text) while the
+//! friend listens, «In pausa: …» without the dot, else `@name`. Actions on the right (Accetta secondary,
+//! Rifiuta ghost, Aggiungi…) do not start the row's gesture.
 //!
-//! Stati come `ListRow`: rest, hover (fill `SURFACE_RAISED`), premuto (`SURFACE_SELECTED`), focus (anello
-//! interno). Il lime c'è solo nel punto dal vivo (la direzione artistica: «Social: live badge dot»).
+//! States as `ListRow`: rest, hover (the `SURFACE_RAISED` tone eases in), pressed (`SURFACE_SELECTED`),
+//! focus (inner ring). The row has a `SPACE_3` inset: pages place it at the frame margin. Lime only in the
+//! live dot.
 
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
@@ -15,21 +15,21 @@ use gpui::{
 use psytify_design::tokens::color::{
     LIME, PURE_WHITE, SURFACE_RAISED, SURFACE_SELECTED, TEXT_PRIMARY, TEXT_SECONDARY,
 };
-use psytify_design::tokens::size::{TRACK_ROW_H, cover::AVATAR_S};
-use psytify_design::tokens::space::{SPACE_3, SPACE_6};
+use psytify_design::tokens::size::{TRACK_ROW_H, cover::ART_ROW};
+use psytify_design::tokens::space::SPACE_3;
 use psytify_design::tokens::type_::{TYPE_ARTIST, TYPE_TRACK_TITLE};
 
 use super::control::{OnClick, Preview, wire, with_click};
 use super::tile::Cover;
 use crate::pixel::shape::inset_ring;
-use crate::theme::{Ap, TypeStyle, col, dp};
+use crate::theme::{Ap, TypeStyle, col, dp, fade};
 
-/// La seconda riga: lo stato della persona.
+/// The second line: the person's status.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
-    /// `@nome` (o un'altra frase tenue: «Richiesta inviata»).
+    /// `@name` (or another quiet line: «Richiesta inviata»).
     Plain(SharedString),
-    /// Sta ascoltando adesso: il punto lime e il testo («Sta ascoltando Titolo · Artista»).
+    /// Listening now: the lime dot and the text («Sta ascoltando Title · Artist»).
     Live(SharedString),
 }
 
@@ -57,13 +57,13 @@ impl PersonRow {
         }
     }
 
-    /// L'indirizzo dell'avatar (il segnaposto nel cerchio finché non arriva o se non c'è).
+    /// The avatar's address (the placeholder in the circle until it arrives, or if there is none).
     pub fn avatar(mut self, url: Option<SharedString>) -> Self {
         self.avatar = url;
         self
     }
 
-    /// Un'azione a destra (un pulsante del kit), nell'ordine di lettura.
+    /// An action on the right (a kit button), in reading order.
     pub fn action(mut self, action: impl IntoElement) -> Self {
         self.actions.push(action.into_any_element());
         self
@@ -74,14 +74,14 @@ impl PersonRow {
         self
     }
 
-    /// Il gesto della riga (aprire il profilo).
+    /// The row's gesture (open the profile).
     pub fn on_click(mut self, handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(std::rc::Rc::new(handler));
         self
     }
 }
 
-/// Un'azione che non deve far partire anche il gesto della riga.
+/// An action that must not start the row's gesture too.
 fn isolated(action: AnyElement) -> AnyElement {
     div()
         .flex_none()
@@ -102,8 +102,8 @@ impl RenderOnce for PersonRow {
                 .truncate()
                 .child(text)
                 .into_any_element(),
-            // L'anatomia del badge dal vivo (linee guida §5) con il testo nel tipo della riga: il punto lime
-            // 2 x 2 AP, 1 AP di spazio, il testo.
+            // The live badge's anatomy (guidelines §5) in the row's type: the 2 x 2 AP lime dot, 1 AP, the
+            // text.
             Status::Live(text) => div()
                 .flex()
                 .items_center()
@@ -129,10 +129,8 @@ impl RenderOnce for PersonRow {
             .flex()
             .items_center()
             .gap(dp(SPACE_3))
-            // L'avatar si allinea alle intestazioni di sezione, come l'arte di `ListRow` senza indice.
-            .pl(dp(SPACE_6))
-            .pr(dp(SPACE_3))
-            .child(Cover::new(AVATAR_S).url(self.avatar).circle())
+            .px(dp(SPACE_3))
+            .child(Cover::new(ART_ROW).url(self.avatar).circle())
             .child(
                 div()
                     .flex_1()
@@ -159,8 +157,8 @@ impl RenderOnce for PersonRow {
             .child(inset_ring(col(PURE_WHITE), wired.focus.clone(), v.force_ring));
         if v.pressed {
             row = row.bg(col(SURFACE_SELECTED));
-        } else if v.hovered {
-            row = row.bg(col(SURFACE_RAISED));
+        } else if v.hover_t > 0.0 {
+            row = row.bg(fade(SURFACE_RAISED, v.hover_t));
         }
         with_click(row, self.on_click)
     }

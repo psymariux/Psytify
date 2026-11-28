@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Psytify
+GenericName=Music Player
+Comment=Player musicale per il catalogo Psytify
+Exec=psytify
+Icon=psytify
+Terminal=false
+Categories=AudioVideo;Audio;Player;Music;
+Keywords=music;player;audio;musica;
+StartupWMClass=psytify

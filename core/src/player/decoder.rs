@@ -1,11 +1,11 @@
-//! Decodifica di tutti i formati del catalogo (FLAC, MP3, Ogg Vorbis, WAV, M4A) con Symphonia,
-//! senza passare dal decoder di rodio.
+//! Decoding of all the catalog's formats (FLAC, MP3, Ogg Vorbis, WAV, M4A) with Symphonia,
+//! without going through rodio's decoder.
 //!
-//! Rodio 0.20 apre ogni flusso come seekable ma senza lunghezza: Symphonia, senza lunghezza, non
-//! sa cercare in un FLAC (il seek falliva sempre) e su un MP4 fallisce con `SeekError`, che rodio
-//! tratta come impossibile (`unreachable!`: l'app si chiudeva appena partiva un m4a). Qui il
-//! lettore del buffer dice la lunghezza annunciata dal server, quindi il seek funziona anche
-//! mentre il brano si sta ancora scaricando.
+//! Rodio 0.20 opens every stream as seekable but without a length: Symphonia, without a length, cannot
+//! seek in a FLAC (the seek always failed) and on an MP4 it fails with `SeekError`, which rodio
+//! treats as impossible (`unreachable!`: the app closed as soon as an m4a started). Here the
+//! buffer reader gives the length announced by the server, so the seek also works
+//! while the track is still downloading.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +23,7 @@ use symphonia::core::units::Time;
 
 use super::stream::StreamReader;
 
-/// Byte che bastano a riconoscere un MP4: la parola `ftyp` dal quarto byte.
+/// Bytes enough to recognise an MP4: the word `ftyp` from the fourth byte.
 pub const SNIFF_BYTES: usize = 8;
 
 pub fn is_mp4(head: &[u8]) -> bool {
@@ -40,28 +40,28 @@ impl MediaSource for StreamReader {
     }
 }
 
-/// Sorgente di campioni f32 per la coda del `Sink`.
+/// Source of f32 samples for the `Sink`'s queue.
 pub struct SymphoniaSource {
     format: Box<dyn FormatReader>,
     decoder: Box<dyn AudioDecoder>,
     track_id: u32,
-    /// Canali e frequenza dello spec del primo pacchetto: i container non li danno sempre (MP4),
-    /// quindi si leggono dai dati decodificati.
+    /// Channels and frequency of the first packet's spec: the containers do not always give them (MP4),
+    /// so they are read from the decoded data.
     channels: u16,
     sample_rate: u32,
-    /// Numero di frame del brano, se il container lo dichiara.
+    /// Number of frames of the track, if the container declares it.
     n_frames: Option<u64>,
-    /// Campioni dell'ultimo pacchetto decodificato e posizione di lettura in essi.
+    /// Samples of the last decoded packet and the read position in them.
     pending: Vec<f32>,
     cursor: usize,
-    /// Frame da scartare dopo un seek: il container riparte dall'inizio del pacchetto che contiene
-    /// il punto chiesto, che può cadere più avanti.
+    /// Frames to discard after a seek: the container restarts from the start of the packet that contains
+    /// the requested point, which may fall further on.
     skip_frames: u64,
 }
 
 impl SymphoniaSource {
-    /// Apre un file da qualunque sorgente. Errore se non c'è una traccia audio che Symphonia sa
-    /// decodificare.
+    /// Opens a file from any source. An error if there is no audio track that Symphonia can
+    /// decode.
     pub fn open(source: Box<dyn MediaSource>) -> Result<Self, Error> {
         let stream = MediaSourceStream::new(source, Default::default());
         let format = symphonia::default::get_probe().probe(
@@ -91,14 +91,14 @@ impl SymphoniaSource {
             cursor: 0,
             skip_frames: 0,
         };
-        // Il primo pacchetto dice formato e frequenza; vale anche come prova che il file si decodifica.
+        // The first packet says format and frequency; it also serves as proof that the file decodes.
         if !source.decode_next() || source.sample_rate == 0 {
             return Err(Error::Unsupported("no decodable audio in the file"));
         }
         Ok(source)
     }
 
-    /// Decodifica il pacchetto successivo della traccia. `false` a fine file o su errore.
+    /// Decodes the next packet of the track. `false` at the end of the file or on error.
     fn decode_next(&mut self) -> bool {
         loop {
             let packet = match self.format.next_packet() {
@@ -122,7 +122,7 @@ impl SymphoniaSource {
                     self.cursor = 0;
                     return true;
                 }
-                // Un pacchetto danneggiato si salta, come fa rodio.
+                // A damaged packet is skipped, as rodio does.
                 Err(Error::DecodeError(_)) => continue,
                 Err(_) => return false,
             }
@@ -184,19 +184,19 @@ mod tests {
     use super::*;
     use crate::player::stream::StreamBuffer;
 
-    /// Un secondo di AAC con il box `moov` in fondo: il caso che fa fallire il decoder di rodio.
+    /// A second of AAC with the `moov` box at the end: the case that makes rodio's decoder fail.
     const TONE_MOOV_END: &[u8] = include_bytes!("../../tests/fixtures/tone-moov-end.m4a");
-    /// Lo stesso segnale con l'indice in testa.
+    /// The same signal with the index at the head.
     const TONE_FASTSTART: &[u8] = include_bytes!("../../tests/fixtures/tone-faststart.m4a");
-    /// Quattro secondi di FLAC mono a 22 050 Hz, senza seektable.
+    /// Four seconds of mono FLAC at 22 050 Hz, without a seektable.
     const TONE_FLAC: &[u8] = include_bytes!("../../tests/fixtures/tone-4s.flac");
 
     fn open(bytes: &[u8]) -> SymphoniaSource {
         SymphoniaSource::open(Box::new(Cursor::new(bytes.to_vec()))).expect("a valid file")
     }
 
-    /// Un WAV PCM in memoria, `frames` frame a dente di sega: nessun file di prova nel repository e
-    /// ogni frame ha un valore diverso, così un seek sbagliato si vede dal conteggio.
+    /// An in-memory PCM WAV, `frames` sawtooth frames: no test file in the repository and
+    /// each frame has a different value, so a wrong seek shows in the count.
     fn wav(channels: u16, rate: u32, bits: u16, frames: u32) -> Vec<u8> {
         let block = channels * bits / 8;
         let data_len = frames * u32::from(block);
@@ -214,7 +214,7 @@ mod tests {
         bytes.extend_from_slice(b"data");
         bytes.extend_from_slice(&data_len.to_le_bytes());
         for frame in 0..frames {
-            // Da -0,5 a +0,5 della scala intera, in `bits` bit little-endian con segno.
+            // From -0.5 to +0.5 of the integer scale, in `bits` signed little-endian bits.
             let level = (i64::from(frame % 1000) - 500) * (1i64 << (bits - 1)) / 1000;
             for _ in 0..channels {
                 bytes.extend_from_slice(&level.to_le_bytes()[..usize::from(bits / 8)]);
@@ -236,7 +236,7 @@ mod tests {
         assert_eq!((source.channels().get(), source.sample_rate().get()), (2, 44_100));
         let seconds = source.total_duration().expect("the length is known").as_secs_f64();
         assert!((seconds - 1.0).abs() < 0.1, "about one second, got {seconds}");
-        // Con il priming dell'AAC il conteggio non è esatto: basta che sia intorno a un secondo.
+        // With the AAC priming the count is not exact: it is enough that it is around a second.
         let samples = source.count();
         assert!((80_000..100_000).contains(&samples), "got {samples} samples");
     }
@@ -250,9 +250,9 @@ mod tests {
     fn seeking_moves_back_into_an_m4a() {
         let all = open(TONE_MOOV_END).count();
         let mut source = open(TONE_MOOV_END);
-        // Si ascolta circa tre quarti del brano, poi si torna a un quarto di secondo. Symphonia 0.6
-        // non sa più cercare in un MP4 letto fino in fondo, ma nell'app non serve: a fine brano la
-        // sorgente esce dalla coda di rodio.
+        // About three quarters of the track is listened to, then it goes back to a quarter of a second. Symphonia 0.6
+        // can no longer seek in an MP4 read to the end, but the app does not need it: at the end of the track the
+        // source leaves rodio's queue.
         source.by_ref().take(all * 3 / 4).for_each(drop);
         source.try_seek(Duration::from_millis(250)).expect("the file is seekable");
         let rest = source.count();
@@ -275,8 +275,8 @@ mod tests {
 
     #[test]
     fn seeking_a_flac_works_while_it_is_still_downloading() {
-        // Il server ha annunciato la lunghezza, ma sono arrivati solo i primi byte: il lettore
-        // aspetta il resto, che qui arriva da un altro thread.
+        // The server announced the length, but only the first bytes arrived: the reader
+        // waits for the rest, which here arrives from another thread.
         let buffer = StreamBuffer::new();
         buffer.set_total(TONE_FLAC.len(), true);
         buffer.write_at(0, &TONE_FLAC[..4096]);
@@ -304,7 +304,7 @@ mod tests {
     fn decodes_a_24_bit_wav_without_clipping_it() {
         let samples: Vec<f32> = open(&wav(2, 48_000, 24, 48_000)).collect();
         assert_eq!(samples.len(), 2 * 48_000);
-        // Il picco del dente di sega è metà scala: se il bit depth fosse sbagliato sarebbe 0 o 1.
+        // The sawtooth's peak is half scale: if the bit depth were wrong it would be 0 or 1.
         let peak = samples.iter().fold(0.0f32, |peak, sample| peak.max(sample.abs()));
         assert!((peak - 0.5).abs() < 0.01, "peak {peak}");
     }
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn seeking_a_wav_works_while_it_is_still_downloading() {
-        // Un WAV pesa dieci volte un FLAC: è il caso in cui si cerca con il file a metà.
+        // A WAV weighs ten times a FLAC: it is the case in which one seeks with the file halfway.
         let bytes = wav(2, 44_100, 16, 4 * 44_100);
         let buffer = StreamBuffer::new();
         buffer.set_total(bytes.len(), true);

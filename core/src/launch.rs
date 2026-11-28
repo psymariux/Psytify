@@ -1,20 +1,20 @@
-//! Ambiente del processo, sistemato prima che parta la GUI (solo Linux: altrove non c'è glibc né il
-//! loader Vulkan da regolare).
+//! Process environment, set up before the GUI starts (Linux only: elsewhere there is no glibc nor the
+//! Vulkan loader to adjust).
 //!
-//! glibc e il loader Vulkan leggono le loro variabili solo all'avvio, e `std::env::set_var` è
-//! `unsafe` (il workspace lo vieta): per cambiarle il client si rilancia una volta con `exec`, che
-//! mantiene il PID. Misurato su Linux con lyrics aperte (RSS dopo 15 s di riproduzione):
+//! glibc and the Vulkan loader read their variables only at startup, and `std::env::set_var` is
+//! `unsafe` (the workspace forbids it): to change them the client re-launches itself once with `exec`, which
+//! keeps the PID. Measured on Linux with lyrics open (RSS after 15 s of playback):
 //!
 //! | Ambiente | RSS |
 //! |---|---|
 //! | predefinito | 367–388 MB |
 //! | `MALLOC_ARENA_MAX=2` | 295 MB |
-//! | + niente driver Vulkan NVIDIA né OpenGL | 222 MB |
+//! | + no NVIDIA Vulkan nor OpenGL driver | 222 MB |
 
-/// Chi la trova impostata è già passato di qui: si evita di rilanciarsi all'infinito.
+/// Whoever finds it set has already been through here: this avoids re-launching forever.
 const MARKER: &str = "PSYTIFY_ENV_READY";
 
-/// Se una di queste è impostata, l'utente ha scelto lui GPU e backend: non si tocca nulla.
+/// If one of these is set, the user has chosen the GPU and backend themselves: nothing is touched.
 const GPU_OPT_OUT: [&str; 10] = [
     "PSYTIFY_ALL_GPUS",
     "VK_LOADER_DRIVERS_SELECT",
@@ -28,30 +28,30 @@ const GPU_OPT_OUT: [&str; 10] = [
     "DRI_PRIME",
 ];
 
-/// Driver Vulkan delle GPU integrate (RADV, ANV, AMDVLK): se ce n'è uno, iced ci disegna già
-/// (chiede la GPU a basso consumo) e il driver NVIDIA si carica per niente.
+/// Vulkan drivers of integrated GPUs (RADV, ANV, AMDVLK): if there is one, iced already draws there
+/// (it asks for the low-power GPU) and the NVIDIA driver loads for nothing.
 const INTEGRATED_DRIVERS: [&str; 3] = ["radeon", "intel", "amd"];
 
-/// I file che descrivono i driver Vulkan installati.
+/// The files that describe the installed Vulkan drivers.
 const VULKAN_ICD_DIRS: [&str; 3] =
     ["/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d", "/usr/local/share/vulkan/icd.d"];
 
-/// Le variabili da impostare, dati i driver Vulkan installati e quelle già presenti.
+/// The variables to set, given the installed Vulkan drivers and those already present.
 fn lean_env(manifests: &[String], is_set: impl Fn(&str) -> bool) -> Vec<(&'static str, &'static str)> {
     let mut changes = Vec::new();
-    // Un thread = una arena malloc: con 40 thread glibc ne apre 32 e tiene ~75 MB liberi ma non resi.
+    // One thread = one malloc arena: with 40 threads glibc opens 32 and keeps ~75 MB free but not returned.
     if !is_set("MALLOC_ARENA_MAX") {
         changes.push(("MALLOC_ARENA_MAX", "2"));
     }
     if leaves_nvidia_driver_unloaded(manifests, &is_set) {
-        // Solo Vulkan: l'OpenGL di wgpu caricherebbe comunque le librerie EGL di NVIDIA e di Mesa.
+        // Vulkan only: wgpu's OpenGL would load the NVIDIA and Mesa EGL libraries anyway.
         changes.push(("VK_LOADER_DRIVERS_DISABLE", "*nvidia*"));
         changes.push(("WGPU_BACKEND", "vulkan"));
     }
     changes
 }
 
-/// C'è un driver NVIDIA e uno di una GPU integrata, e l'utente non ha scelto la GPU a mano.
+/// There is an NVIDIA driver and one of an integrated GPU, and the user has not chosen the GPU by hand.
 fn leaves_nvidia_driver_unloaded(manifests: &[String], is_set: &impl Fn(&str) -> bool) -> bool {
     if GPU_OPT_OUT.iter().any(|name| is_set(name)) {
         return false;
@@ -60,7 +60,7 @@ fn leaves_nvidia_driver_unloaded(manifests: &[String], is_set: &impl Fn(&str) ->
     has("nvidia") && INTEGRATED_DRIVERS.iter().any(|vendor| has(vendor))
 }
 
-/// I nomi (in minuscolo) dei file dei driver Vulkan installati.
+/// The names (in lowercase) of the installed Vulkan driver files.
 fn installed_vulkan_drivers() -> Vec<String> {
     VULKAN_ICD_DIRS
         .iter()
@@ -71,7 +71,7 @@ fn installed_vulkan_drivers() -> Vec<String> {
         .collect()
 }
 
-/// Rilancia il client con l'ambiente più leggero, se serve. Va chiamata per prima in `main`.
+/// Re-launches the client with the lighter environment, if needed. It must be called first in `main`.
 pub fn relaunch_with_lean_env() {
     use std::os::unix::process::CommandExt;
 
@@ -85,7 +85,7 @@ pub fn relaunch_with_lean_env() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    // `exec` torna solo se fallisce: in quel caso il client parte comunque, con l'ambiente di prima.
+    // `exec` returns only if it fails: in that case the client starts anyway, with the previous environment.
     let _failed = std::process::Command::new(exe)
         .args(std::env::args_os().skip(1))
         .env(MARKER, "1")

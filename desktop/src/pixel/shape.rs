@@ -1,13 +1,13 @@
-//! Forme sulla griglia dei pixel d'arte: angoli a tacca (`NOTCH_1`, `NOTCH_2`), bordo di 1 AP, ledge
-//! dura e anello di focus. Tutto è fatto di rettangoli pieni (nessun raggio, nessuna curva): ogni
+//! Shapes on the art-pixel grid: notched corners (`NOTCH_1`, `NOTCH_2`), 1 AP border, hard ledge
+//! and focus ring. Everything is made of solid rectangles (no radius, no curves): each
 //! bordo cade su un pixel fisico intero, a qualunque scala.
 //!
-//! Le misure si calcolano in pixel fisici (`Ap::device` per AP) e si riconvertono in logici solo
-//! all'ultimo, così la geometria non accumula errori di virgola mobile.
+//! Measures are computed in physical pixels (`Ap::device` per AP) and converted back to logical ones only
+//! at the end, so the geometry does not accumulate floating-point errors.
 //!
-//! Una tacca di `n` AP toglie all'angolo la scala di `n` righe: la riga `r` (da 0) perde `n - r` AP per
-//! lato. Con un bordo di 1 AP il riempimento interno ha tacca `n - 1`: per `NOTCH_1` il bordo copre
-//! `(1,0)` e `(0,1)` e il riempimento comincia in `(1,1)`.
+//! A notch of `n` AP takes from the corner the staircase of `n` rows: row `r` (from 0) loses `n - r` AP per
+//! side. With a 1 AP border the inner fill has notch `n - 1`: for `NOTCH_1` the border covers
+//! `(1,0)` and `(0,1)` and the fill starts at `(1,1)`.
 
 use gpui::{App, Bounds, Canvas, FocusHandle, Hsla, Pixels, Styled, Window, canvas, fill, point, px, size};
 
@@ -43,10 +43,10 @@ impl Dev {
     }
 }
 
-/// Segmenti orizzontali (x0, x1) per fascia di righe (y0, y1) di un ottagono con tacca `n`.
+/// Horizontal segments (x0, x1) per band of rows (y0, y1) of an octagon with notch `n`.
 fn octagon_rows(r: Dev, n: u32, ap: f32) -> Vec<(f32, f32, f32, f32)> {
     let n = n as f32;
-    // La tacca non può mangiare più di metà lato.
+    // The notch cannot eat more than half a side.
     let cut = |steps: f32| steps.min((r.w / ap / 2.0).floor()).min((r.h / ap / 2.0).floor());
     let n = cut(n);
     let mut rows = Vec::with_capacity(2 * n as usize + 1);
@@ -79,7 +79,7 @@ pub fn paint_notch_fill(window: &mut Window, bounds: Bounds<Pixels>, n: u32, ap:
     fill_octagon(window, ap.scale, r, n, ap.device as f32, color);
 }
 
-/// Contorno di 1 AP che segue la tacca `n` (dentro `bounds`), senza riempimento.
+/// 1 AP outline that follows the notch `n` (inside `bounds`), without fill.
 pub fn paint_notch_ring(window: &mut Window, bounds: Bounds<Pixels>, n: u32, ap: Ap, color: Hsla) {
     let scale = ap.scale;
     let d = ap.device as f32;
@@ -95,7 +95,7 @@ pub fn paint_notch_ring(window: &mut Window, bounds: Bounds<Pixels>, n: u32, ap:
     let side_h = r.h - 2.0 * m * d;
     Dev { x: r.x, y: r.y + m * d, w: d, h: side_h }.paint(window, scale, color);
     Dev { x: r.x + r.w - d, y: r.y + m * d, w: d, h: side_h }.paint(window, scale, color);
-    // Punti della diagonale (n >= 2): riga i, colonna n - i, nei quattro angoli.
+    // Points of the diagonal (n >= 2): row i, column n - i, in the four corners.
     for i in 1..n {
         let off = (n - i) as f32 * d;
         let row = i as f32 * d;
@@ -110,7 +110,7 @@ pub fn paint_notch_ring(window: &mut Window, bounds: Bounds<Pixels>, n: u32, ap:
     }
 }
 
-/// Riempimento e bordo di 1 AP insieme (uno dei due può mancare).
+/// Fill and 1 AP border together (either one may be missing).
 pub fn paint_notch_box(
     window: &mut Window,
     bounds: Bounds<Pixels>,
@@ -134,13 +134,13 @@ pub fn paint_notch_box(
     }
 }
 
-/// Ledge dura: la forma spostata di (1, 1) AP, ma solo la parte che il corpo non copre, così un
-/// corpo senza riempimento (pulsante secondario) non lascia vedere la ledge al proprio interno.
+/// Hard ledge: the shape moved by (1, 1) AP, but only the part the body does not cover, so a
+/// body without fill (secondary button) does not let the ledge show inside itself.
 pub fn paint_ledge(window: &mut Window, bounds: Bounds<Pixels>, n: u32, ap: Ap, color: Hsla) {
     paint_offset_shadow(window, bounds, n, ap, 1, color);
 }
 
-/// Ombra dura (sfocatura 0) spostata di `k` AP in basso e a destra: la ledge dei pulsanti (k = 1)
+/// Hard shadow (blur 0) moved by `k` AP down and to the right: the buttons' ledge (k = 1)
 /// e l'ombra di menu, dialoghi e toast (`SHADOW_FLOAT_OFFSET`, k = 2).
 pub fn paint_offset_shadow(window: &mut Window, bounds: Bounds<Pixels>, n: u32, ap: Ap, k: u32, color: Hsla) {
     let scale = ap.scale;
@@ -149,7 +149,7 @@ pub fn paint_offset_shadow(window: &mut Window, bounds: Bounds<Pixels>, n: u32, 
     let shifted = Dev { x: body.x + d * k as f32, y: body.y + d * k as f32, ..body };
     let body_rows = octagon_rows(body, n, d);
     let shifted_rows = octagon_rows(shifted, n, d);
-    // Scansione per fasce: tutti i bordi orizzontali di entrambe le forme.
+    // Scan by bands: all the horizontal edges of both shapes.
     let mut ys: Vec<f32> =
         body_rows.iter().chain(shifted_rows.iter()).flat_map(|(y0, y1, _, _)| [*y0, *y1]).collect();
     ys.sort_by(f32::total_cmp);
@@ -172,7 +172,7 @@ fn fill_parent<T: 'static>(canvas: Canvas<T>) -> Canvas<T> {
     canvas.absolute().top(px(0.0)).left(px(0.0)).size_full()
 }
 
-/// Corpo a tacca (riempimento e/o bordo di 1 AP) che riempie il genitore (che deve essere `relative`).
+/// Notched body (fill and/or 1 AP border) that fills the parent (which must be `relative`).
 pub fn notch_box(n: u32, fill_color: Option<Hsla>, border: Option<Hsla>) -> Canvas<()> {
     fill_parent(canvas(
         |_, _, _| (),
@@ -183,7 +183,7 @@ pub fn notch_box(n: u32, fill_color: Option<Hsla>, border: Option<Hsla>) -> Canv
     ))
 }
 
-/// Ledge dura sotto il genitore.
+/// Hard ledge under the parent.
 pub fn ledge(n: u32, color: Hsla) -> Canvas<()> {
     fill_parent(canvas(
         |_, _, _| (),
@@ -194,7 +194,7 @@ pub fn ledge(n: u32, color: Hsla) -> Canvas<()> {
     ))
 }
 
-/// Ombra dura di `k` AP dietro il genitore (livelli flottanti).
+/// Hard shadow of `k` AP behind the parent (floating layers).
 pub fn hard_shadow(n: u32, k: u32, color: Hsla) -> Canvas<()> {
     fill_parent(canvas(
         |_, _, _| (),
@@ -205,9 +205,9 @@ pub fn hard_shadow(n: u32, k: u32, color: Hsla) -> Canvas<()> {
     ))
 }
 
-/// Anello di focus «solo da tastiera»: 1 AP di `color` a 1 AP di distanza dal genitore (2 AP fuori
-/// dai suoi bordi), con la stessa tacca. Si dipinge solo se `handle` ha il focus e l'ultimo input
-/// è stato da tastiera; la decisione si prende al momento del disegno, quindi è sempre aggiornata.
+/// "Keyboard only" focus ring: 1 AP of `color` at 1 AP distance from the parent (2 AP out
+/// from its edges), with the same notch. It is painted only if `handle` has focus and the last input
+/// was from the keyboard; the decision is taken at draw time, so it is always up to date.
 pub fn focus_ring(n: u32, color: Hsla, handle: FocusHandle, ap: Ap) -> Canvas<()> {
     let out = ap.n(2);
     canvas(
@@ -227,7 +227,7 @@ pub fn focus_ring(n: u32, color: Hsla, handle: FocusHandle, ap: Ap) -> Canvas<()
     .bottom(-out)
 }
 
-/// Come [`focus_ring`] ma attivo per un valore fisso (galleria: mostra lo stato «focused» senza tastiera).
+/// As [`focus_ring`] but active for a fixed value (gallery: shows the "focused" state without keyboard).
 pub fn static_ring(n: u32, color: Hsla, ap: Ap) -> Canvas<()> {
     let out = ap.n(2);
     canvas(
@@ -244,8 +244,8 @@ pub fn static_ring(n: u32, color: Hsla, ap: Ap) -> Canvas<()> {
     .bottom(-out)
 }
 
-/// Anello di focus interno (righe e voci di lista: non va mai tagliato da un contenitore che scorre).
-/// Con `force` si mostra sempre (galleria), altrimenti solo con il focus da tastiera.
+/// Inner focus ring (rows and list entries: never clipped by a scrolling container).
+/// With `force` it is always shown (gallery), otherwise only with keyboard focus.
 pub fn inset_ring(color: Hsla, handle: FocusHandle, force: bool) -> Canvas<()> {
     fill_parent(canvas(
         |_, _, _| (),
@@ -259,7 +259,7 @@ pub fn inset_ring(color: Hsla, handle: FocusHandle, force: bool) -> Canvas<()> {
     ))
 }
 
-/// Dither a scacchiera al 50 % di quadrati di 1 AP (campi disabilitati, copertine non disponibili).
+/// 50 % checkerboard dither of 1 AP squares (disabled fields, unavailable covers).
 pub fn dither(color: Hsla) -> Canvas<()> {
     fill_parent(canvas(
         |_, _, _| (),
@@ -282,6 +282,38 @@ pub fn dither(color: Hsla) -> Canvas<()> {
     ))
 }
 
+/// The 2 x 2 ordered-dither (Bayer) threshold of a cell: the order in which cells change in a dissolve.
+pub fn bayer2(col: u32, row: u32) -> u8 {
+    [[0, 2], [3, 1]][(row % 2) as usize][(col % 2) as usize]
+}
+
+/// At most this many dissolve cells along a side: a big slot uses cells of several AP.
+const VEIL_CELLS: f32 = 40.0;
+
+/// The ordered-dither veil of a dissolve: `covered` of every 4 cells (0..=4, in Bayer order) painted in
+/// `color` over `bounds`. Cells are whole APs, a few AP wide on a large slot so a frame stays cheap.
+pub fn paint_dither_veil(window: &mut Window, bounds: Bounds<Pixels>, ap: Ap, covered: u8, color: Hsla) {
+    if covered == 0 {
+        return;
+    }
+    let r = Dev::of(bounds, ap.scale);
+    let unit = ap.device.max(1) as f32;
+    let per = (r.w.max(r.h) / unit / VEIL_CELLS).ceil().max(1.0);
+    let d = unit * per;
+    // Whole cells over a bounded slot: the counts are small.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (cols, rows) = ((r.w / d).ceil() as u32, (r.h / d).ceil() as u32);
+    for row in 0..rows {
+        for c in 0..cols {
+            if bayer2(c, row) < covered.min(4) {
+                let x = r.x + c as f32 * d;
+                let y = r.y + row as f32 * d;
+                Dev { x, y, w: d.min(r.x + r.w - x), h: d.min(r.y + r.h - y) }.paint(window, ap.scale, color);
+            }
+        }
+    }
+}
+
 /// Una fascia di celle AP: `rows` righe da `row`, `width` celle da `col`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CellSpan {
@@ -291,9 +323,9 @@ pub struct CellSpan {
     pub width: u32,
 }
 
-/// Il primo AP dentro il cerchio di `cells` AP di diametro, alla riga `row`: una cella è dentro se il
-/// suo centro sta nel cerchio (`MASK_PIXEL_CIRCLE`). Sempre almeno la cella centrale, così un
-/// cerchio piccolissimo non sparisce.
+/// The first AP inside the circle of `cells` AP in diameter, on row `row`: a cell is inside if its
+/// centre lies in the circle (`MASK_PIXEL_CIRCLE`). Always at least the central cell, so a
+/// tiny circle does not vanish.
 fn circle_first(cells: u32, row: u32) -> u32 {
     let r = cells as f32 / 2.0;
     let dy = row as f32 + 0.5 - r;
@@ -303,7 +335,7 @@ fn circle_first(cells: u32, row: u32) -> u32 {
 }
 
 /// Le fasce di un cerchio rasterizzato a risoluzione AP (`MASK_PIXEL_CIRCLE`): bordi a gradini di 1 AP,
-/// simmetrico sui due assi. Le righe consecutive della stessa larghezza si uniscono in una fascia sola.
+/// symmetric on both axes. Consecutive rows of the same width join into a single band.
 pub fn circle_spans(cells: u32) -> Vec<CellSpan> {
     let mut spans: Vec<CellSpan> = Vec::new();
     for row in 0..cells {
@@ -317,8 +349,8 @@ pub fn circle_spans(cells: u32) -> Vec<CellSpan> {
     spans
 }
 
-/// Il contorno di 1 AP del cerchio di [`circle_spans`]: le celle dentro che toccano (di lato) una cella
-/// fuori. Una o due fasce per riga.
+/// The 1 AP outline of the circle of [`circle_spans`]: the inside cells that touch (sideways) a cell
+/// outside. One or two bands per row.
 pub fn circle_ring(cells: u32) -> Vec<CellSpan> {
     let first = |row: i64| -> u32 {
         if row < 0 || row >= i64::from(cells) {
@@ -331,7 +363,7 @@ pub fn circle_ring(cells: u32) -> Vec<CellSpan> {
     for row in 0..cells {
         let col = circle_first(cells, row);
         let width = cells - 2 * col;
-        // Le celle di questa riga fuori dalle righe vicine sono di bordo; e la prima e l'ultima.
+        // The cells of this row that lie outside the neighbouring rows are edge; and the first and the last.
         let inner = first(i64::from(row) - 1).max(first(i64::from(row) + 1)).max(col + 1);
         let edge = (inner - col).min(width.div_ceil(2));
         if 2 * edge >= width {
@@ -344,8 +376,8 @@ pub fn circle_ring(cells: u32) -> Vec<CellSpan> {
     ring
 }
 
-/// Il quadrato in pixel fisici su cui sta il cerchio: quante celle AP intere ci entrano e dove comincia
-/// (centrato, l'avanzo diviso per difetto).
+/// The square in physical pixels on which the circle sits: how many whole AP cells fit and where it starts
+/// (centred, the leftover divided down).
 fn circle_grid(bounds: Bounds<Pixels>, ap: Ap) -> (Dev, u32) {
     let r = Dev::of(bounds, ap.scale);
     let d = ap.device as f32;
@@ -367,7 +399,7 @@ fn span_rect(grid: Dev, span: CellSpan, d: f32) -> Dev {
 }
 
 /// Le fasce del cerchio dentro `bounds` in pixel logici (allineate ai pixel fisici): servono da maschera
-/// per dipingere una foto nel cerchio.
+/// to paint a photo in the circle.
 pub fn circle_masks(bounds: Bounds<Pixels>, ap: Ap) -> Vec<Bounds<Pixels>> {
     let (grid, cells) = circle_grid(bounds, ap);
     let d = ap.device as f32;
@@ -383,7 +415,7 @@ pub fn circle_masks(bounds: Bounds<Pixels>, ap: Ap) -> Vec<Bounds<Pixels>> {
         .collect()
 }
 
-/// Riempie il cerchio pixel dentro `bounds`.
+/// Fills the pixel circle inside `bounds`.
 pub fn paint_circle_fill(window: &mut Window, bounds: Bounds<Pixels>, ap: Ap, color: Hsla) {
     let (grid, cells) = circle_grid(bounds, ap);
     let d = ap.device as f32;
@@ -401,7 +433,7 @@ pub fn paint_circle_ring(window: &mut Window, bounds: Bounds<Pixels>, ap: Ap, co
     }
 }
 
-/// Contorno del cerchio pixel che riempie il genitore (cornice di hover di un ArtistTile, anello di
+/// Outline of the pixel circle that fills the parent (hover frame of an ArtistTile, ring of
 /// focus).
 pub fn circle_outline(color: Hsla) -> Canvas<()> {
     fill_parent(canvas(
@@ -413,6 +445,15 @@ pub fn circle_outline(color: Hsla) -> Canvas<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dissolve_covers_one_more_quarter_of_the_cells_per_frame() {
+        let mut thresholds: Vec<u8> =
+            (0..2).flat_map(|row| (0..2).map(move |col| bayer2(col, row))).collect();
+        thresholds.sort_unstable();
+        assert_eq!(thresholds, vec![0, 1, 2, 3], "each frame changes a different quarter");
+        assert_eq!(bayer2(0, 0), bayer2(2, 2), "the pattern repeats every 2 cells");
+    }
 
     fn cells_of(spans: &[CellSpan]) -> std::collections::HashSet<(u32, u32)> {
         let mut set = std::collections::HashSet::new();
@@ -437,7 +478,7 @@ mod tests {
             let disc = std::f32::consts::PI * (cells as f32 / 2.0).powi(2);
             let error = (inside.len() as f32 - disc).abs() / disc;
             assert!(error < 0.08, "{cells} celle: {} contro {disc}", inside.len());
-            // La riga di mezzo è piena, la prima no.
+            // The middle row is full, the first is not.
             let middle =
                 circle_spans(cells).into_iter().find(|s| s.row <= cells / 2 && cells / 2 < s.row + s.rows);
             assert_eq!(middle.map(|s| s.width), Some(cells));

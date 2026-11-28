@@ -1,7 +1,5 @@
 [workspace]
-members = ["client", "core", "design", "desktop"]
-# Android is a separate workspace: it uses a patched copy of iced_winit (see android/vendor).
-exclude = ["android"]
+members = ["core", "design", "desktop", "mobile", "mobile/gen"]
 resolver = "2"
 
 [workspace.package]
@@ -25,3 +23,10 @@ panic = "deny"
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# The Kotlin app's emulator builds (`QUICK=1 scripts/android-kotlin.sh`): release code without the
+# whole-program LTO, a few minutes faster, in its own directory under `target/`.
+[profile.android-quick]
+inherits = "release"
+lto = false
+codegen-units = 16

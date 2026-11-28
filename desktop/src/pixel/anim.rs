@@ -1,13 +1,13 @@
-//! Orologio degli sprite: un solo ridisegno programmato alla volta, solo mentre qualcosa si anima.
+//! Sprite clock: only one scheduled redraw at a time, and only while something animates.
 //!
-//! Nessun ciclo per frame: uno sprite animato, quando viene *dipinto*, chiede un ridisegno alla
-//! scadenza del suo prossimo frame (`request_refresh`). Se nessuno sprite animato è visibile non si
-//! dipinge nulla, quindi non si programma nulla e la CPU resta a zero (vedi `docs/PERFORMANCE.md`).
+//! No loop per frame: an animated sprite, when it is *painted*, asks for a redraw at the
+//! deadline of its next frame (`request_refresh`). If no animated sprite is visible nothing is
+//! painted, so nothing is scheduled and the CPU stays at zero (see `docs/PERFORMANCE.md`).
 //!
-//! Il ridisegno invalida la *vista* che ha dipinto lo sprite (`App::notify` della vista e, per GPUI, dei
-//! suoi antenati), non l'intera finestra: le viste con `.cached()` che non animano nulla si riusano
-//! così com'erano invece di rifare layout, prepaint e paint a ogni scatto di un'altra vista. Con
-//! `Window::refresh` ogni scatto dell'equalizzatore o del marchio le rifaceva tutte (BACKLOG 23).
+//! The redraw invalidates the *view* that painted the sprite (`App::notify` of the view and, for GPUI, of its
+//! ancestors), not the whole window: the `.cached()` views that animate nothing are reused
+//! as they were instead of redoing layout, prepaint and paint at every frame of another view. With
+//! `Window::refresh` every frame of the equaliser or the mark redid them all (BACKLOG 23).
 
 use std::time::{Duration, Instant};
 
@@ -16,7 +16,7 @@ use psytify_design::sprite::Sprite;
 
 use super::store::SpriteStore;
 
-/// Millisecondi che mancano al cambio di frame di `sprite` all'istante `elapsed_ms` (0 per gli
+/// Milliseconds left until the frame of `sprite` changes at the instant `elapsed_ms` (0 for the
 /// sprite statici). Segue la stessa logica di `Sprite::frame_index_at`.
 pub fn ms_until_next_frame(sprite: &Sprite, elapsed_ms: u64) -> u64 {
     let cycle = u64::from(sprite.cycle_ms());
@@ -34,23 +34,23 @@ pub fn ms_until_next_frame(sprite: &Sprite, elapsed_ms: u64) -> u64 {
     cycle
 }
 
-/// Margine entro cui due scadenze vicine si servono con lo stesso risveglio.
+/// Margin within which two near deadlines are served by the same wake-up.
 const SLACK: Duration = Duration::from_millis(4);
 
-/// Una vista che vuole essere ridisegnata a un certo istante.
+/// A view that wants to be redrawn at a certain instant.
 struct Wanted {
     view: EntityId,
     at: Instant,
 }
 
-/// Il ridisegno programmato: ogni vista che ha dipinto uno sprite animato dice quando le serve il frame
-/// dopo, e c'è un solo timer efficace per volta, puntato alla scadenza più vicina. Alla scadenza si
-/// invalidano solo le viste «a scadenza» (entro `SLACK`): le altre restano nell'elenco per il timer
-/// successivo. Senza questo, tre animazioni con fasi diverse (l'equalizzatore della coda da 120 ms,
-/// il marchio da 160 ms, il battito da 250 ms) ridisegnavano ogni vista a ogni scatto di un'altra.
+/// The scheduled redraw: each view that painted an animated sprite says when it needs the next frame,
+/// and there is only one effective timer at a time, aimed at the nearest deadline. At the deadline only the
+/// views "due" (within `SLACK`) are invalidated; the others stay in the list for the next
+/// timer. Without this, three animations with different phases (the queue equaliser at 120 ms,
+/// the mark at 160 ms, the beat at 250 ms) would redraw every view at every frame of another.
 ///
-/// Ogni richiesta nuova che anticipa la scadenza invalida il timer precedente (numero di generazione),
-/// così i timer vecchi non ridisegnano e non se ne accumulano: senza questo, due sprite con fasi diverse
+/// Every new request that brings the deadline forward invalidates the previous timer (generation number),
+/// so the old timers do not redraw and do not pile up: without this, two sprites with different phases
 /// moltiplicavano i timer vivi e la finestra si ridisegnava a 60/s.
 #[derive(Default)]
 pub(super) struct RefreshClock {
@@ -60,8 +60,8 @@ pub(super) struct RefreshClock {
 }
 
 impl RefreshClock {
-    /// `view` ha dipinto uno sprite animato che cambia frame a `at`. Più richieste della stessa vista
-    /// (più sprite) tengono la più vicina.
+    /// `view` painted an animated sprite that changes frame at `at`. Several requests from the same view
+    /// (several sprites) keep the nearest.
     pub(super) fn want(&mut self, view: EntityId, at: Instant) {
         match self.wanted.iter_mut().find(|wanted| wanted.view == view) {
             Some(wanted) => wanted.at = wanted.at.min(at),
@@ -69,9 +69,9 @@ impl RefreshClock {
         }
     }
 
-    /// Se serve un nuovo timer ne dà la generazione e la scadenza; `None` se non c'è niente da attendere
-    /// o se uno già programmato scade prima (o quasi insieme): scattando, ridisegnerà le viste a scadenza
-    /// e riarmerà il successivo.
+    /// If a new timer is needed, gives its generation and deadline; `None` if there is nothing to wait for
+    /// or if one already scheduled expires earlier (or almost together): when it fires, it redraws the views due
+    /// and re-arms the next one.
     pub(super) fn next_timer(&mut self, now: Instant) -> Option<(u64, Instant)> {
         let earliest = self.wanted.iter().map(|wanted| wanted.at).min()?;
         if let Some(pending) = self.deadline
@@ -85,8 +85,8 @@ impl RefreshClock {
         Some((self.generation, earliest))
     }
 
-    /// Un timer è scaduto: dà le viste da ridisegnare solo se è ancora quello valido. Le viste che
-    /// aspettano un frame più in là restano nell'elenco.
+    /// A timer has expired: gives the views to redraw only if it is still the valid one. The views that
+    /// wait for a later frame stay in the list.
     pub(super) fn fire(&mut self, generation: u64, now: Instant) -> Option<Vec<EntityId>> {
         if generation != self.generation {
             return None;
@@ -99,16 +99,16 @@ impl RefreshClock {
     }
 }
 
-/// Programma il ridisegno della vista che sta dipingendo (`Window::current_view`) fra `delay_ms`, se non
-/// ce n'è già uno che scade prima. Da chiamare solo dal prepaint o dal paint di un elemento.
+/// Schedules the redraw of the view being painted (`Window::current_view`) within `delay_ms`, if there is not
+/// already one that expires earlier. Call only from the prepaint or paint of an element.
 pub fn request_refresh(window: &Window, cx: &mut App, delay_ms: u64) {
     let at = Instant::now() + Duration::from_millis(delay_ms.max(1));
     cx.global_mut::<SpriteStore>().refresh.want(window.current_view(), at);
     arm(cx);
 }
 
-/// Avvia il timer della scadenza più vicina, se serve. Scattando invalida le viste a scadenza (una vista
-/// che non c'è più, per pagina cambiata o finestra chiusa, non ridisegna niente) e riarma per le altre.
+/// Starts the timer of the nearest deadline, if needed. When it fires it invalidates the due views (a view
+/// that no longer exists, for a changed page or a closed window, redraws nothing) and re-arms for the others.
 fn arm(cx: &mut App) {
     let now = Instant::now();
     let Some((generation, at)) = cx.global_mut::<SpriteStore>().refresh.next_timer(now) else {
@@ -142,7 +142,7 @@ mod tests {
         let first = u64::from(eq.frames()[0].duration_ms);
         assert_eq!(ms_until_next_frame(eq, 0), first);
         assert_eq!(ms_until_next_frame(eq, 30), first - 30);
-        // Al confine del frame scatta il successivo.
+        // At the frame's edge the next one fires.
         assert_eq!(ms_until_next_frame(eq, first), u64::from(eq.frames()[1].duration_ms));
     }
 
@@ -164,13 +164,13 @@ mod tests {
     fn only_the_views_whose_frame_is_due_are_redrawn_and_the_rest_wait() {
         let mut clock = RefreshClock::default();
         let (queue, mark, t0) = (EntityId::from(7), EntityId::from(9), Instant::now());
-        // L'equalizzatore della coda (120 ms) e il marchio (160 ms) hanno fasi diverse.
+        // The queue's equaliser (120 ms) and the mark (160 ms) have different phases.
         clock.want(queue, t0 + MS(120));
         clock.want(mark, t0 + MS(160));
         let (first, at) = clock.next_timer(t0).expect("timer");
         assert_eq!(at, t0 + MS(120));
         assert_eq!(clock.fire(first, t0 + MS(121)), Some(vec![queue]), "il marchio non è ancora a scadenza");
-        // Il marchio resta in attesa: il prossimo timer è il suo.
+        // The mark waits: the next timer is its own.
         let (second, at) = clock.next_timer(t0 + MS(121)).expect("timer for the waiting view");
         assert_eq!(at, t0 + MS(160));
         assert_eq!(clock.fire(second, t0 + MS(160)), Some(vec![mark]));
@@ -194,14 +194,14 @@ mod tests {
     fn only_the_latest_timer_may_redraw_and_stale_ones_are_ignored() {
         let mut clock = RefreshClock::default();
         let (view, other, t0) = (EntityId::from(7), EntityId::from(9), Instant::now());
-        // Il primo timer (500 ms) e poi uno più vicino (120 ms): il vecchio non vale più.
+        // The first timer (500 ms) and then a nearer one (120 ms): the old one no longer counts.
         clock.want(view, t0 + MS(500));
         let (late, _) = clock.next_timer(t0).expect("first timer");
         clock.want(other, t0 + MS(120));
         let (soon, _) = clock.next_timer(t0).expect("an earlier deadline replaces the pending one");
         assert_eq!(clock.fire(late, t0 + MS(500)), None, "il timer superato non ridisegna");
         assert_eq!(clock.fire(soon, t0 + MS(120)), Some(vec![other]));
-        // Una richiesta che scade dopo quella già programmata non crea un altro timer.
+        // A request that expires after the one already scheduled does not create another timer.
         let mut clock = RefreshClock::default();
         let t1 = t0 + MS(1000);
         clock.want(other, t1 + MS(120));
@@ -209,7 +209,7 @@ mod tests {
         clock.want(other, t1 + MS(300));
         assert!(clock.next_timer(t1).is_none());
         assert!(clock.fire(first, t1 + MS(120)).is_some());
-        // Dopo la scadenza si può programmare di nuovo.
+        // After the deadline it can be scheduled again.
         clock.want(other, t1 + MS(240));
         assert!(clock.next_timer(t1 + MS(120)).is_some());
     }

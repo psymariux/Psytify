@@ -1,10 +1,10 @@
-//! Scrittura sicura di un file scaricato (passo 4.6, BACKLOG 3). Il file arriva in un temporaneo
-//! dal nome unico (`.psytify-<uuid>.part`), aperto con `create_new`: non tronca mai un file
-//! dell'utente e due download non condividono mai il temporaneo. A download riuscito prende il suo
-//! nome vero senza coprirne un altro; se il lavoro finisce male o viene annullato (il futuro è
-//! lasciato cadere) il temporaneo si toglie da solo.
+//! Safe writing of a downloaded file (step 4.6, BACKLOG 3). The file arrives in a temporary with a
+//! unique name (`.psytify-<uuid>.part`), opened with `create_new`: it never truncates a file
+//! of the user's and two downloads never share the temporary. On success it takes its real
+//! name without covering another one; if the job ends badly or is cancelled (the future is
+//! dropped) the temporary removes itself.
 //!
-//! Qui stanno anche i due oggetti con cui un lavoro parla con il riduttore senza canali:
+//! Here also sit the two objects with which a job talks to the reducer without channels:
 //! [`Progress`] (byte arrivati, letti a intervalli) e [`Cancel`] (annullamento cooperativo).
 
 use std::io;
@@ -15,38 +15,38 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Notify;
 use uuid::Uuid;
 
-/// Quanti nomi liberi si provano prima di arrendersi: un altro processo che riempie la cartella
-/// mentre si sceglie il nome è già raro, otto volte di fila no.
+/// How many free names are tried before giving up: another process filling the folder
+/// while the name is chosen is already rare, eight times in a row is not.
 const PUBLISH_ATTEMPTS: usize = 8;
 
-/// A che punto è un download: il lavoro scrive, il riduttore legge a intervalli (mai a ogni blocco).
+/// How far a download has got: the job writes, the reducer reads at intervals (never at each block).
 #[derive(Debug, Default)]
 pub struct Progress {
     received: AtomicU64,
-    /// Lunghezza annunciata dal server; 0 se non l'ha detta.
+    /// Length announced by the server; 0 if it did not say.
     total: AtomicU64,
-    /// La connessione è aperta e i byte arrivano; prima il server sta preparando la versione.
+    /// The connection is open and the bytes arrive; before, the server is preparing the version.
     started: AtomicBool,
 }
 
 impl Progress {
-    /// Byte scritti finora.
+    /// Bytes written so far.
     pub fn received(&self) -> u64 {
         self.received.load(Ordering::Relaxed)
     }
 
-    /// Lunghezza del file, se il server l'ha detta.
+    /// Length of the file, if the server said it.
     pub fn total(&self) -> Option<u64> {
         Some(self.total.load(Ordering::Relaxed)).filter(|total| *total > 0)
     }
 
-    /// I byte hanno cominciato ad arrivare.
+    /// The bytes have started to arrive.
     pub fn started(&self) -> bool {
         self.started.load(Ordering::Acquire)
     }
 
-    /// Una nuova connessione di dati si è aperta: il conto riparte da zero (un URL rinnovato
-    /// riscarica da capo).
+    /// A new data connection has opened: the count starts from zero (a renewed URL
+    /// starts over from zero).
     pub(crate) fn begin(&self, total: Option<u64>) {
         self.received.store(0, Ordering::Relaxed);
         self.total.store(total.unwrap_or(0), Ordering::Relaxed);
@@ -57,7 +57,7 @@ impl Progress {
         self.received.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    /// Un `Progress` già avviato, per i test del riduttore.
+    /// A `Progress` already started, for the reducer's tests.
     #[cfg(any(test, feature = "test-support"))]
     pub fn set(&self, received: u64, total: Option<u64>) {
         self.total.store(total.unwrap_or(0), Ordering::Relaxed);
@@ -72,8 +72,8 @@ struct CancelState {
     wake: Notify,
 }
 
-/// Annullamento cooperativo: chi tiene un clone può chiamare [`Cancel::cancel`], e il lavoro, che
-/// aspetta [`Cancel::cancelled`] accanto al suo lavoro vero, si ferma.
+/// Cooperative cancellation: whoever holds a clone can call [`Cancel::cancel`], and the job, which
+/// waits for [`Cancel::cancelled`] beside its real work, and stops.
 #[derive(Debug, Clone, Default)]
 pub struct Cancel(Arc<CancelState>);
 
@@ -87,11 +87,11 @@ impl Cancel {
         self.0.flag.load(Ordering::Acquire)
     }
 
-    /// Si risolve quando qualcuno annulla (subito, se è già stato annullato).
+    /// Resolves when someone cancels (at once, if it has already been cancelled).
     pub async fn cancelled(&self) {
         let woken = self.0.wake.notified();
         tokio::pin!(woken);
-        // Registrarsi prima di guardare il flag: un annullamento nel mezzo non si perde.
+        // Register before looking at the flag: a cancellation in between is not lost.
         woken.as_mut().enable();
         if self.is_cancelled() {
             return;
@@ -100,8 +100,8 @@ impl Cancel {
     }
 }
 
-/// Un file in scrittura nella cartella di destinazione. Se non viene pubblicato (errore, annullo, il
-/// futuro lasciato cadere) sparisce quando lo si lascia cadere.
+/// A file being written in the destination folder. If it is not published (error, cancel, the
+/// future dropped) it disappears when dropped.
 #[derive(Debug)]
 pub(crate) struct TempFile {
     path: PathBuf,
@@ -109,8 +109,8 @@ pub(crate) struct TempFile {
 }
 
 impl TempFile {
-    /// Crea un temporaneo nuovo in `dir`. `create_new` fallisce se il nome esiste già: non si apre
-    /// mai un file che non è nostro.
+    /// Creates a new temporary in `dir`. `create_new` fails if the name already exists: a file that
+    /// is not ours is never opened.
     pub(crate) async fn create(dir: &Path) -> io::Result<(Self, tokio::fs::File)> {
         let path = dir.join(format!(".psytify-{}.part", Uuid::new_v4()));
         let file = tokio::fs::OpenOptions::new().write(true).create_new(true).open(&path).await?;
@@ -122,11 +122,11 @@ impl TempFile {
         &self.path
     }
 
-    /// Il file finito prende il nome `filename` in `dir`. Senza `overwrite` non ne copre mai uno
-    /// esistente: sceglie " (2)", " (3)", … e prende il nome con un collegamento fisso (che fallisce
-    /// se il nome è già occupato) prima di togliere il temporaneo; un file system senza collegamenti
-    /// fissi (una scheda SD) ricade sulla rinomina. Con `overwrite` il nome è nostro (la cartella
-    /// degli aggiornamenti) e la rinomina lo sostituisce.
+    /// The finished file takes the name `filename` in `dir`. Without `overwrite` it never covers an
+    /// existing one: it picks " (2)", " (3)", … and takes the name with a hard link (which fails
+    /// if the name is already taken) before removing the temporary; a file system without hard links
+    /// (an SD card) falls back to renaming. With `overwrite` the name is ours (the updates folder)
+    /// and renaming replaces it.
     pub(crate) async fn publish(
         mut self,
         dir: &Path,
@@ -142,9 +142,9 @@ impl TempFile {
         for _ in 0..PUBLISH_ATTEMPTS {
             let dest = super::unique_path(dir, filename).await;
             match tokio::fs::hard_link(&self.path, &dest).await {
-                // Il temporaneo si toglie quando `self` cade.
+                // The temporary is removed when `self` drops.
                 Ok(()) => return Ok(dest),
-                // Qualcuno ha preso il nome nel frattempo: si sceglie il successivo.
+                // Someone took the name in the meantime: the next one is chosen.
                 Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(_) => {
                     tokio::fs::rename(&self.path, &dest).await?;
@@ -237,7 +237,7 @@ mod tests {
         assert!(!waiting.is_finished());
         cancel.cancel();
         waiting.await.unwrap();
-        // Già annullato: si risolve subito.
+        // Already cancelled: it resolves at once.
         tokio::time::timeout(std::time::Duration::from_secs(1), cancel.cancelled()).await.unwrap();
     }
 

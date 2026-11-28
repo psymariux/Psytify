@@ -1,11 +1,11 @@
-//! Ciò che il sistema e Discord mostrano del brano in corso (passo 4.3b): il widget multimediale
-//! del desktop (MPRIS), la schermata di blocco del telefono e «Sta ascoltando» su Discord.
+//! What the system and Discord show of the track playing (step 4.3b): the desktop's media widget
+//! (MPRIS), the phone's lock screen and "Sta ascoltando" on Discord.
 //!
-//! Il riduttore decide **che cosa** mostrare e **quando**, guardando la vista della riproduzione:
-//! solo a un passaggio (un altro brano, pausa e ripresa, un salto nel brano), mai a ogni battito;
-//! l'host, che tiene i collegamenti col sistema sul thread del core, esegue gli effetti
-//! ([`MediaOp`], [`DiscordOp`]). La posizione da mostrare è `clock.at(now)` con l'`now` iniettato,
-//! così il riduttore resta senza orologio; Discord vuole il tempo del sistema e lo prende l'host.
+//! The reducer decides **what** to show and **when**, looking at the playback view:
+//! only at a transition (another track, pause and resume, a jump in the track), never at each tick;
+//! the host, which holds the system links on the core's thread, runs the effects
+//! ([`MediaOp`], [`DiscordOp`]). The position to show is `clock.at(now)` with the injected `now`,
+//! so the reducer stays without a clock; Discord wants the system's time and the host takes it.
 
 use std::time::{Duration, Instant};
 
@@ -17,10 +17,10 @@ use crate::effect::Effect;
 use crate::media::Now;
 use crate::state::playback::PlaybackView;
 
-/// La copertina già decodificata, che il frontend consegna al core con
-/// [`PlaybackCmd::Artwork`](crate::command::PlaybackCmd::Artwork): la sessione multimediale di
-/// Android la vuole in pixel, mentre MPRIS legge l'indirizzo. Il core la tiene finché il brano in
-/// corso è quello della sua `url`.
+/// The cover already decoded, which the frontend hands to the core with
+/// [`PlaybackCmd::Artwork`](crate::command::PlaybackCmd::Artwork): the media session of
+/// Android wants it in pixels, while MPRIS reads the address. The core keeps it as long as the track in
+/// progress is the one of its `url`.
 #[derive(Clone)]
 pub struct Artwork {
     pub url: String,
@@ -34,31 +34,32 @@ impl std::fmt::Debug for Artwork {
     }
 }
 
-/// Un'operazione sul collegamento multimediale del sistema. L'host la esegue se il collegamento è
-/// pronto (`Event::Ready`); prima, la perde, e al `Ready` il riduttore rimanda lo stato.
+/// An operation on the system's media link. The host runs it if the link is
+/// ready (`Event::Ready`); before that, it is lost, and at `Ready` the reducer sends the state again.
 #[derive(Debug)]
 pub enum MediaOp {
-    /// Il brano mostrato, o niente a player fermo.
+    /// The track shown, or nothing with the player stopped.
     Show(Option<Box<Now>>),
     Volume(f32),
 }
 
-/// Un'operazione su Discord Rich Presence.
+/// A Discord Rich Presence operation.
 #[derive(Debug)]
+// `testing` re-exports the type, so its fields count as read there.
 #[cfg_attr(
-    target_os = "android",
+    all(target_os = "android", not(any(test, feature = "test-support"))),
     expect(dead_code, reason = "su Android non c'è Discord: l'host non legge i campi")
 )]
 pub enum DiscordOp {
-    /// Avvia il thread per l'app Discord con questo identificativo.
+    /// Starts the thread for the Discord app with this identifier.
     Start(String),
-    /// Ferma il thread: l'attività sparisce da Discord.
+    /// Stops the thread: the activity disappears from Discord.
     Stop,
-    /// L'attività da mostrare, o nessuna (in pausa sparisce, come nelle altre app di musica).
+    /// The activity to show, or none (when paused it disappears, as in other music apps).
     Set(Option<Box<DiscordNow>>),
 }
 
-/// Il brano che Discord mostra, con la posizione e la durata: l'host ne fa l'attività con l'ora del
+/// The track Discord shows, with the position and the duration: the host makes the activity with the time of the
 /// sistema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscordNow {
@@ -70,32 +71,32 @@ pub struct DiscordNow {
     pub duration: Duration,
 }
 
-/// Ciò che si è mostrato l'ultima volta: se non cambia, non si manda niente.
+/// What was shown last time: if it does not change, nothing is sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Shown {
     track: Option<Uuid>,
     playing: bool,
-    /// Un salto nel brano o un brano che riparte spostano la posizione che il sistema mostra.
+    /// A jump in the track or a track starting again moves the position the system shows.
     seeks: u64,
     started: u64,
-    /// La copertina in pixel è arrivata.
+    /// The cover in pixels has arrived.
     art: bool,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct System {
-    /// Il collegamento multimediale ha dato il suo capo: da qui in poi gli effetti arrivano.
+    /// The media link has given its sender: from now on the effects arrive.
     ready: bool,
     shown: Option<Shown>,
     volume: Option<f32>,
     art: Option<Artwork>,
-    /// L'identificativo dell'app Discord con il thread acceso, se è acceso.
+    /// The identifier of the Discord app with the thread on, if it is on.
     discord: Option<String>,
     discord_shown: Option<Shown>,
 }
 
 impl System {
-    /// Il collegamento è pronto: si rimanda tutto ciò che il sistema non ha ancora visto.
+    /// The link is ready: everything the system has not seen yet is sent again.
     pub(crate) fn ready(&mut self) {
         self.ready = true;
         self.shown = None;
@@ -106,8 +107,8 @@ impl System {
         self.art = Some(art);
     }
 
-    /// L'impostazione di Discord è cambiata, o no: accende o spegne il thread. Senza Discord (Android)
-    /// o con l'interruttore spento non parte niente.
+    /// The Discord setting has changed, or not: it turns the thread on or off. Without Discord (Android)
+    /// or with the switch off nothing starts.
     pub(crate) fn set_discord(&mut self, presence: bool, app_id: &str, effects: &mut Vec<Effect>) -> bool {
         let chosen = app_id.trim();
         let chosen = if chosen.is_empty() { DEFAULT_DISCORD_APP_ID } else { chosen };
@@ -126,8 +127,8 @@ impl System {
         true
     }
 
-    /// Dopo ogni ingresso: se il brano, la pausa o la posizione sono cambiati per il sistema o per
-    /// Discord, lo si dice.
+    /// After each input: if the track, the pause or the position have changed for the system or for
+    /// Discord, it is said.
     pub(crate) fn sync(&mut self, view: &PlaybackView, now: Instant, effects: &mut Vec<Effect>) {
         let wants_media = self.ready;
         if !wants_media && self.discord.is_none() {
@@ -167,7 +168,7 @@ impl System {
             }
         }
         if self.discord.is_some() {
-            // In pausa o fermo l'attività è la stessa, qualunque cosa cambi: nessuna.
+            // Paused or stopped the activity is the same, whatever changes: none.
             let on_air = track.filter(|_| shown.playing);
             let key = on_air.map(|_| Shown { art: false, ..shown });
             if self.discord_shown != Some(key.unwrap_or(IDLE)) {
@@ -188,5 +189,5 @@ impl System {
     }
 }
 
-/// «Niente su Discord»: la chiave di quando non suona nulla.
+/// "Niente su Discord": the key for when nothing plays.
 const IDLE: Shown = Shown { track: None, playing: false, seeks: 0, started: 0, art: false };

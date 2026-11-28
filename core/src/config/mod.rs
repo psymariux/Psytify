@@ -1,11 +1,11 @@
-//! Configurazione dell'utente: indirizzo del backend, volume, qualità d'ascolto, login Clerk,
-//! ultima coda e playlist locali. Vive in `<config_dir>/psytify/config.json` (crate `dirs`). Non
-//! contiene segreti: il refresh token del login sta in `session.json`.
+//! The user's configuration: backend address, volume, listening quality, Clerk login, last queue and
+//! local playlists. It lives in `<config_dir>/psytify/config.json` (crate `dirs`). It does not
+//! contain secrets: the login's refresh token sits in `session.json`.
 //!
-//! Il file ha due parti nello stesso oggetto JSON: i campi del core ([`CoreConfig`]) e tutte le
-//! altre chiavi ([`Config::ui`]), cioè le preferenze dei frontend (l'ultima schermata, il pannello
-//! aperto) e ciò che ha scritto una versione più nuova. Il core non le interpreta: le rilegge e le
-//! riscrive tali e quali, così un downgrade non cancella nulla.
+//! The file has two parts in the same JSON object: the core's fields ([`CoreConfig`]) and all the
+//! other keys ([`Config::ui`]), that is the frontends' preferences (the last screen, the panel
+//! open) and what a newer version wrote. The core does not interpret them: it rereads and
+//! rewrites them as they are, so a downgrade deletes nothing.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,58 +25,58 @@ use crate::shared::Shared;
 pub mod taste;
 pub use taste::{FollowedArtist, PlayStat, SavedAlbum};
 
-/// Il backend pubblico: quello che le build di distribuzione (desktop, APK, pacchetto AUR) usano di
-/// default. Non è un segreto: è l'indirizzo che l'app contatta comunque.
+/// The public backend: the one the distribution builds (desktop, APK, AUR package) use by
+/// default. It is not a secret: it is the address the app contacts anyway.
 pub const DISTRIBUTION_API_URL: &str = "http://127.0.0.1:8080";
-/// Il backend di una configurazione nuova. Le build di debug usano un server sul proprio PC, le
-/// altre il backend pubblico. `PSYTIFY_DEFAULT_API_URL` alla compilazione lo sostituisce.
+/// The backend of a new configuration. Debug builds use a server on one's own PC, the
+/// others the public backend. `PSYTIFY_DEFAULT_API_URL` at compile time replaces it.
 pub const DEFAULT_API_URL: &str = match option_env!("PSYTIFY_DEFAULT_API_URL") {
-    // Una variabile definita ma vuota vale come assente.
+    // A variable defined but empty counts as absent.
     Some(url) if !url.is_empty() => url,
     _ if cfg!(debug_assertions) => "http://127.0.0.1:8080",
     _ => DISTRIBUTION_API_URL,
 };
-/// L'app Discord della build (Rich Presence): l'Application ID non è un segreto. Vuoto
-/// (`PSYTIFY_DEFAULT_DISCORD_APP_ID=""`), niente Discord finché `config.json` non ne indica uno.
+/// The build's Discord app (Rich Presence): the Application ID is not a secret. Empty
+/// (`PSYTIFY_DEFAULT_DISCORD_APP_ID=""`), no Discord until `config.json` names one.
 pub const DEFAULT_DISCORD_APP_ID: &str = match option_env!("PSYTIFY_DEFAULT_DISCORD_APP_ID") {
     Some(id) => id,
     None => "1565369762429804665",
 };
-/// Il login con Clerk della build: la Frontend API dell'istanza. Non è un segreto. Vale quando
-/// `config.json` non ne sceglie un'altra; vuota (`PSYTIFY_DEFAULT_CLERK_ISSUER=""`), il login resta
+/// The build's Clerk login: the instance's Frontend API. It is not a secret. It applies when
+/// `config.json` does not choose another; empty (`PSYTIFY_DEFAULT_CLERK_ISSUER=""`), the login stays
 /// spento.
 const DEFAULT_CLERK_ISSUER: &str = match option_env!("PSYTIFY_DEFAULT_CLERK_ISSUER") {
     Some(issuer) => issuer,
     None => "https://needed-grouse-4672.clerk.accounts.dev",
 };
-/// Indirizzi predefiniti delle build di sviluppo (desktop ed emulatore Android). Le versioni
-/// precedenti li salvavano nel file anche senza una scelta dell'utente: letti lì, non valgono come
+/// Default addresses of the development builds (desktop and Android emulator). The earlier versions
+/// saved them in the file even without a choice by the user: read there, they do not count as
 /// scelta.
 const BUILTIN_API_URLS: [&str; 2] = ["http://127.0.0.1:8080", "http://10.0.2.2:8080"];
-/// Variabile d'ambiente che sostituisce il backend senza toccare il file.
+/// Environment variable that replaces the backend without touching the file.
 pub const API_URL_ENV: &str = "PSYTIFY_API_URL";
-/// Variabili d'ambiente che sostituiscono `clerk_issuer` e `clerk_client_id`.
+/// Environment variables that replace `clerk_issuer` and `clerk_client_id`.
 pub const CLERK_ISSUER_ENV: &str = "PSYTIFY_CLERK_ISSUER";
 pub const CLERK_CLIENT_ID_ENV: &str = "PSYTIFY_CLERK_CLIENT_ID";
-/// Porta di loopback per il ritorno dal browser (GitHub, Google, Discord).
+/// Loopback port for the return from the browser (GitHub, Google, Discord).
 pub const DEFAULT_OAUTH_PORT: u16 = 53682;
 pub const MAX_PLAYLIST_NAME: usize = 80;
-/// Brani ascoltati di recente che l'app ricorda.
+/// Recently listened tracks that the app remembers.
 pub const MAX_RECENT: usize = 30;
-/// Playlist locali al massimo: oltre, la barra laterale non serve più a niente.
+/// Local playlists at most: beyond that, the sidebar is no longer of any use.
 pub const MAX_PLAYLISTS: usize = 200;
 
-/// Playlist locale: il backend non ha playlist, quindi l'app salva una copia dei brani.
+/// Local playlist: the backend has no playlists, so the app keeps a copy of the tracks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Playlist {
     pub id: Uuid,
     pub name: String,
     pub tracks: Vec<Track>,
-    /// Brani di una playlist esterna salvata, ancora da importare: entrano in `tracks` uno alla
-    /// volta, anche dopo un riavvio.
+    /// Tracks of a saved external playlist, still to be imported: they enter `tracks` one at a
+    /// time, even after a restart.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending: Vec<SourceItem>,
-    /// Visibile sul proprio profilo (a chi è collegato), con i brani del catalogo.
+    /// Visible on one's own profile (to whoever is connected), with the catalog's tracks.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub public: bool,
 }
@@ -90,7 +90,7 @@ impl Playlist {
         self.tracks.iter().any(|t| t.id == track_id)
     }
 
-    /// Aggiunge il brano in fondo. `false` se c'era già: una playlist non ripete un brano.
+    /// Adds the track at the end. `false` if it was already there: a playlist does not repeat a track.
     pub fn add(&mut self, track: Track) -> bool {
         if self.contains(track.id) {
             return false;
@@ -99,7 +99,7 @@ impl Playlist {
         true
     }
 
-    /// Toglie il brano alla posizione indicata. `false` se la posizione non esiste.
+    /// Removes the track at the given position. `false` if the position does not exist.
     pub fn remove_at(&mut self, index: usize) -> bool {
         if index >= self.tracks.len() {
             return false;
@@ -109,7 +109,7 @@ impl Playlist {
     }
 }
 
-/// Mette o toglie "mi piace". Il brano appena piaciuto va in testa. Restituisce `true` se ora piace.
+/// Sets or removes "mi piace". The track just liked goes to the top. Returns `true` if it is now liked.
 pub fn toggle_like(liked: &mut Vec<Track>, track: Track) -> bool {
     match liked.iter().position(|t| t.id == track.id) {
         Some(at) => {
@@ -123,14 +123,14 @@ pub fn toggle_like(liked: &mut Vec<Track>, track: Track) -> bool {
     }
 }
 
-/// Registra un ascolto: il brano va in testa e non compare due volte.
+/// Records a listen: the track goes to the top and does not appear twice.
 pub fn remember_listen(recent: &mut Vec<Track>, track: &Track) {
     recent.retain(|t| t.id != track.id);
     recent.insert(0, track.clone());
     recent.truncate(MAX_RECENT);
 }
 
-/// Nome di playlist pulito: niente caratteri di controllo, spazi compattati, lunghezza limitata.
+/// Clean playlist name: no control characters, spaces compacted, limited length.
 pub fn clean_name(raw: &str) -> String {
     let collapsed = raw
         .chars()
@@ -143,74 +143,77 @@ pub fn clean_name(raw: &str) -> String {
     if name.is_empty() { "Nuova playlist".into() } else { name }
 }
 
-/// Tutto `config.json`: i campi del core e, accanto, le chiavi che il core non conosce.
+/// All of `config.json`: the core's fields and, next to them, the keys the core does not know.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct Config {
     #[serde(flatten)]
     pub core: CoreConfig,
-    /// Ogni altra chiave del file: le preferenze dei frontend (`SettingsCmd::SaveUiPrefs`) e quelle
-    /// di versioni più nuove. Si riscrivono tali e quali; nessuna ha il nome di un campo del core
+    /// Every other key of the file: the frontends' preferences (`SettingsCmd::SaveUiPrefs`) and those
+    /// of newer versions. They are rewritten as they are; none has the name of a core field
     /// ([`merge_ui`] le scarta).
     #[serde(flatten)]
     pub ui: Map<String, Value>,
 }
 
-/// I campi di `config.json` che il core conosce. Le preferenze della sola interfaccia (l'ultima
-/// schermata, il pannello aperto, il videoclip nel pannello, la scheda video dedicata) non sono
-/// qui: le tiene ogni frontend in [`Config::ui`], con i nomi di sempre.
+/// The fields of `config.json` that the core knows. The interface-only preferences (the last
+/// screen, the open panel, the music video in the panel, the dedicated video tab) are not
+/// here: each frontend keeps them in [`Config::ui`], with the names they always had.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CoreConfig {
-    /// Backend scelto dall'utente nelle impostazioni; `None` = quello predefinito della build.
+    /// Backend chosen by the user in the settings; `None` = the build's default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
-    /// Chiave delle versioni precedenti, che scrivevano sempre il backend in uso: un indirizzo
-    /// vecchio sopravviveva così a ogni aggiornamento. Si legge soltanto, per la migrazione: chi
-    /// aggiorna da una di quelle versioni la ha ancora nel file (`docs/transformation/BACKLOG.md`, 2).
+    /// Key of the earlier versions, which always wrote the backend in use: an old address
+    /// survived this way through every update. It is only read, for the migration: whoever
+    /// updates from one of those versions still has it in the file (`docs/transformation/BACKLOG.md`, 2).
     #[serde(rename = "api_base_url", skip_serializing)]
     pub legacy_api: Option<String>,
     pub volume: f32,
     pub queue: Arc<Queue>,
+    /// Where the current queue entry was at the last save, in milliseconds: a restart resumes it
+    /// from there.
+    pub position_ms: u64,
     pub playlists: Shared<Playlist>,
-    /// Brani a cui si è messo "mi piace", il più recente in testa. Il backend non ha utenti per
-    /// questo: come le playlist, stanno solo su questo computer.
+    /// Tracks that were given "mi piace", the most recent at the top. The backend has no users for
+    /// this: like the playlists, they stay only on this computer.
     pub liked: Shared<Track>,
-    /// Ultimi brani ascoltati, il più recente in testa.
+    /// Last tracks listened to, the most recent at the top.
     pub recent: Shared<Track>,
-    /// Ultima ricerca eseguita, ripetuta se l'ultima schermata era Cerca.
+    /// Last search made, repeated if the last screen was "Cerca".
     pub last_query: String,
     pub quality: Quality,
-    /// Qualità dei download (`Message::Download`); dal menu di un brano si può scegliere un'altra.
+    /// Download quality (`Message::Download`); from a track's menu another can be chosen.
     pub download_quality: DownloadQuality,
-    /// I brani scaricati sul dispositivo (l'indice di `offline.rs`), il più recente in testa: dove
-    /// stanno i file e che file sono, per suonarli senza rete.
+    /// The tracks downloaded to the device (the index of `offline.rs`), the most recent at the top: where
+    /// the files are and which files they are, to play them without network.
     pub downloaded: Shared<SavedTrack>,
     /// Frontend API dell'istanza Clerk (`https://...`); vuoto = login disattivato.
     pub clerk_issuer: String,
-    /// Dell'applicazione OAuth del login nel browser delle versioni precedenti: il login dentro
-    /// l'app non lo usa più, resta per non perdere il valore.
+    /// Of the OAuth application of the earlier versions' browser login: the login inside
+    /// the app no longer uses it, it stays so as not to lose the value.
     pub clerk_client_id: String,
     pub oauth_port: u16,
-    /// Mostra su Discord cosa si ascolta (Rich Presence), se Discord è aperto sullo stesso PC.
+    /// Shows on Discord what is being listened to (Rich Presence), if Discord is open on the same PC.
     pub discord_presence: bool,
-    /// Application ID dell'app Discord «Psytify»; vuoto = quello della build.
+    /// Application ID of the Discord app «Psytify»; empty = the build's one.
     pub discord_app_id: String,
-    /// Equalizzatore a 10 bande, acceso o spento con le sue regolazioni.
+    /// 10-band equalizer, on or off with its adjustments.
     pub equalizer: eq::Settings,
-    /// Artisti seguiti: le loro uscite compaiono in «Novità».
+    /// Followed artists: their releases appear in «Novità».
     pub followed: Shared<FollowedArtist>,
-    /// Album salvati nella libreria.
+    /// Albums saved in the library.
     pub saved_albums: Shared<SavedAlbum>,
-    /// Ascolti per brano: i più ascoltati, i tuoi artisti e i mix si ricavano da qui.
+    /// Plays per track: the most played, "i tuoi artisti" and the mixes are derived from here.
     pub stats: Shared<PlayStat>,
-    /// Tempo ascoltato in tutto, in millisecondi.
+    /// Listening time in total, in milliseconds.
     pub listened_ms: u64,
-    /// L'uscita più recente che si è vista in «Novità» (`created_at` del brano): ciò che viene dopo
-    /// è nuovo.
+    /// The most recent release seen in «Novità» (the track's `created_at`): what comes after
+    /// is new.
     pub news_seen: String,
-    /// A fine coda continua da solo con brani dello stesso artista.
+    /// At the end of the queue it goes on by itself with tracks of the same artist.
     pub autoplay: bool,
-    /// Ultime ricerche, la più recente in testa (`remember_search`).
+    /// Last searches, the most recent at the top (`remember_search`).
     pub search_history: Shared<String>,
 }
 
@@ -221,6 +224,7 @@ impl Default for CoreConfig {
             legacy_api: None,
             volume: 0.8,
             queue: Arc::default(),
+            position_ms: 0,
             playlists: Shared::default(),
             liked: Shared::default(),
             recent: Shared::default(),
@@ -245,8 +249,8 @@ impl Default for CoreConfig {
     }
 }
 
-/// I campi di [`CoreConfig`] che possiede il dominio della libreria (`state/library.rs`): sono
-/// `Arc` condivisi, quindi passarli da un dominio all'altro non copia le liste.
+/// The fields of [`CoreConfig`] that the library domain (`state/library.rs`) owns: they are
+/// shared `Arc`s, so passing them from one domain to another does not copy the lists.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct LibraryFields {
     pub(crate) playlists: Shared<Playlist>,
@@ -260,18 +264,19 @@ pub(crate) struct LibraryFields {
     pub(crate) search_history: Shared<String>,
 }
 
-/// I campi di [`CoreConfig`] che possiede il dominio della riproduzione (`state/playback.rs`). La
-/// coda è un `Arc`: passarla da un dominio all'altro non la copia.
+/// The fields of [`CoreConfig`] that the playback domain (`state/playback.rs`) owns. The
+/// queue is an `Arc`: passing it from one domain to another does not copy it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PlaybackFields {
     pub(crate) volume: f32,
     pub(crate) queue: Arc<Queue>,
+    pub(crate) position_ms: u64,
     pub(crate) quality: Quality,
     pub(crate) equalizer: eq::Settings,
     pub(crate) autoplay: bool,
 }
 
-/// I campi di [`CoreConfig`] che possiede il dominio dei download (`state/downloads.rs`).
+/// The fields of [`CoreConfig`] that the downloads domain (`state/downloads.rs`) owns.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct DownloadsFields {
     pub(crate) download_quality: DownloadQuality,
@@ -279,38 +284,40 @@ pub(crate) struct DownloadsFields {
 }
 
 impl CoreConfig {
-    /// I campi dei download, per il suo dominio.
+    /// The download fields, for its domain.
     pub(crate) fn downloads(&self) -> DownloadsFields {
         DownloadsFields { download_quality: self.download_quality, downloaded: self.downloaded.clone() }
     }
 
-    /// Mette al loro posto i campi dei download.
+    /// Puts the download fields back in their place.
     pub(crate) fn set_downloads(&mut self, fields: DownloadsFields) {
         self.download_quality = fields.download_quality;
         self.downloaded = fields.downloaded;
     }
 
-    /// I campi della riproduzione, per il suo dominio.
+    /// The playback fields, for its domain.
     pub(crate) fn playback(&self) -> PlaybackFields {
         PlaybackFields {
             volume: self.volume,
             queue: Arc::clone(&self.queue),
+            position_ms: self.position_ms,
             quality: self.quality,
             equalizer: self.equalizer,
             autoplay: self.autoplay,
         }
     }
 
-    /// Mette al loro posto i campi della riproduzione.
+    /// Puts the playback fields back in their place.
     pub(crate) fn set_playback(&mut self, fields: PlaybackFields) {
         self.volume = fields.volume;
         self.queue = fields.queue;
+        self.position_ms = fields.position_ms;
         self.quality = fields.quality;
         self.equalizer = fields.equalizer;
         self.autoplay = fields.autoplay;
     }
 
-    /// I campi della libreria, per il suo dominio.
+    /// The library fields, for its domain.
     pub(crate) fn library(&self) -> LibraryFields {
         LibraryFields {
             playlists: self.playlists.clone(),
@@ -325,7 +332,7 @@ impl CoreConfig {
         }
     }
 
-    /// Mette al loro posto i campi della libreria.
+    /// Puts the library fields back in their place.
     pub(crate) fn set_library(&mut self, fields: LibraryFields) {
         self.playlists = fields.playlists;
         self.liked = fields.liked;
@@ -339,12 +346,12 @@ impl CoreConfig {
     }
 }
 
-/// Ricerche ricordate al massimo.
+/// Searches remembered at most.
 pub const SEARCH_HISTORY: usize = 8;
 
-/// Mette `query` in testa alle ricerche recenti. Mentre si scrive la ricerca parte più volte
-/// («emi», «emin», «eminem»): una ricerca che ne allunga o ne accorcia un'altra la sostituisce.
-/// Una ricerca da tenere: almeno una lettera o una cifra («,» o «...» no).
+/// Puts `query` at the top of the recent searches. While typing, the search runs several times
+/// ("emi", "emin", "eminem"): a search that extends or shortens another replaces it.
+/// A search worth keeping: at least one letter or digit ("," or "..." are not).
 pub fn worth_remembering(query: &str) -> bool {
     query.chars().any(char::is_alphanumeric)
 }
@@ -364,20 +371,20 @@ pub fn remember_search(history: &mut Vec<String>, query: &str) {
 }
 
 impl CoreConfig {
-    /// L'istanza Clerk del login, se configurata con un issuer https.
+    /// The login's Clerk instance, if configured with an https issuer.
     pub fn clerk_app(&self) -> Option<ClerkApp> {
         clerk_app_from(or_default(&self.clerk_issuer, DEFAULT_CLERK_ISSUER), self.oauth_port)
     }
 
-    /// Ripara valori fuori intervallo letti da disco.
+    /// Repairs out-of-range values read from disk.
     fn sanitize(mut self) -> Self {
         if !self.volume.is_finite() {
             self.volume = Self::default().volume;
         }
         self.volume = self.volume.clamp(0.0, 1.0);
         Arc::make_mut(&mut self.queue).sanitize();
-        // Il backend scritto dalle versioni precedenti resta solo se era una scelta: sul telefono
-        // non c'era modo di cambiarlo, quindi era sempre il predefinito di una build passata.
+        // The backend written by the earlier versions stays only if it was a choice: on the phone
+        // there was no way to change it, so it was always the default of a past build.
         if let Some(legacy) = self.legacy_api.take()
             && self.server.is_none()
             && !cfg!(target_os = "android")
@@ -385,7 +392,7 @@ impl CoreConfig {
         {
             self.server = normalize_server(&legacy);
         }
-        // Le porte sotto 1024 richiedono privilegi: si torna al default.
+        // Ports below 1024 need privileges: it goes back to the default.
         if self.oauth_port < 1024 {
             self.oauth_port = DEFAULT_OAUTH_PORT;
         }
@@ -402,18 +409,18 @@ impl CoreConfig {
     }
 }
 
-/// Applica a `ui` le preferenze `patch` di un frontend: ogni chiave sostituisce quella salvata,
-/// `null` la toglie, le chiavi che `patch` non nomina restano (anche quelle di un altro frontend o
-/// di una versione più nuova). Una chiave con il nome di un campo del core si scarta: scritta due
-/// volte, il file non si rileggerebbe più. Restituisce la mappa nuova solo se qualcosa cambia, così
-/// chi la tiene in un `Arc` la copia solo allora.
+/// Applies the `patch` preferences of a frontend to `ui`: each key replaces the saved one,
+/// `null` removes it, the keys that `patch` does not name stay (also those of another frontend or
+/// of a newer version). A key with the name of a core field is discarded: written twice,
+/// the file would no longer be readable. It returns the new map only if something changes, so
+/// whoever holds it in an `Arc` copies it only then.
 pub fn merge_ui(ui: &Map<String, Value>, patch: Map<String, Value>) -> Option<Map<String, Value>> {
     let mut merged: Option<Map<String, Value>> = None;
     for (key, value) in patch {
         let current = merged.as_ref().unwrap_or(ui).get(&key);
         let changes = if value.is_null() { current.is_some() } else { current != Some(&value) };
-        // Una chiave già nella mappa non è del core: o veniva dal file, dove serde ha già preso i
-        // campi suoi, o è passata da qui.
+        // A key already in the map is not the core's: it came from the file, where serde has already taken
+        // its fields, or it came through here.
         if !changes || (current.is_none() && is_core_key(&key)) {
             continue;
         }
@@ -427,9 +434,9 @@ pub fn merge_ui(ui: &Map<String, Value>, patch: Map<String, Value>) -> Option<Ma
     merged
 }
 
-/// `key` è il nome di un campo di [`CoreConfig`] (o di una chiave che il core legge soltanto, come
-/// `api_base_url`). Lo dice serde stesso: letto un file con quella sola chiave, il core la prende
-/// per sé (o rifiuta il valore) invece di lasciarla fra le altre. Così l'elenco non va tenuto a mano.
+/// `key` is the name of a field of [`CoreConfig`] (or of a key that the core only reads, such as
+/// `api_base_url`). serde itself says so: with a file read holding only that key, the core takes it
+/// for itself (or rejects the value) instead of leaving it among the others. So the list need not be kept by hand.
 pub(crate) fn is_core_key(key: &str) -> bool {
     let mut probe = Map::new();
     probe.insert(key.to_owned(), Value::Null);
@@ -439,12 +446,12 @@ pub(crate) fn is_core_key(key: &str) -> bool {
     }
 }
 
-/// Un campo della configurazione, o il predefinito della build se è vuoto.
+/// A configuration field, or the build's default if it is empty.
 fn or_default<'a>(value: &'a str, default: &'a str) -> &'a str {
     if value.trim().is_empty() { default } else { value }
 }
 
-/// L'istanza Clerk, se l'issuer è un indirizzo `https://` valido.
+/// The Clerk instance, if the issuer is a valid `https://` address.
 fn clerk_app_from(issuer: &str, port: u16) -> Option<ClerkApp> {
     let issuer = issuer.trim().trim_end_matches('/');
     let valid = issuer.starts_with("https://")
@@ -453,20 +460,20 @@ fn clerk_app_from(issuer: &str, port: u16) -> Option<ClerkApp> {
     valid.then(|| ClerkApp { issuer: issuer.to_owned(), port, session_file: None })
 }
 
-/// Backend predefinito scelto da chi avvia l'app (Android: fissato alla compilazione, perché sul
-/// telefono il backend non è su `127.0.0.1`). Vale finché l'utente non ne sceglie un altro.
+/// Default backend chosen by whoever starts the app (Android: fixed at compile time, because on the
+/// phone the backend is not at `127.0.0.1`). It applies until the user chooses another.
 static DEFAULT_API: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn set_default_api_url(url: String) {
     let _ = DEFAULT_API.set(url);
 }
 
-/// Il backend predefinito di questa build.
+/// The default backend of this build.
 pub fn default_api_url() -> &'static str {
     DEFAULT_API.get().map_or(DEFAULT_API_URL, String::as_str)
 }
 
-/// Il backend da usare: la variabile d'ambiente, poi la scelta dell'utente, poi il predefinito.
+/// The backend to use: the environment variable, then the user's choice, then the default.
 pub fn api_url(server: Option<&str>) -> String {
     std::env::var(API_URL_ENV)
         .ok()
@@ -475,55 +482,36 @@ pub fn api_url(server: Option<&str>) -> String {
         .unwrap_or_else(|| default_api_url().to_owned())
 }
 
-/// Ripulisce l'indirizzo scritto dall'utente; vuoto o uguale al predefinito vuol dire nessuna scelta.
+/// Cleans the address typed by the user; empty or equal to the default means no choice.
 pub fn normalize_server(input: &str) -> Option<String> {
     let url = input.trim().trim_end_matches('/');
     (!url.is_empty() && url != default_api_url()).then(|| url.to_owned())
 }
 
-/// Cartella dei dati scelta da chi avvia l'app (Android: la cartella privata dell'app), al posto di
-/// quelle del sistema che `dirs` conosce solo su desktop. Dal passo 4.7 la leggono solo i
-/// frontend, per riempire `CoreOptions::data_dir` e `downloads_dir`: il core non la guarda più,
-/// e ogni core ha la sua cartella (`config.json`, `session.json`, download e aggiornamenti).
-static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-
-/// Usa `dir` per configurazione, sessione e download. Va chiamata prima di `run`; la seconda volta
-/// non cambia niente.
-pub fn set_data_dir(dir: PathBuf) {
-    let _ = DATA_DIR.set(dir);
-}
-
-/// La cartella di configurazione di Psytify.
+// Desktop folders. Android passes its own in `CoreOptions` and never calls these.
+/// The Psytify configuration folder.
 pub fn dir() -> Option<PathBuf> {
-    match DATA_DIR.get() {
-        Some(dir) => Some(dir.clone()),
-        None => dirs::config_dir().map(|dir| dir.join("psytify")),
-    }
+    dirs::config_dir().map(|dir| dir.join("psytify"))
 }
 
-/// Dove finiscono i brani scaricati: la cartella Download dell'utente, o quella dei dati dell'app.
+/// Where the downloaded tracks end up: the user's Download folder, else the home folder.
 pub fn downloads_dir() -> PathBuf {
-    match DATA_DIR.get() {
-        Some(dir) => dir.join("Download"),
-        None => {
-            dirs::download_dir().or_else(dirs::home_dir).unwrap_or_else(std::env::temp_dir).join("Psytify")
-        }
-    }
+    dirs::download_dir().or_else(dirs::home_dir).unwrap_or_else(std::env::temp_dir).join("Psytify")
 }
 
-/// `config.json` nella cartella dei dati `dir`.
+/// `config.json` in the data folder `dir`.
 pub fn file_in(dir: &Path) -> PathBuf {
     dir.join("config.json")
 }
 
-/// `config.json` nella cartella di [`dir`].
+/// `config.json` in the folder of [`dir`].
 pub fn path() -> Option<PathBuf> {
     dir().map(|dir| file_in(&dir))
 }
 
-/// Legge `config.json` da `path`; senza percorso, i default. Un file assente dà i default; un file
-/// illeggibile viene messo da parte come `config.json.broken` e si riparte dai default, senza
-/// perdere i dati dell'utente. Lettura sincrona: avviene una volta sola, all'avvio.
+/// Reads `config.json` from `path`; without a path, the defaults. A missing file gives the defaults; an
+/// unreadable file is set aside as `config.json.broken` and it starts from the defaults, without
+/// losing the user's data. Synchronous read: it happens once, at startup.
 pub fn load(path: Option<&Path>) -> Config {
     let mut config = path.map_or_else(Config::default, load_from);
     for (var, field) in [
@@ -552,9 +540,9 @@ fn load_from(path: &Path) -> Config {
     }
 }
 
-/// Scrive `config.json` in modo atomico: un file temporaneo accanto, poi la rinomina. Una
-/// scrittura interrotta lascia intatto il file di prima. Solo il core la chiama
-/// (`state::settings`), una scrittura alla volta: è l'unico a scrivere il file.
+/// Writes `config.json` atomically: a temporary file next to it, then the rename. An
+/// interrupted write leaves the previous file intact. Only the core calls it
+/// (`state::settings`), one write at a time: it is the only one that writes the file.
 pub(crate) async fn write(path: &Path, core: &CoreConfig, ui: &Map<String, Value>) -> Result<(), AppError> {
     let io_error = |_| AppError::Io(path.display().to_string());
     if let Some(dir) = path.parent() {
@@ -625,12 +613,13 @@ mod tests {
         assert_eq!(load_from(&path), Config { core, ui });
     }
 
-    /// Una configurazione con ogni campo diverso dal default, per il test di `config.json`.
+    /// A configuration with every field different from the default, for the `config.json` test.
     fn full_config() -> Config {
         let mut core = CoreConfig {
             server: Some("https://backend.example.test".into()),
             legacy_api: None,
             volume: 0.5,
+            position_ms: 42_000,
             last_query: "daft punk".into(),
             quality: Quality::Standard,
             download_quality: DownloadQuality::High,
@@ -690,8 +679,8 @@ mod tests {
         core.playlists.make_mut().push(playlist);
         core.liked.make_mut().push(track(4));
         core.recent.make_mut().push(track(5));
-        // Le preferenze dell'interfaccia Iced e una chiave di una versione futura: per il core
-        // sono chiavi qualsiasi.
+        // A frontend's preferences and a key of a future version: for the core
+        // they are any keys.
         let ui = object(serde_json::json!({
             "last_screen": {"kind": "album", "id": "00000000-0000-0000-0000-000000000007"},
             "panel_open": true,
@@ -702,10 +691,10 @@ mod tests {
         Config { core, ui }
     }
 
-    /// Il file golden di `config.json`, nel formato delle release: ogni campo valorizzato, senza
-    /// token e con id fittizi. Il confronto è sui valori JSON (non sui byte): l'ordine dei campi e
-    /// gli spazi non sono un contratto. Il file porta anche `api_base_url`, letta per la migrazione
-    /// ma mai riscritta, e `unknown_future_key`, che resta com'è.
+    /// The golden file of `config.json`, in the format of the releases: every field filled in, without
+    /// tokens and with fake ids. The comparison is on the JSON values (not on the bytes): the order of the fields and
+    /// the spaces are not a contract. The file also carries `api_base_url`, read for the migration
+    /// but never rewritten, and `unknown_future_key`, which stays as it is.
     #[tokio::test]
     async fn golden_config_json_round_trips() {
         let text = include_str!("../../tests/fixtures/config.golden.json");
@@ -731,7 +720,7 @@ mod tests {
         let loaded = load_from(&path);
         write(&path, &loaded.core, &loaded.ui).await.unwrap();
 
-        // Un downgrade non cancella i campi scritti da una versione più nuova
+        // A downgrade does not delete the fields written by a newer version.
         // (`docs/transformation/BACKLOG.md`, 1).
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved["unknown_future_key"], serde_json::json!({"a": 1}));
@@ -740,7 +729,7 @@ mod tests {
 
     #[test]
     fn a_ui_value_from_a_newer_version_does_not_break_the_core_fields() {
-        // Una schermata che questa versione non conosce: prima rendeva illeggibile tutto il file.
+        // A screen this version does not know: before, it made the whole file unreadable.
         let json = r#"{"volume": 0.3, "last_screen": {"kind": "podcasts"}}"#;
         let config: Config = serde_json::from_str(json).unwrap();
         assert_eq!(config.core.volume, 0.3);
@@ -855,7 +844,7 @@ mod tests {
         let loaded = load_from(&path);
         assert_eq!(loaded.core.server.as_deref(), Some("https://music.example.org"));
         assert!(loaded.ui.is_empty(), "the old key is the core's, not a ui key");
-        // Riscritto, il file non ha più la chiave vecchia: la scelta sta in `server`.
+        // Rewritten, the file no longer has the old key: the choice sits in `server`.
         write(&path, &loaded.core, &loaded.ui).await.unwrap();
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved.get("api_base_url"), None);
@@ -873,7 +862,7 @@ mod tests {
 
     #[test]
     fn clerk_login_is_off_without_issuer() {
-        // Un issuer vuoto spegne il login; `CoreConfig::default()` invece prende quello della build.
+        // An empty issuer turns the login off; `CoreConfig::default()` instead takes the build's one.
         assert_eq!(clerk_app_from("", DEFAULT_OAUTH_PORT), None);
     }
 

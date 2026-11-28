@@ -1,7 +1,8 @@
 //! NavigationItem (barra laterale) e Tabs (in pagina).
 //!
-//! NavigationItem: 32 dp, icona 12 AP + etichetta `TYPE_NAV`; selezionato = barra lime di
-//! `MARKER_W` a sinistra, icona piena, etichetta primaria, nessun fill. Tabs: sottolineatura di 2 AP
+//! NavigationItem: 32 dp by default, 12 AP icon + `TYPE_NAV` label; hover eases the tone in and nudges the
+//! icon 1 AP right; selected = the `MARKER_W` lime bar on the left (it grows from the centre in three frames
+//! when the selection moves), filled icon, primary label, no fill. Tabs: sottolineatura di 2 AP
 //! `WARM_WHITE` sulla linea di base `LINE_SUBTLE`, niente lime.
 
 use gpui::{
@@ -12,6 +13,7 @@ use psytify_design::tokens::color::{
     ICON_ACTIVE, ICON_DISABLED, ICON_IDLE, LIME, PURE_WHITE, SURFACE_RAISED, SURFACE_SELECTED, TEXT_DISABLED,
     TEXT_PRIMARY, TEXT_SECONDARY, WARM_WHITE,
 };
+use psytify_design::tokens::motion::{MOTION_FAST, STEP_FRAMES};
 use psytify_design::tokens::shape::MARKER_W;
 use psytify_design::tokens::size::NAV_ITEM_H;
 use psytify_design::tokens::space::{SPACE_3, SPACE_4};
@@ -20,9 +22,11 @@ use psytify_design::tokens::type_::TYPE_NAV;
 use super::badge::{Badge, BadgeKind};
 use super::control::{OnClick, Preview, wire, with_click};
 use super::separator::Separator;
+use super::tooltip::with_tooltip;
+use crate::motion::{ap_round, follow, steps};
 use crate::pixel::PixelSprite;
 use crate::pixel::shape::inset_ring;
-use crate::theme::{Ap, TypeStyle, col, dp};
+use crate::theme::{Ap, TypeStyle, col, dp, fade, to_dp};
 
 #[derive(IntoElement)]
 pub struct NavigationItem {
@@ -34,6 +38,7 @@ pub struct NavigationItem {
     disabled: bool,
     count: Option<u32>,
     rail: bool,
+    height: f32,
     preview: Preview,
     on_click: Option<OnClick>,
 }
@@ -49,12 +54,13 @@ impl NavigationItem {
             disabled: false,
             count: None,
             rail: false,
+            height: NAV_ITEM_H,
             preview: Preview::Live,
             on_click: None,
         }
     }
 
-    /// Variante piena dell'icona, usata quando la voce è selezionata.
+    /// Full variant of the icon, used when the entry is selected.
     pub fn icon_selected(mut self, icon: &'static str) -> Self {
         self.icon_selected = Some(icon);
         self
@@ -75,7 +81,7 @@ impl NavigationItem {
         self
     }
 
-    /// Rail compressa: solo icona.
+    /// Compact rail: icon only.
     pub fn rail(mut self, rail: bool) -> Self {
         self.rail = rail;
         self
@@ -83,6 +89,12 @@ impl NavigationItem {
 
     pub fn preview(mut self, preview: Preview) -> Self {
         self.preview = preview;
+        self
+    }
+
+    /// Row height in dp (`NAV_ITEM_H` by default).
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = height;
         self
     }
 
@@ -107,17 +119,24 @@ impl RenderOnce for NavigationItem {
         let fill = if self.selected || self.disabled {
             None
         } else if v.pressed {
-            Some(SURFACE_SELECTED)
-        } else if v.hovered {
-            Some(SURFACE_RAISED)
+            Some(col(SURFACE_SELECTED))
+        } else if v.hover_t > 0.0 {
+            Some(fade(SURFACE_RAISED, v.hover_t))
         } else {
             None
         };
+        // The selection marker grows from the centre to full height in three frames when the selection
+        // moves here (and shrinks the same way when it leaves).
+        let marker_id = ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "marker".into());
+        let grow = follow(marker_id, if self.selected { 1.0 } else { 0.0 }, MOTION_FAST, window, cx);
+        let marker_frames = steps(grow, STEP_FRAMES);
+        // The icon nudges 1 AP right on hover.
+        let nudge = ap.n(ap_round(v.hover_t));
         let icon = if self.selected { self.icon_selected.unwrap_or(self.icon) } else { self.icon };
         let mut row = wired
             .element
             .relative()
-            .h(dp(NAV_ITEM_H))
+            .h(dp(self.height))
             .w_full()
             .flex()
             .items_center()
@@ -125,28 +144,41 @@ impl RenderOnce for NavigationItem {
             .px(dp(SPACE_3))
             .text_color(col(text))
             .type_role(TYPE_NAV)
-            .child(PixelSprite::new(icon).tint(icon_tint));
-        if !self.rail {
+            .child(div().relative().left(nudge).flex_none().child(PixelSprite::new(icon).tint(icon_tint)));
+        let label = self.label.clone();
+        if self.rail {
+            row = row.justify_center();
+        } else {
             row = row.child(div().flex_1().truncate().child(self.label));
             if let Some(count) = self.count {
                 row = row.child(Badge::new(count.to_string(), BadgeKind::Count));
             }
         }
         if let Some(color) = fill {
-            row = row.bg(col(color));
+            row = row.bg(color);
         }
-        if self.selected {
-            // Barra lime di 2 AP a sinistra, rientrata di 1 AP sopra e sotto.
+        if marker_frames > 0 {
+            // A 2 AP lime bar on the left, 1 AP in from the top and bottom at full height, centred.
+            let full = (self.height - 2.0 * to_dp(ap.one())).max(0.0);
+            let h = full * marker_frames as f32 / STEP_FRAMES as f32;
             row = row.child(
-                div().absolute().left(dp(0.0)).top(ap.one()).bottom(ap.one()).w(ap.n(MARKER_W)).bg(col(LIME)),
+                div()
+                    .absolute()
+                    .left(dp(0.0))
+                    .top(dp((self.height - h) / 2.0))
+                    .h(dp(h))
+                    .w(ap.n(MARKER_W))
+                    .bg(col(LIME)),
             );
         }
         row = row.child(inset_ring(col(PURE_WHITE), wired.focus.clone(), v.force_ring));
-        with_click(row, if self.disabled { None } else { self.on_click })
+        let row = with_click(row, if self.disabled { None } else { self.on_click });
+        // On the rail the label is the tooltip.
+        if self.rail { with_tooltip(row, label, None) } else { row }
     }
 }
 
-/// Callback di selezione di una scheda (indice).
+/// Callback for selecting a tab (index).
 type OnSelect = std::rc::Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 /// Una scheda.
@@ -163,7 +195,7 @@ impl Tab {
     }
 }
 
-/// Riga di schede; `selected` è l'indice attivo. `preview` forza lo stato della scheda `preview_ix`.
+/// Row of tabs; `selected` is the active index. `preview` forces the state of the tab `preview_ix`.
 #[derive(IntoElement)]
 pub struct Tabs {
     tabs: Vec<Tab>,

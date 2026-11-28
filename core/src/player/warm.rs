@@ -1,6 +1,6 @@
-//! Brani tenuti "caldi": la testata di ciò che probabilmente si ascolterà tra poco (il brano su cui
-//! si ferma il mouse, i prossimi della coda, il primo di un album). Il clic su Riproduci trova già i
-//! primi secondi in memoria e il brano parte senza aspettare la rete.
+//! Tracks kept "warm": the head of what will probably be played soon (the track the mouse stops on,
+//! the next ones in the queue, the first of an album). A click on Play then finds the first
+//! seconds already in memory and the track starts without waiting for the network.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -10,9 +10,9 @@ use uuid::Uuid;
 use super::stream::StreamBuffer;
 use crate::api::Quality;
 
-/// Brani caldi tenuti al massimo: ognuno pesa circa `WARM_BYTES` finché non suona.
+/// Warm tracks kept at most: each weighs about `WARM_BYTES` until it plays.
 const MAX_WARM: usize = 5;
-/// Oltre questa età l'URL firmato e la connessione sono da considerare scaduti.
+/// Past this age the signed URL and the connection are considered expired.
 const MAX_AGE: Duration = Duration::from_secs(4 * 60);
 
 #[derive(Debug)]
@@ -32,18 +32,18 @@ impl Entry {
 #[derive(Debug, Default)]
 pub struct WarmCache {
     entries: Vec<Entry>,
-    /// Brani in apertura: non se ne chiede uno due volte.
+    /// Tracks being opened: one is not requested twice.
     pending: HashSet<(Uuid, Quality)>,
 }
 
 impl WarmCache {
-    /// Il brano non è caldo né in apertura: conviene aprirlo.
+    /// The track is neither warm nor being opened: it is worth opening.
     pub fn wants(&self, id: Uuid, quality: Quality) -> bool {
         !self.pending.contains(&(id, quality))
             && !self.entries.iter().any(|e| e.id == id && e.quality == quality && e.is_usable())
     }
 
-    /// Segna il brano come in apertura. `false` se non serve aprirlo.
+    /// Marks the track as being opened. `false` if it does not need opening.
     pub fn begin(&mut self, id: Uuid, quality: Quality) -> bool {
         if !self.wants(id, quality) {
             return false;
@@ -52,7 +52,7 @@ impl WarmCache {
         self.pending.insert((id, quality))
     }
 
-    /// Il brano è arrivato (o l'apertura è fallita: si riproverà alla prossima occasione).
+    /// The track has arrived (or the opening failed: it will be retried next time).
     pub fn finish(&mut self, id: Uuid, quality: Quality, stream: Option<StreamBuffer>) {
         self.pending.remove(&(id, quality));
         let Some(stream) = stream else { return };
@@ -63,7 +63,7 @@ impl WarmCache {
         }
     }
 
-    /// Il buffer del brano, se è caldo e ancora buono. Esce dalla cache: da qui lo possiede chi lo suona.
+    /// The track's buffer, if it is warm and still good. It leaves the cache: from here its player owns it.
     pub fn take(&mut self, id: Uuid, quality: Quality) -> Option<StreamBuffer> {
         let at = self.entries.iter().position(|e| e.id == id && e.quality == quality)?;
         let entry = self.entries.remove(at);
@@ -73,8 +73,8 @@ impl WarmCache {
         })
     }
 
-    /// Fa continuare il download di un brano caldo fino alla fine (il prossimo della coda, vicino
-    /// alla fine del brano che suona). `true` se il brano era caldo.
+    /// Lets the download of a warm track continue to the end (the next in the queue, close
+    /// to the end of the track playing). `true` if the track was warm.
     pub fn release(&self, id: Uuid, quality: Quality) -> bool {
         self.entries.iter().find(|e| e.id == id && e.quality == quality && e.is_usable()).is_some_and(|e| {
             e.stream.release();
@@ -82,7 +82,7 @@ impl WarmCache {
         })
     }
 
-    /// Ferma tutto: nessuna connessione resta aperta per brani che non servono più.
+    /// Stops everything: no connection stays open for tracks that are no longer needed.
     pub fn clear(&mut self) {
         for entry in self.entries.drain(..) {
             entry.stream.cancel();

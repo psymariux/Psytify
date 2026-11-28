@@ -4,13 +4,13 @@
 Reads the sprite grids through sprites.py and writes, with nearest-neighbour integer
 scaling only (no smoothing, no fractional scale):
 
-  android/res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher.png
+  android-app/app/src/main/res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher.png
       48/72/96/144/192 px, `app_icon` on deep_black. Scale = the largest integer that
       leaves at least 10 % padding on each side; the art is centred on whole pixels.
-  android/res/drawable/ic_stat_psytify.xml
+  android-app/app/src/main/res/drawable/ic_stat_psytify.xml
       notification icon: the `mark` sprite as a vector of rects, white on transparent
       (24 dp viewport, 2 dp per art pixel, so every density lands on whole pixels).
-  client/assets/psytify.svg
+  design/assets/psytify.svg
       desktop icon: `app_icon` as crisp rects on deep_black (128 viewBox, 6 per art pixel).
 
 Usage: python3 -I design/tools/launcher.py
@@ -176,16 +176,16 @@ def main() -> int:
     bg = token_rgb("deep_black")
     face = sprite_pixels("app_icon")
     for density, canvas in ANDROID_SIZES.items():
-        out = REPO / "android" / "res" / f"mipmap-{density}" / "ic_launcher.png"
+        out = REPO / "android-app" / "app" / "src" / "main" / "res" / f"mipmap-{density}" / "ic_launcher.png"
         out.parent.mkdir(parents=True, exist_ok=True)
         android_png(face, canvas, bg).save(out, optimize=False)
         print(f"wrote {out.relative_to(REPO)} ({canvas}px)")
     mark = sprite_pixels("mark", "pure_white")
-    stat = REPO / "android" / "res" / "drawable" / "ic_stat_psytify.xml"
+    stat = REPO / "android-app" / "app" / "src" / "main" / "res" / "drawable" / "ic_stat_psytify.xml"
     stat.parent.mkdir(parents=True, exist_ok=True)
     stat.write_text(stat_vector(mark), encoding="utf-8")
     print(f"wrote {stat.relative_to(REPO)}")
-    svg = REPO / "client" / "assets" / "psytify.svg"
+    svg = REPO / "design" / "assets" / "psytify.svg"
     svg.write_text(desktop_svg(face, bg), encoding="utf-8")
     print(f"wrote {svg.relative_to(REPO)}")
     return 0

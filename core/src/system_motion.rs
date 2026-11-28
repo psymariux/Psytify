@@ -1,50 +1,50 @@
-//! Il movimento ridotto chiesto dal sistema (passo 6.5b): se il desktop vuole meno animazioni
-//! (accessibilità) o se il sistema è in risparmio energetico. Il frontend che «segue il sistema» lo
-//! legge dalla vista delle impostazioni (`SettingsView::system_motion`) e riduce il movimento.
+//! The reduced motion requested by the system (step 6.5b): when the desktop wants fewer animations
+//! (accessibility) or when the system is in power saving. A frontend that "follows the system" reads it
+//! from the settings view (`SettingsView::system_motion`) and reduces the motion.
 //!
-//! Il segnale arriva come un flusso ([`events`]) che l'host tiene sul thread del core, come i
-//! controlli multimediali: una lettura all'inizio e poi una a ogni cambio vero, senza nessun timer.
-//! Su Linux viene da D-Bus:
+//! The signal arrives as a stream ([`events`]) that the host holds on the core's thread, like the
+//! media controls: one reading at the start and then one at each real change, with no timer at all.
+//! On Linux it comes from D-Bus:
 //!
-//! - il portale `org.freedesktop.portal.Settings`: `org.freedesktop.appearance` `reduced-motion`
-//!   (1 = ridotto), e come riserva `org.gnome.desktop.interface` `enable-animations` (falso =
-//!   ridotto) e `org.kde.kdeglobals.KDE` `AnimationDurationFactor` (0 = ridotto), ascoltando il
-//!   segnale `SettingChanged`;
-//! - il profilo energetico di power-profiles-daemon, sul bus del sistema
-//!   (`org.freedesktop.UPower.PowerProfiles`, o il vecchio nome `net.hadess.PowerProfiles`):
-//!   `ActiveProfile` = `power-saver`, ascoltando `PropertiesChanged`.
+//! - the `org.freedesktop.portal.Settings` portal: `org.freedesktop.appearance` `reduced-motion`
+//!   (1 = reduced), and as a fallback `org.gnome.desktop.interface` `enable-animations` (false =
+//!   reduced) and `org.kde.kdeglobals.KDE` `AnimationDurationFactor` (0 = reduced), listening to the
+//!   `SettingChanged` signal;
+//! - the power profile of power-profiles-daemon, on the system bus
+//!   (`org.freedesktop.UPower.PowerProfiles`, or the old name `net.hadess.PowerProfiles`):
+//!   `ActiveProfile` = `power-saver`, listening to `PropertiesChanged`.
 //!
-//! Un servizio che manca non è un errore: quella fonte resta «nessuna preferenza». Su Windows e
-//! Android per ora il flusso finisce subito (nessuna preferenza: BACKLOG 22 e 35).
+//! A missing service is not an error: that source stays "no preference". On Windows and
+//! Android for now the stream ends at once (no preference: BACKLOG 22 and 35).
 
-/// Ciò che il sistema chiede del movimento. `None`: nessuna risposta (il servizio non c'è).
+/// What the system asks about motion. `None`: no answer (the service is not there).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SystemMotion {
-    /// Il desktop chiede animazioni ridotte (portale, GNOME o KDE).
+    /// The desktop asks for reduced animations (portal, GNOME or KDE).
     pub reduced_motion: Option<bool>,
-    /// Il profilo energetico è il risparmio energetico.
+    /// The power profile is power saving.
     pub power_saver: Option<bool>,
 }
 
-/// Perché il sistema chiede movimento ridotto.
+/// Why the system asks for reduced motion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reason {
-    /// Le impostazioni del desktop (accessibilità, animazioni spente).
+    /// The desktop settings (accessibility, animations off).
     ReducedMotion,
-    /// Il risparmio energetico.
+    /// Power saving.
     PowerSaver,
     Both,
 }
 
 impl SystemMotion {
-    /// Il sistema chiede movimento ridotto: per l'accessibilità o per il risparmio energetico.
-    /// Senza risposta vale movimento pieno.
+    /// The system asks for reduced motion: for accessibility or for power saving.
+    /// Without an answer, full motion applies.
     #[must_use]
     pub fn reduce(self) -> bool {
         self.reason().is_some()
     }
 
-    /// Perché, se lo chiede.
+    /// Why, if it says so.
     #[must_use]
     pub fn reason(self) -> Option<Reason> {
         match (self.reduced_motion == Some(true), self.power_saver == Some(true)) {
@@ -61,8 +61,8 @@ pub use linux::events;
 #[cfg(all(target_os = "linux", test))]
 use linux::watch;
 
-/// Fuori da Linux il sistema non dice niente, per ora: il flusso finisce subito e il frontend
-/// resta su movimento pieno (Windows: BACKLOG 22; Android: BACKLOG 35).
+/// Outside Linux the system says nothing, for now: the stream ends at once and the frontend
+/// stays on full motion (Windows: BACKLOG 22; Android: BACKLOG 35).
 #[cfg(not(target_os = "linux"))]
 pub fn events() -> impl futures_util::Stream<Item = SystemMotion> + Send + 'static {
     futures_util::stream::empty()
@@ -85,7 +85,7 @@ mod linux {
     pub(super) const APPEARANCE: (&str, &str) = ("org.freedesktop.appearance", "reduced-motion");
     const GNOME: (&str, &str) = ("org.gnome.desktop.interface", "enable-animations");
     const KDE: (&str, &str) = ("org.kde.kdeglobals.KDE", "AnimationDurationFactor");
-    /// power-profiles-daemon: il nome di oggi e quello di prima della 0.20 (nome, percorso).
+    /// power-profiles-daemon: today's name and the one from before 0.20 (name, path).
     pub(super) const POWER: [(&str, &str); 2] = [
         ("org.freedesktop.UPower.PowerProfiles", "/org/freedesktop/UPower/PowerProfiles"),
         ("net.hadess.PowerProfiles", "/net/hadess/PowerProfiles"),
@@ -93,8 +93,8 @@ mod linux {
     pub(super) const ACTIVE_PROFILE: &str = "ActiveProfile";
     const POWER_SAVER: &str = "power-saver";
 
-    /// Le letture di ogni fonte. La preferenza del desktop è ridotta se una qualsiasi delle tre lo
-    /// dice (un portale GNOME può non tradurre `enable-animations` in `reduced-motion`).
+    /// The readings of each source. The desktop preference is reduced if any of the three says so
+    /// (a GNOME portal may not translate `enable-animations` into `reduced-motion`).
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
     pub(super) struct Sources {
         appearance: Option<bool>,
@@ -104,8 +104,8 @@ mod linux {
     }
 
     impl Sources {
-        /// Un'impostazione del portale; quelle di altre chiavi non contano. Un valore di un tipo
-        /// inatteso è «nessuna preferenza».
+        /// A portal setting; those of other keys do not count. A value of an unexpected type is
+        /// "no preference".
         pub(super) fn set(&mut self, namespace: &str, key: &str, value: &Value<'_>) {
             let value = unwrap_variant(value);
             match (namespace, key) {
@@ -128,7 +128,7 @@ mod linux {
         }
     }
 
-    /// Il vecchio metodo `Read` del portale mette la risposta in una variante di troppo.
+    /// The portal's old `Read` method puts the answer in one variant too many.
     fn unwrap_variant<'v>(value: &'v Value<'v>) -> &'v Value<'v> {
         match value {
             Value::Value(inner) => unwrap_variant(inner),
@@ -136,7 +136,7 @@ mod linux {
         }
     }
 
-    /// `reduced-motion`: 0 nessuna preferenza, 1 movimento ridotto.
+    /// `reduced-motion`: 0 no preference, 1 reduced motion.
     fn reduced_from_appearance(value: &Value<'_>) -> Option<bool> {
         match value {
             Value::U32(value) => Some(*value == 1),
@@ -144,7 +144,7 @@ mod linux {
         }
     }
 
-    /// `enable-animations`: le animazioni spente sono movimento ridotto.
+    /// `enable-animations`: animations off means reduced motion.
     fn reduced_from_gnome(value: &Value<'_>) -> Option<bool> {
         match value {
             Value::Bool(enabled) => Some(!enabled),
@@ -152,8 +152,8 @@ mod linux {
         }
     }
 
-    /// `AnimationDurationFactor`: 0 vuol dire animazioni istantanee. Il portale di KDE lo dà come
-    /// numero o come testo, secondo la versione.
+    /// `AnimationDurationFactor`: 0 means instant animations. KDE's portal gives it as a
+    /// number or as text, depending on the version.
     fn reduced_from_kde(value: &Value<'_>) -> Option<bool> {
         let factor = match value {
             Value::F64(factor) => *factor,
@@ -170,8 +170,8 @@ mod linux {
         }
     }
 
-    /// Si collega ai bus e manda le letture: il portale sta sul bus della sessione, power-profiles-daemon su
-    /// quello del sistema. Senza nessuno dei due il flusso finisce subito.
+    /// Connects to the buses and sends the readings: the portal is on the session bus, power-profiles-daemon on
+    /// the system one. Without either of them the stream ends at once.
     pub fn events() -> impl Stream<Item = SystemMotion> + Send + 'static {
         crate::media::channel(4, |output| async move {
             let session = Connection::session().await.ok();
@@ -182,15 +182,15 @@ mod linux {
         })
     }
 
-    /// Le letture da un collegamento già aperto, per entrambe le fonti (i test usano un bus privato con
-    /// servizi finti).
+    /// The readings from an already open link, for both sources (the tests use a private bus with
+    /// fake services).
     #[cfg(test)]
     pub(super) fn watch(connection: Connection) -> impl Stream<Item = SystemMotion> + Send + 'static {
         crate::media::channel(4, |output| run(Some(connection.clone()), Some(connection), output))
     }
 
-    /// Legge le fonti, manda la prima lettura e poi una a ogni cambio vero. Aspetta solo i segnali:
-    /// fermo, non si sveglia mai. Finisce quando nessuno legge più o tutti i segnali sono finiti.
+    /// Reads the sources, sends the first reading and then one at each real change. It only waits for the signals:
+    /// idle, it never wakes up. It ends when nobody reads any more or all the signals have ended.
     async fn run(
         session: Option<Connection>,
         system: Option<Connection>,
@@ -201,7 +201,7 @@ mod linux {
             Some(session) => proxy(session, PORTAL, PORTAL_PATH, PORTAL_SETTINGS).await,
             None => None,
         };
-        // Iscriversi prima di leggere: un cambio nel mezzo non si perde.
+        // Subscribe before reading: a change in between is not lost.
         let mut settings = match &portal {
             Some(portal) => portal.receive_signal("SettingChanged").await.ok(),
             None => None,
@@ -261,7 +261,7 @@ mod linux {
 
     type ProfileStream = zbus::fdo::PropertiesChangedStream<'static>;
 
-    /// Il prossimo segnale di un flusso; un flusso finito si toglie e non si aspetta più.
+    /// The next signal of a stream; a finished stream is removed and no longer waited for.
     async fn next(stream: &mut Option<zbus::SignalStream<'static>>) -> Option<std::sync::Arc<zbus::Message>> {
         let Some(inner) = stream else { return std::future::pending().await };
         let item = inner.next().await;
@@ -282,7 +282,7 @@ mod linux {
         item
     }
 
-    /// Un proxy senza cache delle proprietà: nessun lavoro in sottofondo.
+    /// A proxy without a property cache: no background work.
     async fn proxy(
         connection: &Connection,
         name: &'static str,
@@ -302,7 +302,7 @@ mod linux {
             .ok()
     }
 
-    /// Un'impostazione del portale: `ReadOne` (portale 2) o, se manca, il vecchio `Read`.
+    /// A portal setting: `ReadOne` (portal 2) or, if it is missing, the old `Read`.
     async fn read_setting(portal: &Proxy<'_>, namespace: &str, key: &str) -> Option<OwnedValue> {
         match portal.call::<_, _, OwnedValue>("ReadOne", &(namespace, key)).await {
             Ok(value) => Some(value),
@@ -315,8 +315,8 @@ mod linux {
         }
     }
 
-    /// Il profilo energetico attivo, dal primo dei due nomi che risponde, e il flusso dei suoi
-    /// cambi. Nessuno dei due: niente (nessuna preferenza).
+    /// The active power profile, from the first of the two names that answers, and the stream of its
+    /// changes. Neither of them: nothing (no preference).
     async fn power_profiles(
         connection: &Connection,
         sources: &mut Sources,
@@ -393,9 +393,9 @@ mod tests {
         assert!(!motion(Some(false), None).reduce());
     }
 
-    /// Il collegamento vero contro servizi finti su un bus privato (`dbus-daemon` lanciato dal
-    /// test, mai quello della sessione): la prima lettura e poi il passaggio dal vivo al risparmio
-    /// energetico e al movimento ridotto, e ritorno. Senza `dbus-daemon` il test non fa niente.
+    /// The real link against fake services on a private bus (`dbus-daemon` started by the
+    /// test, never the session's one): the first reading and then the live switch to power saving
+    /// and to reduced motion, and back. Without `dbus-daemon` the test does nothing.
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn the_watcher_follows_the_fake_services_live() {
@@ -441,7 +441,7 @@ mod tests {
             }
         }
 
-        // Un bus tutto suo: nessuna cartella di servizi, così niente si avvia da solo.
+        // A bus of its own: no services folder, so nothing starts by itself.
         let dir = std::env::temp_dir().join(format!("psytify-motion-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("cartella del bus");
         let config = dir.join("bus.conf");
@@ -458,7 +458,7 @@ mod tests {
             ),
         )
         .expect("configurazione del bus");
-        /// Il bus si ferma anche se il test fallisce.
+        /// The bus stops even if the test fails.
         struct Daemon(std::process::Child, std::path::PathBuf);
         impl Drop for Daemon {
             fn drop(&mut self) {
@@ -485,7 +485,7 @@ mod tests {
         }
         let address = address.trim().to_owned();
         let (power_name, power_path) = linux::POWER[0];
-        // Un bus che non risponde non blocca il test: ogni passo ha la sua scadenza.
+        // A bus that does not answer does not block the test: each step has its own deadline.
         let within = Duration::from_secs(10);
         let service = ConnectionBuilder::address(address.as_str())
             .unwrap()
@@ -512,13 +512,13 @@ mod tests {
         let full = SystemMotion { reduced_motion: Some(false), power_saver: Some(false) };
         assert_eq!(next().await, full, "la prima lettura");
 
-        // Il risparmio energetico, dal vivo.
+        // Power saving, live.
         let profiles = service.object_server().interface::<_, FakeProfiles>(power_path).await.unwrap();
         profiles.get_mut().await.active = "power-saver".into();
         profiles.get().await.active_profile_changed(profiles.signal_context()).await.unwrap();
         assert_eq!(next().await, SystemMotion { power_saver: Some(true), ..full });
 
-        // Il movimento ridotto del desktop, dal vivo; un segnale di un'altra chiave non manda niente.
+        // The desktop's reduced motion, live; a signal of another key sends nothing.
         let settings =
             service.object_server().interface::<_, FakeSettings>(PORTAL_PATH_FOR_TEST).await.unwrap();
         let ctxt = settings.signal_context();
@@ -528,7 +528,7 @@ mod tests {
             .unwrap();
         assert_eq!(next().await, SystemMotion { reduced_motion: Some(true), power_saver: Some(true) });
 
-        // E ritorno al movimento pieno.
+        // And back to full motion.
         profiles.get_mut().await.active = "balanced".into();
         profiles.get().await.active_profile_changed(profiles.signal_context()).await.unwrap();
         FakeSettings::setting_changed(ctxt, linux::APPEARANCE.0, linux::APPEARANCE.1, Value::U32(0))
@@ -546,8 +546,8 @@ mod tests {
         drop(daemon);
     }
 
-    /// I bus veri di chi lancia il test, in sola lettura: stampa la prima lettura. A mano
-    /// (`cargo test -p psytify-core -- --ignored reads_the_real_buses --nocapture`), mai in CI.
+    /// The real buses of whoever runs the test, read only: it prints the first reading. By hand
+    /// (`cargo test -p psytify-core -- --ignored reads_the_real_buses --nocapture`), never in CI.
     #[cfg(target_os = "linux")]
     #[tokio::test]
     #[ignore = "legge i bus veri della sessione e del sistema"]

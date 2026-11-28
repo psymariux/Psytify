@@ -74,28 +74,6 @@ jobs:
       - run: cargo build -p psytify --release --locked --no-default-features
       - run: cargo test -p psytify --locked --no-default-features
       - run: cargo test -p psytify-core --locked --no-default-features
-      # The Iced client (`psytify-iced`) is the Android app and a development binary: compiling is enough.
-      - run: cargo check -p psytify-iced --locked --no-default-features
-
-  android-check:
-    name: Android shell (cargo check)
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: rustup show
-      - run: rustup target add aarch64-linux-android
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: android -> android/target
-      # The NDK is the one in scripts/android-env.sh (NDK_VERSION): sdkmanager installs it in the runner's SDK.
-      - name: Install the NDK
-        run: |
-          . scripts/android-env.sh
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
-      - run: scripts/android-check.sh
 
   scripts:
     name: Shell scripts
@@ -111,7 +89,7 @@ jobs:
   ci-success:
     name: CI success
     if: always()
-    needs: [quality, test, windows, android-check, scripts]
+    needs: [quality, test, windows, scripts]
     runs-on: ubuntu-latest
     steps:
       - name: Check results

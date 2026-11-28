@@ -1,18 +1,18 @@
-//! Il videoclip nel desktop GPUI (feature `video`, solo Linux con GStreamer): la metà «di affari» è del
-//! core (`VideoCmd`, `VideoView`: quale videoclip, quando chiederlo, il passaggio da 360p a 720p, i
-//! guasti), qui c'è il resto, come da `docs/transformation/05-video-spike.md` §5 (opzione A).
+//! The music video in the GPUI desktop (feature `video`, Linux only with GStreamer): the "business" half is in the
+//! core (`VideoCmd`, `VideoView`: which video, when to ask for it, the switch from 360p to 720p, the
+//! failures); here is the rest, as in `docs/transformation/05-video-spike.md` §5 (option A).
 //!
-//! - `pipeline`: GStreamer, solo video, ridotto ai pixel del riquadro e a 30 fotogrammi al secondo, BGRA.
-//! - `slot`: il posto dell'ultimo fotogramma fra GStreamer e la UI (mai una coda) e una sveglia per
-//!   fotogramma nuovo.
-//! - `size`: quanto grande decodificare (i pixel fisici del riquadro, mai oltre il videoclip né 720p).
-//! - `plan`: le decisioni pure: quando una pipeline esiste, apri / affianca / chiudi, l'applicazione delle
-//!   regole di sincronia del core (`psytify_core::video::Alignment`) e il ritmo del controllo dello scarto.
-//! - `stage`: l'entità GPUI che tiene tutto insieme e disegna il fotogramma (`Arc<RenderImage>` nuova a
-//!   ogni fotogramma, la precedente tolta dall'atlante nello stesso disegno).
+//! - `pipeline`: GStreamer, video only, reduced to the pixels of the box and to 30 frames per second, BGRA.
+//! - `slot`: the place of the last frame between GStreamer and the UI (never a queue) and a wake-up for
+//!   new frame.
+//! - `size`: how big to decode (the physical pixels of the box, never beyond the video nor 720p).
+//! - `plan`: the pure decisions: when a pipeline exists, open / alongside / close, the application of the
+//!   core's sync rules (`psytify_core::video::Alignment`) and the rhythm of the drift check.
+//! - `stage`: the GPUI entity that holds everything together and draws the frame (a new `Arc<RenderImage>` per
+//!   frame, the previous one removed from the atlas in the same draw).
 //!
-//! Una pipeline esiste solo per il brano in corso, mentre suona e mentre il pannello o la vista immersiva
-//! mostrano il videoclip; altrimenti niente pipeline, niente thread, niente timer, niente fotogrammi.
+//! A pipeline exists only for the track playing, while it plays and while the panel or the immersive view
+//! show the video; otherwise no pipeline, no thread, no timer, no frames.
 
 pub mod pipeline;
 pub mod plan;
@@ -23,8 +23,8 @@ pub mod stage;
 use psytify_core::snapshot::{ClipState, VideoView};
 use uuid::Uuid;
 
-/// Un indirizzo da aprire, con il suo numero d'ordine e l'altezza. L'indirizzo è firmato e a scadenza: va
-/// solo alla pipeline, mai in un log (il `Debug` non lo stampa).
+/// An address to open, with its sequence number and height. The address is signed and expires: it goes
+/// only to the pipeline, never into a log (the `Debug` does not print it).
 #[derive(Clone, PartialEq, Eq)]
 pub struct Source {
     pub seq: u64,
@@ -33,7 +33,7 @@ pub struct Source {
 }
 
 impl Source {
-    /// Un indirizzo locale (`file://…`), per i dati di prova.
+    /// A local address (`file://…`), for the test data.
     #[cfg(feature = "fixtures")]
     pub fn local(seq: u64, url: String) -> Self {
         Self { seq, height: None, url }
@@ -50,26 +50,26 @@ impl std::fmt::Debug for Source {
     }
 }
 
-/// A che punto è il videoclip del brano di cui parla il core, per il desktop.
+/// Where the track's video is, as the core describes it, for the desktop.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Clip {
-    /// Nessuno lo mostra, o il brano non ha un videoclip.
+    /// Nobody shows it, or the track has no video.
     #[default]
     Idle,
-    /// Il server lo prepara (la prima volta lo scarica).
+    /// The server is preparing it (the first time it downloads it).
     Loading,
     /// L'indirizzo da aprire.
     Ready(Source),
-    /// Non si è aperto: il testo dell'errore, per «Riprova».
+    /// It did not open: the error text, for «Riprova».
     Failed(String),
 }
 
-/// La vista del video come la legge il desktop: quella del core o, con `--fixture video-*`, una di prova.
+/// The video view as the desktop reads it: the core's or, with `--fixture video-*`, a test one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ClipView {
     pub track: Option<Uuid>,
     pub clip: Clip,
-    /// Cresce a ogni videoclip che si ferma: un avviso per ogni aumento.
+    /// Grows with every video that stops: a notice for each increase.
     pub failures: u64,
 }
 
@@ -86,7 +86,7 @@ impl ClipView {
         Self { track: view.track, clip, failures: view.failures }
     }
 
-    /// Il videoclip pronto per `track`, se c'è.
+    /// The video ready for `track`, if there is one.
     pub fn ready_for(&self, track: Uuid) -> Option<&Source> {
         match &self.clip {
             Clip::Ready(source) if self.track == Some(track) => Some(source),
@@ -94,7 +94,7 @@ impl ClipView {
         }
     }
 
-    /// Il videoclip di `track` non si è aperto: il testo dell'errore.
+    /// The video of `track` did not open: the error text.
     pub fn failed_for(&self, track: Uuid) -> Option<&str> {
         match &self.clip {
             Clip::Failed(error) if self.track == Some(track) => Some(error),

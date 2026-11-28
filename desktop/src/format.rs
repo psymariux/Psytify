@@ -1,8 +1,8 @@
-//! Testi corti per l'interfaccia (durate, conteggi), calcolati quando il dato cambia e non nella view.
+//! Short texts for the interface (durations, counts), computed when the data changes and not in the view.
 
 use std::time::Duration;
 
-/// `m:ss` (o `h:mm:ss` oltre l'ora) di una durata in secondi interi.
+/// `m:ss` (or `h:mm:ss` beyond the hour) of a duration in whole seconds.
 pub fn clock(duration: Duration) -> String {
     let secs = duration.as_secs();
     let (hours, minutes, seconds) = (secs / 3600, secs / 60 % 60, secs % 60);
@@ -13,7 +13,7 @@ pub fn clock(duration: Duration) -> String {
     }
 }
 
-/// Durata di un brano o di una coda a partire dai millisecondi.
+/// Duration of a track or a queue from milliseconds.
 pub fn clock_ms(ms: u64) -> String {
     clock(Duration::from_millis(ms))
 }
@@ -23,8 +23,8 @@ pub fn tracks(count: usize) -> String {
     if count == 1 { "1 brano".to_owned() } else { format!("{count} brani") }
 }
 
-/// La durata di una raccolta in parole: «48 min», «2 h», «1 h 5 min» (al minuto più vicino), come nel
-/// client Iced.
+/// The duration of a collection in words: «48 min», «2 h», «1 h 5 min» (to the nearest minute), as in the
+/// phone layout.
 pub fn total(ms: u64) -> String {
     let minutes = (ms + 30_000) / 60_000;
     match (minutes / 60, minutes % 60) {
@@ -34,7 +34,7 @@ pub fn total(ms: u64) -> String {
     }
 }
 
-/// Un peso in parole: «126,4 MB» (multipli di mille, una cifra decimale), come nel client Iced.
+/// A weight in words: «126,4 MB» (multiples of a thousand, one decimal digit).
 pub fn size(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["B", "kB", "MB", "GB"];
     let mut value = bytes as f64;
@@ -46,7 +46,7 @@ pub fn size(bytes: u64) -> String {
     if unit == 0 { format!("{bytes} B") } else { format!("{value:.1} {}", UNITS[unit]).replace('.', ",") }
 }
 
-/// Come si chiama una licenza nei risultati di Internet Archive (`DiscoverItem::licence`).
+/// What a licence is called in Internet Archive's results (`DiscoverItem::licence`).
 pub fn licence_label(kind: &str) -> &'static str {
     match kind {
         "cc0" => "CC0",
@@ -62,7 +62,7 @@ pub fn licence_label(kind: &str) -> &'static str {
     }
 }
 
-/// I fan di un artista del catalogo ufficiale, come nel client Iced (`side_panel::fans_label`).
+/// The fans of an artist of the official catalogue, (`side_panel::fans_label`).
 pub fn fans(fans: u64) -> String {
     match fans {
         0..1_000 => format!("{fans} fan"),
@@ -74,7 +74,7 @@ pub fn fans(fans: u64) -> String {
     }
 }
 
-/// «CC0 · 20, CC BY · 3»: le licenze dei brani, dalla più comune (come il client Iced).
+/// «CC0 · 20, CC BY · 3»: the tracks' licences, from the most common.
 pub fn licence_summary<'a>(labels: impl IntoIterator<Item = &'a str>) -> String {
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for label in labels {

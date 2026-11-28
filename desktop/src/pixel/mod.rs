@@ -1,8 +1,8 @@
-// Come per `components`: parte dell'API (cornici piene, frame fissi) attende le schermate vere.
+// As for `components`: part of the API (full frames, fixed frames) waits for the real screens.
 #![allow(dead_code)]
 
-//! Pixel art sul GPUI: sprite nitidi (`PixelSprite`), cache degli sprite ingranditi (`SpriteStore`),
-//! orologio delle animazioni (`anim`) e le forme a tacca di bordi, ledge e anello di focus (`shape`).
+//! Pixel art on GPUI: crisp sprites (`PixelSprite`), cache of the upscaled sprites (`SpriteStore`),
+//! the animation clock (`anim`) and the notched shapes of borders, ledges and the focus ring (`shape`).
 
 pub mod anim;
 pub mod shape;

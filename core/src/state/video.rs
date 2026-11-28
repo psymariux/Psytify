@@ -1,35 +1,35 @@
-//! Videoclip (passo 4.9): la metà «di affari» del video. La pipeline di GStreamer, i fotogrammi e il
-//! widget restano nel frontend; qui sta tutto il resto.
+//! Music video (step 4.9): the core half of the video. The GStreamer pipeline, the frames and the
+//! widget stay in the frontend; here sits everything else.
 //!
-//! **Quale videoclip.** Un frontend dice che mostra il video ([`VideoCmd::Show`], come
-//! `PlaybackCmd::Lyrics` per il testo): finché non lo dice il core non chiede niente al server. Con
-//! il video mostrato e un brano che ne ha uno (`has_video`) il core chiede l'indirizzo
-//! (`GET /v1/tracks/{id}/video-url`: la prima volta il server scarica il videoclip, a 360p subito e a
-//! 720p in sottofondo) e lo pubblica in [`VideoView`]. Il frontend apre l'indirizzo
-//! ([`Clip::url`]); un [`Clip::seq`] nuovo è un altro indirizzo da aprire.
+//! **Which music video.** A frontend says it shows the video ([`VideoCmd::Show`], like
+//! `PlaybackCmd::Lyrics` for the text): until it says so the core asks the server for nothing. With
+//! the video shown and a track that has one (`has_video`) the core asks for the address
+//! (`GET /v1/tracks/{id}/video-url`: the first time the server downloads the music video, at 360p at once and
+//! at 720p in the background) and publishes it in [`VideoView`]. The frontend opens the address
+//! ([`Clip::url`]); a new [`Clip::seq`] is another address to open.
 //!
-//! **Dal 360p al 720p.** Mentre il videoclip mostrato è sotto [`FULL_HEIGHT`] il core riarma un
-//! timer ([`Timer::Upgrade`], [`UPGRADE_WAIT`], al massimo [`MAX_UPGRADES`] volte) e chiede di nuovo
-//! l'indirizzo: se il server ha una versione più alta la pubblica con un `seq` nuovo, e il frontend la
-//! apre di fianco e la sostituisce senza fermarsi. Il timer è armato solo con un videoclip mostrato
-//! e non ancora completo: un core fermo, un brano senza video o il video nascosto non armano niente.
+//! **From 360p to 720p.** While the clip shown is below [`FULL_HEIGHT`] the core re-arms a
+//! timer ([`Timer::Upgrade`], [`UPGRADE_WAIT`], at most [`MAX_UPGRADES`] times) and asks for the address again:
+//! if the server has a higher version it publishes it with a new `seq`, and the frontend opens it
+//! alongside and replaces the other without stopping. The timer is armed only with a clip shown
+//! and not yet complete: an idle core, a track without video or a hidden video arm nothing.
 //!
-//! **Quando non si apre.** Il frontend dice [`VideoCmd::Failed`] se l'indirizzo non si apre o lo stream
-//! cade: il core riprova una volta con un indirizzo nuovo (può essere scaduto) e poi ferma il
-//! videoclip di quel brano (`ClipState::Failed`) finché non cambia il brano o arriva
-//! [`VideoCmd::Retry`]. Un aggiornamento che non si apre non ferma niente: resta la versione che
-//! suonava e il core riprova più tardi.
+//! **When it does not open.** The frontend says [`VideoCmd::Failed`] if the address does not open or the stream
+//! drops: the core retries once with a new address (it may have expired) and then stops the
+//! music video of that track (`ClipState::Failed`) until the track changes or [`VideoCmd::Retry`]
+//! arrives. An upgrade that does not open stops nothing: the version that was playing stays, and the core
+//! retries later.
 //!
-//! **In anticipo.** Con [`VideoCmd::PrepareAhead`] il server prepara i videoclip del brano che parte e
-//! dei [`AHEAD`] successivi (`POST /v1/tracks/{id}/video/prepare`, una volta per brano, con un
-//! elenco limitato dei brani già chiesti).
+//! **In advance.** With [`VideoCmd::PrepareAhead`] the server prepares the music videos of the track that starts and
+//! of the next [`AHEAD`] (`POST /v1/tracks/{id}/video/prepare`, once per track, with a
+//! limited list of the tracks already asked for).
 //!
-//! **L'allineamento all'audio.** Le decisioni di sincronia sono funzioni pure ([`Alignment`]): il
-//! frontend misura il suo player ([`Measure`]) e applica ciò che torna ([`Adjust`]); la posizione
-//! da raggiungere la dà l'orologio della riproduzione (`clock.at(now)`), la soglia di scarto
-//! ([`DRIFT`]), la pausa fra due riallineamenti ([`RESYNC_PAUSE`]) e l'anticipo ([`MAX_LEAD`]).
-//! Nessun comando e nessuna pubblicazione per questo: il frontend lo chiede al suo Tick, che c'è già
-//! mentre suona.
+//! **The alignment to the audio.** The sync decisions are pure functions ([`Alignment`]): the
+//! frontend measures its player ([`Measure`]) and applies what comes back ([`Adjust`]); the position
+//! to reach is given by the playback clock (`clock.at(now)`), the drift threshold
+//! ([`DRIFT`]), the pause between two realignments ([`RESYNC_PAUSE`]) and the lead ([`MAX_LEAD`]).
+//! No command and no publish for this: the frontend asks for it on its Tick, which is already there
+//! while it plays.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -44,89 +44,89 @@ use crate::effect::{self, Effect, TimerKey};
 use crate::error::AppError;
 use crate::state::playback::PlaybackView;
 
-/// Brani della coda, dopo quello corrente, di cui il server prepara il videoclip.
+/// Tracks of the queue, after the current one, whose music video the server prepares.
 pub const AHEAD: usize = 2;
-/// Altezza della versione completa: sotto, si aspetta che il server la prepari.
+/// Height of the full version: below it, one waits for the server to prepare it.
 pub const FULL_HEIGHT: u32 = 720;
-/// Ogni quanto si chiede se la versione completa è pronta, e quante volte al massimo.
+/// How often it is asked whether the full version is ready, and how many times at most.
 pub const UPGRADE_WAIT: Duration = Duration::from_secs(6);
 pub const MAX_UPGRADES: u32 = 10;
-/// Scarto tollerato fra video e audio prima di riallineare il video.
+/// Difference tolerated between video and audio before the video is realigned.
 pub const DRIFT: Duration = Duration::from_millis(200);
-/// Dopo un riallineamento si lascia al video il tempo di ripartire.
+/// After a realignment the video is given time to start again.
 pub const RESYNC_PAUSE: Duration = Duration::from_secs(2);
-/// Massimo anticipo con cui si mira un riallineamento (vedi [`Alignment`]).
+/// Maximum lead with which a realignment is aimed (see [`Alignment`]).
 pub const MAX_LEAD: Duration = Duration::from_millis(1500);
-/// Quanto si aspetta, sul thread che apre il video, che il seek iniziale arrivi a destinazione.
+/// How long, on the thread that opens the video, the initial seek is waited for to reach its target.
 pub const SETTLE: Duration = Duration::from_millis(600);
-/// Brani di cui si ricorda di aver chiesto la preparazione (scarto: il meno recente).
+/// Tracks of which it is remembered that the preparation was asked (discarded: the least recent).
 const PREPARED: usize = 128;
 
-// ---------- Allineamento all'audio: funzioni pure, del frontend ----------
+// ---------- Alignment to the audio: pure functions, of the frontend ----------
 
-/// Ciò che il frontend misura sul suo player a ogni battito.
+/// What the frontend measures on its player at each tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Measure {
-    /// Dove si trova il video.
+    /// Where the video is.
     pub position: Duration,
-    /// La durata del video; zero se non la conosce ancora.
+    /// The video's duration; zero if it does not know it yet.
     pub duration: Duration,
-    /// Il player è in pausa.
+    /// The player is paused.
     pub paused: bool,
-    /// Il video è arrivato in fondo.
+    /// The video has reached the end.
     pub ended: bool,
 }
 
-/// Ciò che il frontend fa al suo player.
+/// What the frontend does to its player.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Adjust {
-    /// `Some(true)`: metti in pausa; `Some(false)`: fai ripartire.
+    /// `Some(true)`: pause; `Some(false)`: start again.
     pub pause: Option<bool>,
-    /// Porta il video a questa posizione.
+    /// Brings the video to this position.
     pub seek: Option<Duration>,
 }
 
 impl Adjust {
-    /// Non c'è niente da fare.
+    /// There is nothing to do.
     pub fn is_none(&self) -> bool {
         self.pause.is_none() && self.seek.is_none()
     }
 }
 
-/// Lo stato del riallineamento di un player: l'ultimo riallineamento e l'anticipo con cui si mira.
-/// Lo tiene il frontend insieme al suo player (uno per videoclip aperto); qui stanno le regole.
+/// The realignment state of a player: the last realignment and the lead with which it is aimed.
+/// The frontend keeps it together with its player (one per open music video); the rules are here.
 #[derive(Debug, Clone, Copy)]
 pub struct Alignment {
-    /// Ultimo riallineamento all'audio: non lo si insegue a ogni battito.
+    /// Last realignment to the audio: it is not chased at each tick.
     synced_at: Instant,
-    /// Il seek stesso costa tempo (il video si ferma a bufferizzare mentre l'audio va avanti): si
-    /// mira avanti di quanto il video è rimasto indietro le volte prima, o si insegue all'infinito.
+    /// The seek itself costs time (the video stops to buffer while the audio goes on): one
+    /// aims ahead by how far the video has fallen behind the previous times, or one chases forever.
     lead: Duration,
 }
 
 impl Alignment {
-    /// Un player appena aperto, adesso.
+    /// A player just opened, now.
     pub fn new(now: Instant) -> Self {
         Self { synced_at: now, lead: Duration::ZERO }
     }
 
-    /// L'anticipo con cui si mira adesso.
+    /// The lead with which it is aimed now.
     pub fn lead(&self) -> Duration {
         self.lead
     }
 
-    /// La riproduzione è cambiata da `previous` a `view`: che cosa deve fare il video per seguirla.
-    /// Un brano che parte o un salto nel brano portano il video alla posizione dell'audio; una
-    /// pausa lo ferma; la ripresa lo fa ripartire dalla posizione dell'audio. `None` se non è
-    /// cambiato niente che lo riguardi.
+    /// Playback has changed from `previous` to `view`: what the video must do to follow it.
+    /// A track that starts or a jump within the track brings the video to the audio's position; a
+    /// pause stops it; the resume starts it again from the audio's position. `None` if nothing
+    /// that concerns it has changed.
     pub fn follow(&mut self, previous: &PlaybackView, view: &PlaybackView, now: Instant) -> Option<Adjust> {
         let playing = view.is_playing();
         let moved = view.started != previous.started || view.seeks != previous.seeks;
         if !moved && view.state == previous.state {
             return None;
         }
-        // Un salto, o la ripresa dopo una pausa: il video va dove sta l'audio. Una pausa lo ferma e
-        // basta.
+        // A jump, or the resume after a pause: the video goes where the audio is. A pause stops it and
+        // that is all.
         let seek = (moved || playing).then(|| {
             self.synced_at = now;
             view.position(now)
@@ -134,10 +134,10 @@ impl Alignment {
         Some(Adjust { pause: Some(!playing), seek })
     }
 
-    /// Al battito, o con `force` appena aperto un player: se il video si è allontanato dall'audio
-    /// (rete lenta, decoder in ritardo) lo si riporta dov'è l'audio, al massimo ogni
-    /// [`RESYNC_PAUSE`]. Pausa e ripresa seguono sempre la riproduzione. Un video più corto
-    /// dell'audio resta sull'ultimo fotogramma.
+    /// At the tick, or with `force` just after a player opens: if the video has drifted from the audio
+    /// (slow network, decoder late) it is brought back to where the audio is, at most every
+    /// [`RESYNC_PAUSE`]. Pause and resume always follow playback. A video shorter
+    /// than the audio stays on the last frame.
     pub fn align(&mut self, playback: &PlaybackView, video: Measure, force: bool, now: Instant) -> Adjust {
         let playing = playback.is_playing();
         if !force && (!playing || now.saturating_duration_since(self.synced_at) < RESYNC_PAUSE) {
@@ -164,49 +164,49 @@ impl Alignment {
     }
 }
 
-// ---------- Il dominio ----------
+// ---------- The domain ----------
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VideoCmd {
-    /// Un frontend mostra (o smette di mostrare) il videoclip del brano in corso: il pannello «In
-    /// riproduzione» sul video, la vista a tutto schermo. Il core lo chiede al server solo finché
-    /// serve.
+    /// A frontend shows (or stops showing) the music video of the track playing: the "In riproduzione"
+    /// panel on the video, the full-screen view. The core asks the server for it only while
+    /// it is needed.
     Show(bool),
-    /// Chi ascolta vuole i videoclip: il server prepara quelli del brano che parte e dei prossimi.
-    /// Da spento non si prepara niente. Il brano che è già in coda all'avvio si prepara solo
-    /// quando un brano comincia a suonare.
+    /// The listener wants music videos: the server prepares those of the track that starts and of the next ones.
+    /// When off nothing is prepared. The track that is already in the queue at startup is prepared only
+    /// when a track starts to play.
     PrepareAhead(bool),
-    /// Il videoclip con quel `seq` non si apre o lo stream è caduto. Una volta il core ne chiede un
-    /// altro indirizzo, la seconda ferma il videoclip di quel brano (un `seq` che non è più quello
-    /// pubblicato si ignora).
+    /// The music video with that `seq` does not open or the stream has dropped. The first time the core asks for
+    /// another address, the second stops that track's music video (a `seq` that is no longer the
+    /// published one is ignored).
     Failed { seq: u64 },
-    /// Toglie il blocco di un videoclip che non si apriva («Riprova», o chi cambia la scelta del
-    /// video): se è ancora mostrato si chiede di nuovo.
+    /// Removes the block of a music video that did not open ("Riprova", or whoever changes the choice of
+    /// video): if it is still shown it is asked for again.
     Retry,
-    /// Lo toglie e lo chiede di nuovo, anche se andava: il frontend ha cambiato il modo di
-    /// decodificarlo.
+    /// Removes it and asks for it again, even if it was working: the frontend has changed the way
+    /// it decodes it.
     Reopen,
 }
 
-/// Un videoclip da aprire: l'indirizzo firmato, l'altezza e il numero d'ordine.
+/// A music video to open: the signed address, the height and the sequence number.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Clip {
-    /// Cresce a ogni indirizzo nuovo: il frontend apre quello che non ha ancora aperto.
+    /// Grows at each new address: the frontend opens the one it has not opened yet.
     pub seq: u64,
-    /// L'altezza della versione servita (360 la prima, 720 la completa); `None` per un videoclip
-    /// salvato prima delle due versioni, che è completo.
+    /// The height of the version served (360 the first, 720 the complete one); `None` for a music video
+    /// saved before the two versions, which is complete.
     pub height: Option<u32>,
     url: Secret,
 }
 
 impl Clip {
-    /// L'indirizzo da aprire. Firmato e a scadenza: non va nei log (il `Debug` non lo stampa).
+    /// The address to open. Signed and expiring: it does not go in logs (the `Debug` does not print it).
     pub fn url(&self) -> &str {
         self.url.expose()
     }
 
-    /// È la versione completa: non c'è altro da aspettare.
+    /// This is the full version: there is nothing else to wait for.
     pub fn is_full(&self) -> bool {
         self.height.is_none_or(|height| height >= FULL_HEIGHT)
     }
@@ -218,62 +218,62 @@ impl std::fmt::Debug for Clip {
     }
 }
 
-/// A che punto è il videoclip di [`VideoView::track`].
+/// Where the music video of [`VideoView::track`] is.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum ClipState {
-    /// Nessuno lo mostra, o il brano non ha un videoclip.
+    /// Nobody shows it, or the track has no music video.
     #[default]
     Idle,
-    /// Il server lo sta preparando (la prima volta lo scarica: può volerci mezzo minuto).
+    /// The server is preparing it (the first time it downloads it: it may take half a minute).
     Loading,
-    /// L'indirizzo da aprire; con un `seq` nuovo, una versione migliore da affiancare e sostituire.
+    /// The address to open; with a new `seq`, a better version to put alongside and replace.
     Ready(Clip),
-    /// Non si è aperto, nemmeno al secondo tentativo (o il server non l'ha dato): il frontend
-    /// mostra «Riprova» e manda [`VideoCmd::Retry`].
+    /// It did not open, not even at the second attempt (or the server did not give it): the frontend
+    /// shows "Riprova" and sends [`VideoCmd::Retry`].
     Failed(AppError),
 }
 
-/// Ciò che i frontend vedono del dominio.
+/// What the frontends see of the domain.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct VideoView {
-    /// Il brano di cui si parla (`None` a riposo).
+    /// The track being discussed (`None` at rest).
     pub track: Option<Uuid>,
     pub state: ClipState,
-    /// Cresce a ogni videoclip che si ferma: un frontend avvisa l'ascoltatore quando il numero è
-    /// nuovo (l'errore è in `state`).
+    /// Grows at each music video that stops: a frontend notifies the listener when the number is
+    /// new (the error is in `state`).
     pub failures: u64,
 }
 
-/// I timer del dominio.
+/// The domain's timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Timer {
-    /// È ora di chiedere se la versione completa è pronta. Armato solo con un videoclip mostrato e
-    /// ancora sotto la versione completa.
+    /// Time to ask whether the full version is ready. Armed only with a clip shown and
+    /// still below the full version.
     Upgrade,
 }
 
-/// I lavori asincroni del dominio (rete), che l'host esegue sul runtime.
+/// The domain's async jobs (network), which the host runs on the runtime.
 #[derive(Debug)]
 pub(crate) enum Job {
-    /// L'indirizzo del videoclip di `track` per la richiesta `ticket`. La prima volta il server
-    /// scarica il videoclip e risponde dopo (fino a due minuti).
+    /// The address of `track`'s music video for the request `ticket`. The first time the server
+    /// downloads the music video and answers after (up to two minutes).
     Url { api: Result<ApiClient, AppError>, track: Uuid, ticket: u64 },
-    /// Il server prepara il videoclip di `id`, che suonerà presto: risponde subito.
+    /// The server prepares the music video of `id`, which will play soon: it answers at once.
     Prepare { api: Result<ApiClient, AppError>, id: Uuid },
 }
 
-/// L'esito di un [`Job`], che torna al dominio.
+/// The outcome of a [`Job`], which goes back to the domain.
 #[derive(Debug)]
 pub(crate) enum Done {
     Url {
         ticket: u64,
         result: Result<SignedUrl, AppError>,
     },
-    /// Come è andata la preparazione non cambia niente: il server la fa o no.
+    /// How the preparation went changes nothing: the server does it or not.
     Prepared,
 }
 
-/// Dove si è con il videoclip del brano in corso.
+/// Where one is with the music video of the track playing.
 #[derive(Debug, Default)]
 enum Stage {
     #[default]
@@ -284,7 +284,7 @@ enum Stage {
     Ready {
         track: Uuid,
         clip: Clip,
-        /// La versione che questo indirizzo ha sostituito: se il frontend non lo apre, resta lei.
+        /// The version this address replaced: if the frontend does not open it, that one stays.
         replaced: Option<Clip>,
     },
     Failed {
@@ -302,44 +302,44 @@ impl Stage {
     }
 }
 
-/// La richiesta dell'indirizzo in volo.
+/// The address request in flight.
 #[derive(Debug, Clone, Copy)]
 struct Awaiting {
     ticket: u64,
-    /// Chiede una versione migliore di quella mostrata, non il primo indirizzo.
+    /// Asks for a better version than the one shown, not the first address.
     upgrade: bool,
 }
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug)]
 pub(crate) struct Video {
     pub(crate) view: Arc<VideoView>,
-    /// Il backend scelto nelle impostazioni e il client che ne viene.
+    /// The backend chosen in the settings and the client that comes from it.
     server: Option<String>,
     api: Result<ApiClient, AppError>,
-    /// Un frontend mostra il videoclip.
+    /// A frontend shows the music video.
     shown: bool,
-    /// Chi ascolta vuole i videoclip: si preparano quelli in arrivo.
+    /// The listener wants music videos: the incoming ones are prepared.
     ahead: bool,
-    /// `PrepareAhead(true)` è appena arrivato: si prepara al prossimo passaggio.
+    /// `PrepareAhead(true)` has just arrived: it is prepared at the next passing.
     just_enabled: bool,
-    /// L'ultimo `started` visto della riproduzione: cambia quando un brano comincia a suonare.
+    /// The last `started` seen from playback: it changes when a track starts to play.
     started: u64,
     stage: Stage,
-    /// La vista non è più quella dello stadio.
+    /// The view is no longer the stage's.
     dirty: bool,
     awaiting: Option<Awaiting>,
     ticket: u64,
-    /// L'ultimo `seq` dato a un indirizzo.
+    /// The last `seq` given to an address.
     seq: u64,
-    /// L'indirizzo nuovo dopo un guasto è già stato chiesto una volta per questo videoclip.
+    /// The new address after a failure has already been asked for once for this music video.
     retried: bool,
-    /// Richieste della versione completa già fatte per questo videoclip.
+    /// Requests for the full version already made for this music video.
     upgrades: u32,
-    /// Il timer dell'aggiornamento è armato.
+    /// The upgrade timer is armed.
     armed: bool,
     failures: u64,
-    /// Brani di cui si è già chiesto la preparazione, dal meno recente.
+    /// Tracks for which the preparation has already been asked, from the least recent.
     prepared: VecDeque<Uuid>,
 }
 
@@ -350,7 +350,7 @@ impl Default for Video {
 }
 
 impl Video {
-    /// Il dominio con il backend scelto nelle impostazioni.
+    /// The domain with the backend chosen in the settings.
     pub(crate) fn new(server: Option<String>) -> Self {
         Self {
             view: Arc::default(),
@@ -373,7 +373,7 @@ impl Video {
         }
     }
 
-    /// Il backend scelto nelle impostazioni è cambiato: il client si rifà.
+    /// The backend chosen in the settings has changed: the client is made again.
     pub(crate) fn set_server(&mut self, server: &Option<String>) {
         if self.server != *server {
             self.server.clone_from(server);
@@ -420,8 +420,8 @@ impl Video {
     pub(crate) fn done(&mut self, done: Done, _now: Instant, effects: &mut Vec<Effect>) {
         match done {
             Done::Url { ticket, result } => {
-                // Una risposta che non è dell'ultima richiesta (un altro brano, il video nascosto, un
-                // altro tentativo) non vale più.
+                // A reply that is not the one of the last request (another track, the video hidden, another
+                // attempt) no longer counts.
                 let Some(awaiting) = self.awaiting.filter(|awaiting| awaiting.ticket == ticket) else {
                     return;
                 };
@@ -436,8 +436,8 @@ impl Video {
         }
     }
 
-    /// Dopo ogni ingresso: il videoclip che serve al brano in corso, e ciò che il server deve
-    /// preparare. Senza novità confronta e basta: un core fermo non arma niente e non pubblica.
+    /// After each input: the music video the track playing needs, and what the server must
+    /// prepare. Without news it compares and that is all: an idle core arms nothing and publishes nothing.
     pub(crate) fn settle(&mut self, playback: &PlaybackView, effects: &mut Vec<Effect>) {
         let current = playback.queue.current().filter(|track| track.has_video).map(|track| track.id);
         self.settle_clip(current, effects);
@@ -445,12 +445,12 @@ impl Video {
         self.show();
     }
 
-    // ---------- Il videoclip del brano in corso ----------
+    // ---------- The music video of the track playing ----------
 
     fn settle_clip(&mut self, current: Option<Uuid>, effects: &mut Vec<Effect>) {
         let held = self.stage.track();
         let failed = matches!(self.stage, Stage::Failed { .. });
-        // Un videoclip che non si apriva resta fermo finché il brano non cambia.
+        // A music video that did not open stays stopped until the track changes.
         if failed && held == current {
             return;
         }
@@ -464,7 +464,7 @@ impl Video {
         }
     }
 
-    /// Toglie il videoclip: niente timer, niente risposta da aspettare.
+    /// Removes the music video: no timer, no reply to wait for.
     fn drop_clip(&mut self, effects: &mut Vec<Effect>) {
         self.disarm(effects);
         self.awaiting = None;
@@ -475,7 +475,7 @@ impl Video {
         }
     }
 
-    /// Chiede l'indirizzo del videoclip di `track` da capo.
+    /// Asks for the address of `track`'s music video from the start.
     fn open(&mut self, track: Uuid, retried: bool, effects: &mut Vec<Effect>) {
         self.retried = retried;
         self.upgrades = 0;
@@ -490,7 +490,7 @@ impl Video {
         effects.push(Effect::Run(effect::Job::Video(job)));
     }
 
-    /// Il primo indirizzo (o quello nuovo dopo un guasto) è arrivato.
+    /// The first address (or the new one after a failure) has arrived.
     fn opened(&mut self, result: Result<SignedUrl, AppError>, effects: &mut Vec<Effect>) {
         let Stage::Loading { track } = self.stage else { return };
         match result {
@@ -503,12 +503,12 @@ impl Video {
         }
     }
 
-    /// La risposta alla richiesta di una versione migliore. Se non lo è, o la richiesta è fallita,
-    /// si riprova più tardi, finché le volte non finiscono.
+    /// The reply to the request for a better version. If it is not one, or the request failed,
+    /// it is retried later, until the attempts run out.
     fn upgraded(&mut self, result: Result<SignedUrl, AppError>, effects: &mut Vec<Effect>) {
         let Stage::Ready { track, clip, .. } = &self.stage else { return };
         let (track, shown) = (*track, clip.height);
-        // Senza altezza è un videoclip salvato prima delle due versioni: è completo.
+        // Without a height it is a music video saved before the two versions: it is complete.
         let better = |signed: &SignedUrl| match (signed.height, shown) {
             (Some(offered), Some(shown)) => offered > shown,
             _ => true,
@@ -531,7 +531,7 @@ impl Video {
         Clip { seq: self.seq, height: signed.height, url: Secret::new(signed.url) }
     }
 
-    /// Il frontend non è riuscito ad aprire (o a tenere aperto) il videoclip `seq`.
+    /// The frontend did not manage to open (or to keep open) the music video `seq`.
     fn failed(&mut self, seq: u64, effects: &mut Vec<Effect>) {
         let Stage::Ready { track, clip, replaced } = &mut self.stage else { return };
         if clip.seq != seq {
@@ -539,13 +539,13 @@ impl Video {
         }
         let track = *track;
         if let Some(previous) = replaced.take() {
-            // L'aggiornamento non si è aperto: resta la versione che già suonava.
+            // The upgrade did not open: the version that was already playing stays.
             self.set(Stage::Ready { track, clip: previous, replaced: None });
             self.arm(effects);
         } else if self.retried {
             self.fail(track, AppError::Video, effects);
         } else {
-            // Un indirizzo scaduto o uno stream caduto: una volta se ne chiede uno nuovo.
+            // An expired address or a dropped stream: once, a new one is asked for.
             self.disarm(effects);
             self.open(track, true, effects);
         }
@@ -558,7 +558,7 @@ impl Video {
         self.set(Stage::Failed { track, error });
     }
 
-    /// Arma il timer dell'aggiornamento se il videoclip mostrato non è ancora completo.
+    /// Arms the upgrade timer if the music video shown is not yet complete.
     fn arm(&mut self, effects: &mut Vec<Effect>) {
         let Stage::Ready { clip, .. } = &self.stage else { return };
         if clip.is_full() || self.upgrades >= MAX_UPGRADES {
@@ -579,7 +579,7 @@ impl Video {
         self.dirty = true;
     }
 
-    /// La vista segue lo stadio, ma cambia (e si ripubblica) solo se qualcosa è diverso davvero.
+    /// The view follows the stage, but changes (and is published again) only if something is really different.
     fn show(&mut self) {
         if !std::mem::take(&mut self.dirty) {
             return;
@@ -598,10 +598,10 @@ impl Video {
         }
     }
 
-    // ---------- In anticipo ----------
+    // ---------- In advance ----------
 
-    /// Quando un brano comincia a suonare (o chi ascolta accende i videoclip dopo che uno è già
-    /// partito) il server prepara quello in corso e i prossimi. Ogni brano una volta.
+    /// When a track starts to play (or whoever listens turns the music videos on after one has already
+    /// started) the server prepares the current one and the next ones. Each track once.
     fn settle_ahead(&mut self, playback: &PlaybackView, effects: &mut Vec<Effect>) {
         let begun = std::mem::replace(&mut self.started, playback.started) != playback.started;
         let enabled = std::mem::take(&mut self.just_enabled);
@@ -619,7 +619,7 @@ impl Video {
         }
     }
 
-    /// Ricorda che si è chiesto `id`; `false` se c'era già (e lo rimette fra i più recenti).
+    /// Remembers that `id` was asked; `false` if it was already there (and puts it back among the most recent).
     fn remember(&mut self, id: Uuid) -> bool {
         let known = self.prepared.iter().position(|prepared| *prepared == id);
         if let Some(index) = known {
@@ -651,7 +651,7 @@ impl Job {
         }
     }
 
-    /// Se il lavoro va perso, il dominio non resta ad aspettare: l'indirizzo non è arrivato.
+    /// If the job is lost, the domain does not keep waiting: the address did not arrive.
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::Url { ticket, .. } => Done::Url { ticket: *ticket, result: Err(AppError::Network) },
@@ -682,7 +682,7 @@ mod tests {
         Duration::from_secs(n)
     }
 
-    /// Un brano del catalogo con il suo videoclip, ancora da scaricare sul server.
+    /// A catalog track with its music video, still to be downloaded to the server.
     fn clip_track(n: u128) -> Track {
         Track { has_video: true, ..track(n) }
     }
@@ -698,17 +698,17 @@ mod tests {
         }
     }
 
-    /// Il core intero (stesso passaggio fra i domini di quello vero) con il tempo in mano al test, un
-    /// audio finto e le richieste al server raccolte: niente rete, niente orologio.
+    /// The whole core (the same passing between domains as the real one) with the time in the test's hands, a
+    /// fake audio and the requests to the server collected: no network, no clock.
     struct Rig {
         state: CoreState,
         snapshot: Snapshot,
         now: Instant,
-        /// Gli indirizzi chiesti al server, dall'ultima lettura: (brano, numero della richiesta).
+        /// The addresses asked of the server, since the last reading: (track, request number).
         urls: Vec<(Uuid, u64)>,
-        /// Le preparazioni chieste, dall'ultima lettura.
+        /// The preparations asked, since the last reading.
         prepares: Vec<Uuid>,
-        /// Il timer dell'aggiornamento è armato, e quante volte è stato armato in tutto.
+        /// The upgrade timer is armed, and how many times it has been armed in all.
         upgrade: bool,
         arms: usize,
         loads: Vec<(Uuid, u64)>,
@@ -772,7 +772,7 @@ mod tests {
             self.feed(Input::Command(Command::Playback(command)));
         }
 
-        /// I brani in coda, il primo suona.
+        /// The tracks in the queue, the first plays.
         fn play(&mut self, tracks: Vec<Track>) {
             self.playback(PlaybackCmd::Play { tracks: tracks.into(), start: 0 });
             self.load_arrives();
@@ -793,18 +793,18 @@ mod tests {
             })));
         }
 
-        /// Il server risponde alla richiesta numero `ticket`.
+        /// The server answers request number `ticket`.
         fn answer(&mut self, ticket: u64, result: Result<SignedUrl, AppError>) {
             self.feed(Input::Done(AnyDone::Video(Done::Url { ticket, result })));
         }
 
-        /// L'ultima richiesta in volo riceve la risposta.
+        /// The last request in flight receives the reply.
         fn answer_last(&mut self, result: Result<SignedUrl, AppError>) {
             let (_, ticket) = *self.urls.last().expect("una richiesta");
             self.answer(ticket, result);
         }
 
-        /// Scade il timer dell'aggiornamento, armato da `UPGRADE_WAIT`.
+        /// The upgrade timer expires, armed by `UPGRADE_WAIT`.
         fn fire_upgrade(&mut self) {
             assert!(self.upgrade, "il timer deve essere armato");
             self.upgrade = false;
@@ -831,7 +831,7 @@ mod tests {
             self.snapshot.versions.video
         }
 
-        /// Un brano con il videoclip suona e il video è mostrato; l'indirizzo a 360p è arrivato.
+        /// A track with the music video plays and the video is shown; the address at 360p has arrived.
         fn showing_360() -> Self {
             let mut rig = Self::new();
             rig.play(vec![clip_track(1), clip_track(2)]);
@@ -841,7 +841,7 @@ mod tests {
         }
     }
 
-    // ---------- Quale videoclip ----------
+    // ---------- Which music video ----------
 
     #[test]
     fn nothing_is_asked_while_the_video_is_hidden() {
@@ -862,7 +862,7 @@ mod tests {
         let view = rig.view();
         assert_eq!((view.track, &view.state), (Some(id(1)), &ClipState::Loading));
         assert!(!rig.upgrade, "ancora niente da aggiornare");
-        // Mostrarlo di nuovo non rifà la richiesta.
+        // Showing it again does not repeat the request.
         rig.video(VideoCmd::Show(true));
         assert_eq!(rig.urls.len(), 1);
     }
@@ -874,8 +874,8 @@ mod tests {
         rig.video(VideoCmd::Show(true));
         assert!(rig.urls.is_empty());
         assert_eq!((rig.published(), rig.view().state.clone()), (0, ClipState::Idle));
-        // Il brano dopo ne ha uno: la richiesta parte da sé, e quando il brano senza video torna, il
-        // videoclip se ne va.
+        // The next track has one: the request starts by itself, and when the track without video returns, the
+        // music video goes away.
         rig.next();
         assert_eq!(rig.urls, [(id(2), 1)]);
         rig.playback(PlaybackCmd::Previous);
@@ -894,7 +894,7 @@ mod tests {
         assert_eq!((clip.seq, clip.height, clip.is_full()), (1, Some(360), false));
         assert_eq!(clip.url(), "https://media.test/v1/media?t=firmato");
         assert_eq!(rig.view().track, Some(id(1)));
-        // L'indirizzo è firmato: nei log non compare.
+        // The address is signed: it does not appear in logs.
         let debug = format!("{:?}", rig.view());
         assert!(!debug.contains("media.test") && !debug.contains("firmato"), "{debug}");
     }
@@ -906,7 +906,7 @@ mod tests {
         rig.video(VideoCmd::Show(true));
         rig.next();
         assert_eq!(rig.urls, [(id(1), 1), (id(2), 2)]);
-        // La risposta del primo brano arriva tardi: non vale più.
+        // The reply of the first track arrives late: it no longer counts.
         rig.answer(1, Ok(signed(Some(360))));
         assert_eq!(rig.view().state, ClipState::Loading);
         rig.answer(2, Ok(signed(Some(720))));
@@ -920,7 +920,7 @@ mod tests {
         rig.video(VideoCmd::Show(false));
         assert!(!rig.upgrade, "il timer si annulla");
         assert_eq!((rig.view().state.clone(), rig.view().track), (ClipState::Idle, None));
-        // Una risposta in volo non lo riporta indietro.
+        // A reply in flight does not bring it back.
         rig.video(VideoCmd::Show(true));
         rig.video(VideoCmd::Show(false));
         let before = rig.published();
@@ -929,14 +929,14 @@ mod tests {
         assert!(!rig.upgrade);
     }
 
-    // ---------- Dal 360p al 720p ----------
+    // ---------- From 360p to 720p ----------
 
     #[test]
     fn the_full_version_is_asked_every_six_seconds_up_to_ten_times() {
         let mut rig = Rig::showing_360();
         assert_eq!((rig.urls.len(), rig.arms), (1, 1));
         let published = rig.published();
-        // Il server non ha ancora il 720p: dieci domande, e poi basta.
+        // The server does not have the 720p yet: ten questions, and then no more.
         for asked in 1..=MAX_UPGRADES as usize {
             rig.fire_upgrade();
             assert_eq!(rig.urls.len(), 1 + asked);
@@ -971,7 +971,7 @@ mod tests {
         assert!(rig.upgrade, "la rete è caduta: si riprova al prossimo giro");
         assert_eq!((rig.state(), rig.published()), (ClipState::Ready(rig.clip()), published));
         rig.fire_upgrade();
-        // Senza altezza è un videoclip salvato prima delle due versioni: è completo.
+        // Without a height it is a music video saved before the two versions: it is complete.
         rig.answer_last(Ok(signed(None)));
         assert_eq!((rig.clip().seq, rig.clip().is_full()), (2, true));
         assert!(!rig.upgrade);
@@ -1000,9 +1000,9 @@ mod tests {
         assert_eq!((rig.view().track, rig.view().state.clone()), (Some(id(2)), ClipState::Loading));
     }
 
-    /// Prestazioni (passo 4.9): con il video nascosto il core non arma niente e non pubblica niente,
-    /// anche con i comandi che non cambiano niente; un videoclip pubblica solo la versione del suo
-    /// dominio, e una versione migliore una volta sola.
+    /// Performance (step 4.9): with the video hidden the core arms nothing and publishes nothing,
+    /// even with commands that change nothing; a music video publishes only the version of its
+    /// domain, and a better version once only.
     #[test]
     fn only_the_video_version_moves_and_an_idle_core_moves_nothing() {
         let mut rig = Rig::new();
@@ -1027,7 +1027,7 @@ mod tests {
         rig.answer_last(Ok(signed(Some(360))));
         let ready = rig.snapshot.versions;
         assert_eq!(ready, DomainVersions { video: loading.video + 1, ..idle });
-        // Un'attesa che non porta niente di nuovo non pubblica; il 720p sì, una volta, e da solo.
+        // A wait that brings nothing new does not publish; the 720p does, once, and by itself.
         rig.fire_upgrade();
         rig.answer_last(Ok(signed(Some(360))));
         assert_eq!(rig.snapshot.versions, ready);
@@ -1035,13 +1035,13 @@ mod tests {
         rig.answer_last(Ok(signed(Some(720))));
         assert_eq!(rig.snapshot.versions, DomainVersions { video: ready.video + 1, ..idle });
         assert!(!rig.upgrade);
-        // Nascosto di nuovo: una pubblicazione, e il core torna a riposo.
+        // Hidden again: one publish, and the core goes back to rest.
         rig.video(VideoCmd::Show(false));
         assert_eq!(rig.snapshot.versions, DomainVersions { video: ready.video + 2, ..idle });
         assert_eq!(rig.view().state, ClipState::Idle);
     }
 
-    // ---------- Quando non si apre ----------
+    // ---------- When it does not open ----------
 
     #[test]
     fn a_clip_that_does_not_open_is_asked_again_once_then_blocked() {
@@ -1055,12 +1055,12 @@ mod tests {
         let second = rig.clip().seq;
         assert_ne!(first, second);
         assert!(rig.upgrade, "il videoclip nuovo riprende l'attesa del 720p");
-        // Il secondo guasto ferma il videoclip di quel brano.
+        // The second failure stops that track's music video.
         rig.video(VideoCmd::Failed { seq: second });
         assert_eq!(rig.state(), ClipState::Failed(AppError::Video));
         assert_eq!((rig.view().track, rig.view().failures), (Some(id(1)), 1));
         assert!(!rig.upgrade);
-        // Mostrarlo di nuovo o nasconderlo non lo riprova.
+        // Showing it again or hiding it does not retry it.
         rig.video(VideoCmd::Show(false));
         rig.video(VideoCmd::Show(true));
         assert_eq!((rig.urls.len(), rig.state()), (2, ClipState::Failed(AppError::Video)));
@@ -1072,7 +1072,7 @@ mod tests {
         let before = (rig.published(), rig.urls.len());
         rig.video(VideoCmd::Failed { seq: 99 });
         assert_eq!((rig.published(), rig.urls.len()), before);
-        // E senza videoclip non c'è niente da guastare.
+        // And without a music video there is nothing to fail.
         let mut idle = Rig::new();
         idle.video(VideoCmd::Failed { seq: 1 });
         assert_eq!(idle.published(), 0);
@@ -1085,7 +1085,7 @@ mod tests {
         rig.answer_last(Ok(signed(Some(360))));
         rig.video(VideoCmd::Failed { seq: 2 });
         assert!(matches!(rig.state(), ClipState::Failed(_)));
-        // «Riprova»: si chiede da capo, con un'altra possibilità di riprovare.
+        // "Riprova": it is asked from the start, with another chance to retry.
         rig.video(VideoCmd::Retry);
         assert_eq!(rig.state(), ClipState::Loading);
         assert_eq!(rig.urls.len(), 3);
@@ -1096,7 +1096,7 @@ mod tests {
         rig.answer_last(Ok(signed(Some(720))));
         rig.video(VideoCmd::Failed { seq: 4 });
         assert!(matches!(rig.state(), ClipState::Failed(_)));
-        // Un altro brano ha il suo videoclip.
+        // Another track has its music video.
         rig.next();
         assert_eq!((rig.view().track, rig.state()), (Some(id(2)), ClipState::Loading));
         assert_eq!(rig.view().failures, 2, "i guasti già contati restano contati");
@@ -1120,7 +1120,7 @@ mod tests {
         assert_eq!(rig.state(), ClipState::Failed(refusal));
         assert_eq!(rig.view().failures, 1);
         assert_eq!(rig.urls.len(), 1, "un rifiuto del server non si ripete da solo");
-        // Ma «Riprova» lo chiede da capo.
+        // But "Riprova" asks from the start.
         rig.video(VideoCmd::Retry);
         assert_eq!(rig.state(), ClipState::Loading);
     }
@@ -1131,13 +1131,13 @@ mod tests {
         rig.fire_upgrade();
         rig.answer_last(Ok(signed(Some(720))));
         assert_eq!(rig.clip().seq, 2);
-        // Il frontend non apre il 720p: continua con il 360p che suonava.
+        // The frontend does not open the 720p: it goes on with the 360p that was playing.
         rig.video(VideoCmd::Failed { seq: 2 });
         let clip = rig.clip();
         assert_eq!((clip.seq, clip.height), (1, Some(360)));
         assert!(rig.upgrade, "e il 720p si richiede più tardi");
         assert_eq!(rig.view().failures, 0, "un aggiornamento mancato non è un guasto");
-        // Il tentativo dopo ritrova il 720p con un indirizzo nuovo.
+        // The attempt after finds the 720p again with a new address.
         rig.fire_upgrade();
         rig.answer_last(Ok(signed(Some(720))));
         assert_eq!(rig.clip().seq, 3);
@@ -1172,10 +1172,10 @@ mod tests {
         assert!(matches!(Job::Prepare { api: Err(AppError::Network), id: id(1) }.lost(), Done::Prepared));
     }
 
-    // ---------- In anticipo ----------
+    // ---------- In advance ----------
 
     fn queue_of_clips() -> Vec<Track> {
-        // Il 3 ha il videoclip già pronto, il 5 non ne ha: non si preparano.
+        // Track 3 has its music video already ready, 5 does not have one: they are not prepared.
         vec![
             clip_track(1),
             clip_track(2),
@@ -1191,10 +1191,10 @@ mod tests {
         let mut rig = Rig::new();
         rig.video(VideoCmd::PrepareAhead(true));
         rig.play(queue_of_clips());
-        // Il brano corrente e i due dopo: il 3 è già pronto, quindi 1 e 2.
+        // The current track and the two after: 3 is already ready, so 1 and 2.
         assert_eq!(std::mem::take(&mut rig.prepares), [id(1), id(2)]);
         rig.next();
-        // Corrente 2 (già chiesto), poi 3 (pronto) e 4.
+        // Current 2 (already asked), then 3 (ready) and 4.
         assert_eq!(std::mem::take(&mut rig.prepares), [id(4)]);
         rig.next();
         assert!(rig.prepares.is_empty(), "3 pronto, 4 già chiesto, 5 senza video");
@@ -1211,13 +1211,13 @@ mod tests {
         rig.play(queue_of_clips());
         rig.next();
         assert!(rig.prepares.is_empty());
-        // Acceso a brano già partito: si prepara subito quello in corso e i prossimi.
+        // Turned on with a track already started: the current one and the next ones are prepared at once.
         rig.video(VideoCmd::PrepareAhead(true));
         assert_eq!(std::mem::take(&mut rig.prepares), [id(2), id(4)]);
-        // Rimandato lo stesso: non cambia niente.
+        // Turned off again the same: nothing changes.
         rig.video(VideoCmd::PrepareAhead(true));
         assert!(rig.prepares.is_empty());
-        // Spento, un altro brano che parte non prepara niente; riacceso, riprende dal resto.
+        // Off, another track that starts prepares nothing; on again, it resumes from the rest.
         rig.video(VideoCmd::PrepareAhead(false));
         rig.next();
         rig.next();
@@ -1229,8 +1229,8 @@ mod tests {
     #[test]
     fn the_restored_queue_is_not_prepared_until_something_plays() {
         let mut rig = Rig::new();
-        // La coda ripresa dall'ultima sessione c'è, ma niente è partito: all'avvio il server non
-        // scarica tre videoclip che nessuno ha chiesto.
+        // The queue resumed from the last session is there, but nothing has started: at startup the server
+        // does not download three music videos that nobody has asked for.
         rig.playback(PlaybackCmd::Enqueue(Box::new(clip_track(1))));
         rig.playback(PlaybackCmd::Enqueue(Box::new(clip_track(2))));
         rig.video(VideoCmd::PrepareAhead(true));
@@ -1247,19 +1247,19 @@ mod tests {
             assert!(video.remember(id(n)));
         }
         assert_eq!(video.prepared.len(), PREPARED);
-        // Uno in più: esce il meno recente (l'1, rimesso in coda prima che arrivassero gli altri).
+        // One more: the least recent goes out (the 1, put back in the queue before the others arrived).
         assert!(video.remember(id(1000)));
         assert_eq!(video.prepared.len(), PREPARED);
         assert!(video.remember(id(1)), "il meno recente è stato dimenticato e si richiede");
         assert!(!video.remember(id(1000)));
-        // Rivedere un brano lo rimette fra i più recenti: il 3 resta, il 2 (ormai il più vecchio) esce.
+        // Seeing a track again puts it back among the most recent: 3 stays, 2 (by now the oldest) goes out.
         assert!(!video.remember(id(3)));
         assert!(video.remember(id(2000)));
         assert!(video.remember(id(2)));
         assert!(!video.remember(id(3)));
     }
 
-    // ---------- Allineamento all'audio ----------
+    // ---------- Alignment to the audio ----------
 
     fn view_at(position: Duration, playing: bool, at: Instant) -> PlaybackView {
         let (state, clock) = if playing {
@@ -1280,7 +1280,7 @@ mod tests {
         let mut alignment = Alignment::new(start);
         let later = start + secs(3);
         let audio = view_at(secs(10), true, start);
-        // Audio a 13 s: il video a 13,15 s è dentro la soglia.
+        // Audio at 13 s: the video at 13.15 s is within the threshold.
         let adjust = alignment.align(&audio, measure(secs(13) + Duration::from_millis(150)), false, later);
         assert!(adjust.is_none());
         assert_eq!(alignment.lead(), Duration::ZERO);
@@ -1291,15 +1291,15 @@ mod tests {
         let start = Instant::now();
         let mut alignment = Alignment::new(start);
         let audio = view_at(secs(10), true, start);
-        // Dopo 3 s l'audio è a 13 s e il video a 12: indietro di 1 s. Si mira 1 s avanti.
+        // After 3 s the audio is at 13 s and the video at 12: behind by 1 s. One aims 1 s ahead.
         let at = start + secs(3);
         let adjust = alignment.align(&audio, measure(secs(12)), false, at);
         assert_eq!(adjust, Adjust { pause: None, seek: Some(secs(14)) });
         assert_eq!(alignment.lead(), secs(1));
-        // Troppo presto: il video non è ancora ripartito, non lo si insegue.
+        // Too early: the video has not started again yet, it is not chased.
         let adjust = alignment.align(&audio, measure(secs(12)), false, at + Duration::from_millis(1900));
         assert!(adjust.is_none());
-        // Dopo due secondi (audio a 15 s) è ancora indietro di 0,5 s: l'anticipo cresce.
+        // After two seconds (audio at 15 s) it is still behind by 0.5 s: the lead grows.
         let at = at + RESYNC_PAUSE;
         let adjust = alignment.align(&audio, measure(secs(14) + Duration::from_millis(500)), false, at);
         assert_eq!(alignment.lead(), Duration::from_millis(1500));
@@ -1327,12 +1327,12 @@ mod tests {
         let at = start + secs(3);
         alignment.align(&audio, measure(secs(12)), false, at);
         assert_eq!(alignment.lead(), secs(1));
-        // Audio a 15 s; il video a 15,4 s è 400 ms avanti: l'anticipo scende a 600 ms.
+        // Audio at 15 s; the video at 15.4 s is 400 ms ahead: the lead falls to 600 ms.
         let at = at + secs(2);
         let adjust = alignment.align(&audio, measure(secs(15) + Duration::from_millis(400)), false, at);
         assert_eq!(alignment.lead(), Duration::from_millis(600));
         assert_eq!(adjust.seek, Some(secs(15) + Duration::from_millis(600)));
-        // E non scende sotto zero.
+        // And it does not fall below zero.
         let at = at + secs(2);
         alignment.align(&audio, measure(secs(17) + Duration::from_secs(3)), false, at);
         assert_eq!(alignment.lead(), Duration::ZERO);
@@ -1344,12 +1344,12 @@ mod tests {
         let mut alignment = Alignment::new(start - secs(10));
         let paused = view_at(secs(10), false, start);
         let moving = Measure { paused: false, ..measure(secs(30)) };
-        // Al battito, con l'audio in pausa, non si fa niente (la pausa la segue `follow`).
+        // At the tick, with the audio paused, nothing is done (the pause is followed by `follow`).
         assert!(alignment.align(&paused, moving, false, start).is_none());
-        // Un player appena aperto si mette subito come l'audio: in pausa e alla stessa posizione.
+        // A player just opened is set at once like the audio: paused and at the same position.
         let adjust = alignment.align(&paused, moving, true, start);
         assert_eq!(adjust, Adjust { pause: Some(true), seek: Some(secs(10)) });
-        // Mentre suona, un video fermo riparte.
+        // While it plays, a stopped video starts again.
         let playing = view_at(secs(10), true, start);
         let stopped = Measure { paused: true, ..measure(secs(10)) };
         let adjust = alignment.align(&playing, stopped, true, start);
@@ -1363,7 +1363,7 @@ mod tests {
         let audio = view_at(secs(190), true, start);
         let short = Measure { duration: secs(180), ..measure(secs(179)) };
         assert!(alignment.align(&audio, short, false, start).is_none());
-        // Il video arrivato in fondo non si riporta indietro, ma la pausa resta quella dell'audio.
+        // A video that has reached the end is not brought back, but the pause stays that of the audio.
         let ended = Measure { ended: true, paused: true, ..measure(secs(20)) };
         let playing = view_at(secs(20), true, start);
         assert_eq!(alignment.align(&playing, ended, false, start).seek, None);
@@ -1376,16 +1376,16 @@ mod tests {
         let mut alignment = Alignment::new(start);
         let base = view_at(secs(10), true, start);
 
-        // Niente di nuovo: niente da fare.
+        // Nothing new: nothing to do.
         assert_eq!(alignment.follow(&base, &base.clone(), at), None);
 
-        // Un brano che parte: il video va alla posizione dell'audio (15 s a `at`).
+        // A track starting: the video goes to the audio's position (15 s at `at`).
         let started = PlaybackView { started: 1, ..base.clone() };
         assert_eq!(
             alignment.follow(&base, &started, at),
             Some(Adjust { pause: Some(false), seek: Some(secs(15)) })
         );
-        // Un salto nel brano, da fermo o no, porta il video lì.
+        // A jump within the track, stopped or not, brings the video there.
         let sought = PlaybackView { seeks: 1, ..started.clone() };
         assert_eq!(
             alignment.follow(&started, &sought, at),
@@ -1396,7 +1396,7 @@ mod tests {
             alignment.follow(&sought, &sought_paused, at),
             Some(Adjust { pause: Some(true), seek: Some(secs(40)) })
         );
-        // Una pausa ferma il video e basta; la ripresa lo rimette dov'è l'audio.
+        // A pause stops the video and that is all; the resume puts it back where the audio is.
         let paused = PlaybackView { started: 1, ..view_at(secs(15), false, at) };
         assert_eq!(alignment.follow(&started, &paused, at), Some(Adjust { pause: Some(true), seek: None }));
         let resumed = PlaybackView { started: 1, ..view_at(secs(15), true, at) };
@@ -1413,7 +1413,7 @@ mod tests {
         let base = view_at(secs(10), true, start);
         let started = PlaybackView { started: 1, ..base.clone() };
         alignment.follow(&base, &started, start);
-        // Appena spostato: il video è ancora indietro, ma si aspetta che riparta.
+        // Just moved: the video is still behind, but it is awaited to start again.
         let behind = measure(secs(5));
         assert!(alignment.align(&started, behind, false, start + Duration::from_millis(500)).is_none());
         assert!(alignment.align(&started, behind, false, start + RESYNC_PAUSE).seek.is_some());

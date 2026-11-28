@@ -1,21 +1,25 @@
-//! Shortcut: la voce di *Riprendi* in cima alla Home (`PSYTIFY_ART_DIRECTION.md`, Home): una riga compatta
-//! con la copertina di `COVER_S` a filo e il titolo, in una griglia di due colonne come un pannello di
-//! accesso rapido. A riposo ha il fondo `SURFACE_RAISED` (si legge come un bersaglio anche senza mouse),
-//! in hover `SURFACE_SELECTED`; premuta la stessa tinta, focus con l'anello interno. Se è ciò che suona,
-//! l'equalizzatore sta in fondo alla riga (lo dipinge `Shell`, vedi `playing_spot`).
+//! Shortcut: an item of *Riprendi* at the top of the Home: a compact 56 dp row with the 56 dp cover flush
+//! and the title, in a 2 to 4 column grid like a quick access panel. At rest the fill is `SURFACE_RAISED`
+//! (it reads as a target without a pointer); on hover the tone eases to `SURFACE_SELECTED` and, with a play
+//! action, the play button steps in from the right in three frames. Pressed takes the same tone, focus the
+//! inner ring. If it is what plays, the equalizer sits at the end (painted by `Shell`, see `playing_spot`).
 
 use gpui::{App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
+use psytify_design::sprite;
 use psytify_design::tokens::color::{PURE_WHITE, SURFACE_RAISED, SURFACE_SELECTED, TEXT_PRIMARY};
-use psytify_design::tokens::size::cover::COVER_S;
+use psytify_design::tokens::motion::STEP_FRAMES;
+use psytify_design::tokens::size::cover::ART_SHORTCUT;
 use psytify_design::tokens::space::{SPACE_3, SPACE_4};
 use psytify_design::tokens::type_::TYPE_TRACK_TITLE;
 
 use super::control::{OnClick, Preview, wire, with_click};
+use super::icon_button::IconButton;
 use super::indicators::{Equalizer, PlayState};
 use super::list_row::{RowArt, row_art};
 use super::playing_spot::PlayingSpot;
+use crate::motion::steps;
 use crate::pixel::shape::inset_ring;
-use crate::theme::{TypeStyle, col, dp};
+use crate::theme::{Ap, TypeStyle, col, dp, mix};
 
 #[derive(IntoElement)]
 pub struct Shortcut {
@@ -25,6 +29,7 @@ pub struct Shortcut {
     playing: Option<(PlayState, Option<PlayingSpot>)>,
     preview: Preview,
     on_click: Option<OnClick>,
+    on_play: Option<OnClick>,
 }
 
 impl Shortcut {
@@ -36,10 +41,17 @@ impl Shortcut {
             playing: None,
             preview: Preview::Live,
             on_click: None,
+            on_play: None,
         }
     }
 
-    /// È ciò che suona: l'equalizzatore in fondo, dipinto da `Shell` sopra la vista in cache.
+    /// The play button that steps in on hover (it does not also open the item).
+    pub fn on_play(mut self, handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.on_play = Some(std::rc::Rc::new(handler));
+        self
+    }
+
+    /// It is what plays: the equaliser at the bottom, painted by `Shell` over the cached view.
     pub fn playing_at(mut self, state: PlayState, spot: &PlayingSpot) -> Self {
         self.playing = Some((state, Some(spot.clone())));
         self
@@ -64,21 +76,23 @@ impl Shortcut {
 
 impl RenderOnce for Shortcut {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let ap = Ap::of(window);
         let wired = wire(&self.id, false, self.preview, window, cx);
         let v = wired.visual;
-        let fill = if v.pressed || v.hovered { SURFACE_SELECTED } else { SURFACE_RAISED };
+        let fill =
+            if v.pressed { col(SURFACE_SELECTED) } else { mix(SURFACE_RAISED, SURFACE_SELECTED, v.hover_t) };
         let mut row = wired
             .element
             .relative()
-            .h(dp(COVER_S))
+            .h(dp(ART_SHORTCUT))
             .w_full()
             .min_w_0()
             .flex()
             .items_center()
             .gap(dp(SPACE_4))
             .pr(dp(SPACE_3))
-            .bg(col(fill))
-            .child(row_art(self.art, COVER_S))
+            .bg(fill)
+            .child(row_art(self.art, ART_SHORTCUT))
             .child(
                 div()
                     .flex_1()
@@ -88,6 +102,20 @@ impl RenderOnce for Shortcut {
                     .truncate()
                     .child(self.title),
             );
+        let frames = steps(v.hover_t, STEP_FRAMES);
+        if let Some(play) = self.on_play.filter(|_| frames > 0) {
+            // Three frames from 4 AP to the right to its place.
+            let button =
+                IconButton::new(SharedString::from(format!("{:?}-play", self.id)), sprite::ICON_PLAY)
+                    .primary()
+                    .tooltip("Riproduci", None)
+                    .on_click(move |event, window, cx| {
+                        cx.stop_propagation();
+                        play(event, window, cx);
+                    });
+            row = row
+                .child(div().relative().left(ap.n(4 * (STEP_FRAMES - frames) / STEP_FRAMES)).child(button));
+        }
         if let Some((state, spot)) = self.playing {
             row = row.child(match spot {
                 Some(spot) => spot.marker(state).into_any_element(),

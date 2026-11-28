@@ -1,5 +1,5 @@
-//! Tooltip: nome e scorciatoia di un controllo. `SURFACE_RAISED`, bordo di 1 AP `LINE_STRONG`, tacca 1,
-//! testo `TYPE_META`. Compare dopo `TOOLTIP_DELAY_MS` senza muoversi.
+//! Tooltip: name and shortcut of a control. `SURFACE_RAISED`, 1 AP `LINE_STRONG` border, notch 1,
+//! `TYPE_META` text. Appears after `TOOLTIP_DELAY_MS` without moving.
 
 use std::time::Duration;
 
@@ -17,8 +17,8 @@ use psytify_design::tokens::type_::TYPE_META;
 use crate::pixel::shape::notch_box;
 use crate::theme::{Ap, TypeStyle, col, dp};
 
-/// Il riquadro del tooltip (senza posizionamento): lo usano la vista del tooltip, la galleria e
-/// l'anteprima del tempo sul seek.
+/// The tooltip box (without placement): used by the tooltip view, the gallery and
+/// the time preview on the seek bar.
 #[derive(IntoElement)]
 pub struct TooltipBox {
     text: SharedString,
@@ -54,7 +54,7 @@ impl RenderOnce for TooltipBox {
     }
 }
 
-/// Vista del tooltip che GPUI mostra sopra il resto, vicino al puntatore.
+/// Tooltip view that GPUI shows above the rest, near the pointer.
 pub struct TooltipView {
     text: SharedString,
     shortcut: Option<SharedString>,
@@ -62,7 +62,7 @@ pub struct TooltipView {
 
 impl Render for TooltipView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        // Un margine fa stare il tooltip a 4 dp sotto il puntatore, come da linee guida.
+        // A margin keeps the tooltip 4 dp below the pointer, as the guidelines say.
         let mut tip = TooltipBox::new(self.text.clone());
         if let Some(keys) = &self.shortcut {
             tip = tip.shortcut(keys.clone());
@@ -71,7 +71,7 @@ impl Render for TooltipView {
     }
 }
 
-/// Costruttore di tooltip per `.tooltip(...)`.
+/// Tooltip builder for `.tooltip(...)`.
 pub fn tooltip(
     text: impl Into<SharedString>,
     shortcut: Option<SharedString>,

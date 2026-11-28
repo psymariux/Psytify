@@ -1,7 +1,7 @@
-// Questi test affermano proprietà di costanti di proposito: il lint «assertions_on_constants» non si applica.
+// These tests deliberately assert properties of constants: the «assertions_on_constants» lint does not apply.
 #![allow(clippy::assertions_on_constants)]
 
-//! Controlli di coerenza dei token fra loro e con il documento `PSYTIFY_DESIGN_TOKENS.md`.
+//! Consistency checks of the tokens with each other and with the document `PSYTIFY_DESIGN_TOKENS.md`.
 
 use std::collections::HashSet;
 
@@ -50,7 +50,7 @@ fn hex_values_match_the_doc_and_the_sprite_manifest() {
         assert_eq!(*name, doc_name);
         assert_eq!(color.hex(), hex, "{name}");
     }
-    // `design/assets/pixel/manifest.toml` ripete gli stessi dodici valori: devono restare uguali.
+    // `design/assets/pixel/manifest.toml` repeats the same twelve values: they must stay equal.
     let manifest = include_str!("../assets/pixel/manifest.toml");
     for (name, color) in PALETTE {
         let line = format!("{} = \"#{:06x}\"", name.to_lowercase(), color.hex());
@@ -64,7 +64,7 @@ fn hex_values_match_the_doc_and_the_sprite_manifest() {
 
 #[test]
 fn the_palette_is_slightly_warm() {
-    // Tutti i grigi: R - B fra 2 e 14 (tranne nero e bianco puri, e i due colori d'accento).
+    // All the greys: R - B between 2 and 14 (except pure black and white, and the two accent colours).
     for (name, c) in &PALETTE[1..9] {
         let warmth = i32::from(c.r()) - i32::from(c.b());
         assert!((2..=14).contains(&warmth), "{name}: {warmth}");
@@ -127,7 +127,7 @@ fn aliases_point_where_the_doc_says() {
 
 #[test]
 fn text_tiers_and_interactive_roles_are_told_apart() {
-    // Dove il documento dice che due ruoli differiscono, i valori differiscono.
+    // Where the document says that two roles differ, the values differ.
     let tiers = [TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TEXT_DISABLED];
     assert_eq!(tiers.iter().collect::<HashSet<_>>().len(), 4);
     assert_ne!(CONTROL_BORDER, CONTROL_BORDER_HOVER);
@@ -202,10 +202,33 @@ fn layout_sizes_are_multiples_of_the_grid() {
         assert_eq!(v % 16.0, 0.0, "le copertine sono multipli di 16 dp: {v}");
     }
     assert!(size::WINDOW_MIN_W > size::SIDEBAR_RAIL_W + size::SIDE_PANEL_W + size::TILE_MIN_W);
-    assert!(size::BP_RAIL < size::BP_PANEL_DOCK && size::BP_PANEL_DOCK < size::BP_WIDE);
+    assert!(size::BP_RAIL < size::BP_FRAME_NARROW && size::BP_FRAME_NARROW < size::BP_PANEL_DOCK);
+    assert!(size::SIDEBAR_MIN_W <= size::SIDEBAR_DEFAULT_W && size::SIDEBAR_DEFAULT_W <= size::SIDEBAR_MAX_W);
+    for v in size::cover::ART_RAMP {
+        assert_eq!(v % 8.0, 0.0, "art sizes are whole 4 AP steps: {v}");
+    }
+    assert_eq!(size::cover::ART_HEADER % 8.0, 0.0);
     assert!(size::SEEK_TRACK_H < size::SEEK_HIT_H);
     assert!(size::phone::TOUCH_TARGET >= 44.0);
     assert!(size::ICON_BUTTON >= size::ICON);
+}
+
+#[test]
+fn fluid_grids_fill_the_row_and_flowing_lists_take_one_to_three_columns() {
+    let (columns, side) = size::tile_grid(1000.0, size::TILE_MIN, size::TILE_GAP);
+    assert_eq!(columns, 5); // (1000 + 24) / 192 = 5.3
+    assert!((side * 5.0 + 4.0 * size::TILE_GAP - 1000.0).abs() < 1e-3, "the tiles fill the row exactly");
+    assert!(side >= size::TILE_MIN);
+    assert_eq!(size::tile_grid(100.0, size::TILE_MIN, size::TILE_GAP).0, 1);
+    assert_eq!(size::tile_grid(f32::NAN, size::TILE_MIN, size::TILE_GAP), (1, size::TILE_MIN));
+    assert_eq!(size::flow_columns(600.0), 1);
+    assert_eq!(size::flow_columns(899.0), 1);
+    assert_eq!(size::flow_columns(900.0), 2);
+    assert_eq!(size::flow_columns(1499.0), 2);
+    assert_eq!(size::flow_columns(1500.0), 3);
+    assert_eq!(size::flow_columns(f32::NAN), 1);
+    assert_eq!(size::frame_margin(1100.0), size::FRAME_MARGIN_NARROW);
+    assert_eq!(size::frame_margin(1200.0), size::FRAME_MARGIN);
 }
 
 #[test]
@@ -225,44 +248,62 @@ fn grid_columns_and_phone_cover_formulas() {
 #[test]
 fn type_scale_matches_the_doc() {
     use type_::*;
-    let doc = [
-        ("TYPE_DISPLAY", FAMILY_UI, 32.0, 40.0, 600, -0.32, false),
-        ("TYPE_PAGE_TITLE", FAMILY_PIXEL, 22.0, 28.0, 400, 0.0, true),
-        ("TYPE_WORDMARK", FAMILY_PIXEL, 22.0, 28.0, 400, 0.0, false),
-        ("TYPE_HEADING", FAMILY_UI, 16.0, 24.0, 600, -0.08, false),
-        ("TYPE_TRACK_TITLE", FAMILY_UI, 14.0, 20.0, 500, 0.0, false),
-        ("TYPE_ARTIST", FAMILY_UI, 13.0, 18.0, 400, 0.0, false),
-        ("TYPE_BODY", FAMILY_UI, 14.0, 20.0, 400, 0.0, false),
-        ("TYPE_META", FAMILY_UI, 12.0, 16.0, 400, 0.0, true),
-        ("TYPE_NAV", FAMILY_UI, 13.0, 20.0, 500, 0.0, false),
-        ("TYPE_BUTTON", FAMILY_UI, 13.0, 16.0, 600, 0.13, false),
-        ("TYPE_LABEL", FAMILY_UI, 11.0, 16.0, 600, 0.66, true),
-        ("TYPE_NUMERIC", FAMILY_UI, 12.0, 16.0, 400, 0.0, true),
-        ("TYPE_NUMERIC_PIXEL", FAMILY_PIXEL, 22.0, 28.0, 400, 0.0, true),
-        ("TYPE_LYRIC_FOCUS", FAMILY_UI, 24.0, 32.0, 600, -0.24, false),
-        ("TYPE_LYRIC_PANEL", FAMILY_UI, 18.0, 26.0, 600, -0.18, false),
+    // Desktop v2 §1: five sizes and the lyric pair.
+    let ramp = [
+        ("DISPLAY", FAMILY_PIXEL, 40.0, 44.0),
+        ("TITLE", FAMILY_UI, 22.0, 28.0),
+        ("BODY", FAMILY_UI, 15.0, 20.0),
+        ("META", FAMILY_UI, 13.0, 18.0),
+        ("CAPTION", FAMILY_PIXEL, 11.0, 14.0),
     ];
-    assert_eq!(type_::ALL.len(), doc.len());
-    for ((name, role), (doc_name, family, size, line, weight, tracking, tabular)) in
-        type_::ALL.iter().zip(doc)
-    {
+    for ((name, role), (doc_name, family, size, line)) in RAMP.iter().zip(ramp) {
         assert_eq!(*name, doc_name);
-        assert_eq!(
-            (role.family, role.size, role.line_height, role.weight, role.tracking, role.tabular),
-            (family, size, line, weight, tracking, tabular),
-            "{name}"
+        assert_eq!((role.family, role.size, role.line_height), (family, size, line), "{name}");
+    }
+    assert_eq!((LYRIC_PANEL.size, LYRIC_PANEL.line_height), (20.0, 28.0));
+    assert_eq!((LYRIC_STAGE.size, LYRIC_STAGE.line_height), (32.0, 40.0));
+    assert_eq!((TITLE.weight, BODY.weight, META.weight), (600, 500, 400));
+    // Every role is one size of the ramp (or of the lyric pair): nothing else is visible.
+    let sizes: Vec<(f32, f32)> = RAMP
+        .iter()
+        .map(|(_, r)| (r.size, r.line_height))
+        .chain([(LYRIC_PANEL.size, LYRIC_PANEL.line_height), (LYRIC_STAGE.size, LYRIC_STAGE.line_height)])
+        .collect();
+    assert_eq!(type_::ALL.len(), 15);
+    for (name, role) in type_::ALL.iter() {
+        assert!(
+            sizes.contains(&(role.size, role.line_height)),
+            "{name}: {} / {}",
+            role.size,
+            role.line_height
         );
-        assert!(role.line_height >= role.size, "{name}: interlinea sotto il corpo");
+        assert!(role.line_height >= role.size, "{name}: line height under the size");
         assert!([400, 500, 600].contains(&role.weight), "{name}");
     }
+    assert_eq!(TYPE_HEADING, TITLE);
+    assert_eq!(TYPE_TRACK_TITLE, BODY);
+    assert_eq!((TYPE_BODY.size, TYPE_BODY.weight), (BODY.size, 400));
+    assert_eq!((TYPE_LABEL.family, TYPE_LABEL.size), (FAMILY_PIXEL, 11.0));
     assert!(TYPE_NUMERIC_PIXEL.slashed_zero && !TYPE_NUMERIC.slashed_zero);
     assert_eq!(TYPE_LABEL.case, TextCase::Upper);
-    // Il tipo pixel: 11 / 14 AP, identico su desktop e telefono, mai un'altra dimensione.
+    // The pixel face: 11 / 14 AP.
     assert_eq!((PIXEL_SIZE, PIXEL_LINE), (11.0 * 2.0, 14.0 * 2.0));
     assert_eq!((PIXEL_SIZE_AP, PIXEL_LINE_AP), (11, 14));
-    for (_, role) in type_::ALL.iter().filter(|(_, r)| r.family == FAMILY_PIXEL) {
-        assert_eq!((role.size, role.line_height), (PIXEL_SIZE, PIXEL_LINE));
-    }
+}
+
+#[test]
+fn the_pixel_face_snaps_to_whole_multiples_of_eleven_device_pixels() {
+    use type_::*;
+    assert_eq!(pixel_face_device(CAPTION, 1.0), (11.0, 14.0));
+    assert_eq!(pixel_face_device(CAPTION, 1.5), (22.0, 28.0), "ties round up");
+    assert_eq!(pixel_face_device(CAPTION, 1.375), (11.0, 14.0));
+    assert_eq!(pixel_face_device(CAPTION, 1.25 * 1.2), (22.0, 28.0), "a tie with float noise");
+    assert_eq!(pixel_face_device(CAPTION, 2.0), (22.0, 28.0));
+    assert_eq!(pixel_face_device(CAPTION, 0.5), (11.0, 14.0), "never under 11");
+    assert_eq!(pixel_face_device(DISPLAY, 1.0), (44.0, 48.0));
+    assert_eq!(pixel_face_device(DISPLAY, 1.5), (55.0, 61.0));
+    assert_eq!(pixel_face_device(TYPE_WORDMARK, 1.0), (22.0, 28.0));
+    assert_eq!(pixel_face_device(DISPLAY, f32::NAN).0, 11.0);
 }
 
 #[test]
@@ -277,15 +318,13 @@ fn phone_overrides_only_differ_where_the_doc_says() {
         (11.0, 16.0, 500)
     );
     assert_eq!((phone::TYPE_LYRIC.size, phone::TYPE_LYRIC.line_height), (22.0, 30.0));
-    // Famiglia, peso e maiuscole restano quelli del ruolo base.
     assert_eq!(phone::TYPE_TRACK_TITLE.weight, type_::TYPE_TRACK_TITLE.weight);
-    assert_eq!(phone::TYPE_DISPLAY.family, type_::TYPE_DISPLAY.family);
 }
 
 #[test]
 fn motion_tokens_match_the_doc() {
     use motion::*;
-    let doc = [0, 70, 100, 160, 200, 280];
+    let doc = [0, 70, 100, 160, 200, 220, 280];
     for ((name, m), ms) in motion::ALL.iter().zip(doc) {
         assert_eq!(m.ms, ms, "{name}");
     }
@@ -300,7 +339,8 @@ fn motion_tokens_match_the_doc() {
         (500, 4000, 530, 530, 250)
     );
     assert_eq!(SPRITE_FRAME_MIN_MS, 80);
-    // reduce_motion: durate della UI a 0, il tick del progresso no.
+    assert_eq!((STAGGER_MS, STAGGER_MAX_STEPS, ENTER_RISE_AP, STEP_FRAMES), (40, 6, 4, 3));
+    // reduce_motion: UI durations at 0, the progress tick is not.
     assert_eq!(MOTION_BASE.effective_ms(true), 0);
     assert_eq!(MOTION_BASE.effective_ms(false), 160);
     assert_eq!(PROGRESS_TICK_MS, 250);

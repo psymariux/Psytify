@@ -1,27 +1,27 @@
-//! Una lista condivisa fra il core e i frontend: clonarla copia un puntatore, non gli elementi.
+//! A list shared between the core and the frontends: cloning it copies a pointer, not the elements.
 //!
-//! Le liste della libreria (playlist, brani piaciuti, ascolti) stanno nella vista pubblicata, in
-//! `config.json` e nelle copie dei frontend: con `Shared` sono lo stesso `Arc`. Il core la cambia
-//! con [`Shared::make_mut`], che copia gli elementi solo se qualcuno tiene ancora la versione
-//! pubblicata; un frontend la legge come uno slice e la confronta con `Arc::ptr_eq`.
+//! The library lists (playlists, liked tracks, plays) sit in the published view, in
+//! `config.json` and in the frontends' copies: with `Shared` they are the same `Arc`. The core changes it
+//! with [`Shared::make_mut`], which copies the elements only if someone still holds the published
+//! version; a frontend reads it as a slice and compares it with `Arc::ptr_eq`.
 
 use std::ops::Deref;
 use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Un `Vec<T>` immutabile e condiviso. Scrive e legge come un array JSON.
+/// An immutable, shared `Vec<T>`. It reads and writes like a JSON array.
 pub struct Shared<T>(Arc<Vec<T>>);
 
 impl<T> Shared<T> {
-    /// Le due liste sono la stessa allocazione: nessuno l'ha cambiata fra una lettura e l'altra.
+    /// The two lists are the same allocation: nobody changed it between one read and the next.
     pub fn same(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
 impl<T: Clone> Shared<T> {
-    /// La lista da modificare: se è condivisa con una vista già pubblicata la copia prima.
+    /// The list to modify: if it is shared with an already published view, it is copied first.
     pub fn make_mut(&mut self) -> &mut Vec<T> {
         Arc::make_mut(&mut self.0)
     }
@@ -69,7 +69,7 @@ impl<'a, T> IntoIterator for &'a Shared<T> {
 }
 
 impl<T: PartialEq> PartialEq for Shared<T> {
-    /// Lo stesso puntatore basta: il confronto degli elementi serve solo a due liste diverse.
+    /// The same pointer is enough: comparing the elements is only for two different lists.
     fn eq(&self, other: &Self) -> bool {
         self.same(other) || *self.0 == *other.0
     }

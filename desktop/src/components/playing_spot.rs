@@ -1,27 +1,27 @@
-//! Il posto dell'equalizzatore del brano in corso in una lista (BACKLOG 23).
+//! The equaliser spot of the playing track in a list (BACKLOG 23).
 //!
-//! Un equalizzatore animato dentro una vista `.cached()` la invalida a ogni scatto (`pixel::anim`
-//! notifica la vista che l'ha dipinto e GPUI segna sporchi anche i suoi antenati, `Window::mark_view_dirty`):
-//! la pagina rifaceva la lista intera dieci volte al secondo solo per cambiare dodici pixel. Qui la riga
-//! non dipinge l'equalizzatore: mette al suo posto un segnaposto della stessa misura ([`PlayingSpot::marker`])
-//! che, quando la vista dipinge, annota dove sta e sotto quale maschera (la lista che scorre lo taglia).
-//! Lo dipinge `Shell` sopra la pagina ([`overlay`]): il timer dello sprite invalida così solo `Shell`,
-//! che non è in cache, e la pagina si riusa com'era (`AnyView::cached` riusa prepaint e paint finché la
-//! vista non è sporca e la sua misura non cambia).
+//! An animated equaliser inside a `.cached()` view invalidates it at every frame (`pixel::anim`
+//! notifies the view that painted it, and GPUI marks its ancestors dirty too, `Window::mark_view_dirty`):
+//! the page redid the whole list ten times a second just to change twelve pixels. Here the row
+//! does not paint the equaliser: it puts in its place a placeholder of the same size ([`PlayingSpot::marker`])
+//! that, when the view paints, notes where it is and under which mask (the scrolling list clips it).
+//! `Shell` paints it over the page ([`overlay`]): the sprite's timer invalidates only `Shell`,
+//! which is not cached, and the page is reused as it was (`AnyView::cached` reuses prepaint and paint while the
+//! view is not dirty and its size does not change).
 //!
-//! Il posto vale finché la vista non si ridisegna: la vista lo cancella all'inizio di `render`
-//! ([`PlayingSpot::clear`]) e la riga lo segna di nuovo nel paint dello stesso fotogramma, prima di
-//! `Shell` (che dipinge il suo strato dopo la pagina). Se la vista è riusata dalla cache, la posizione è
-//! quella del fotogramma prima, che non è cambiata.
+//! The spot holds until the view redraws: the view clears it at the start of `render`
+//! ([`PlayingSpot::clear`]) and the row marks it again in the paint of the same frame, before
+//! `Shell` (which paints its layer after the page). If the view is reused from the cache, the position is
+//! that of the previous frame, which has not changed.
 //!
-//! Una vista può mostrare lo stesso brano in più posti (la Home: una scorciatoia, una copertina e una riga
-//! della classifica): il posto ne tiene fino a [`MAX_SPOTS`], quelli in più non si dipingono.
+//! A view can show the same track in several places (the Home: a shortcut, a cover and a row of the
+//! chart): the spot keeps up to [`MAX_SPOTS`] of them, the extra ones are not painted.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, ContentMask, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, canvas, div, px,
+    App, Bounds, ContentMask, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, canvas, div,
 };
 use psytify_design::sprite;
 use psytify_design::tokens::Rgba;
@@ -29,8 +29,9 @@ use psytify_design::tokens::color::{STATE_ON, STONE};
 
 use super::indicators::PlayState;
 use crate::pixel::sprite::{nominal_size, paint_sprite};
+use crate::theme::dp;
 
-/// Dove dipingere l'equalizzatore e come.
+/// Where to paint the equaliser and how.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Spot {
     slot: Bounds<Pixels>,
@@ -38,11 +39,11 @@ struct Spot {
     state: PlayState,
 }
 
-/// Gli equalizzatori di una vista al massimo: il limite tiene fisso lo spazio (nessuna allocazione dopo il
+/// The equalisers of a view at most: the limit keeps the space fixed (no allocation after the
 /// primo fotogramma) e nessuna pagina ne mostra tanti.
 pub const MAX_SPOTS: usize = 8;
 
-/// Il posto dell'equalizzatore di una vista: lo segna la riga che suona, lo dipinge `Shell`.
+/// The equaliser spot of a view: the playing row marks it, `Shell` paints it.
 #[derive(Clone, Debug, Default)]
 pub struct PlayingSpot(Rc<RefCell<Vec<Spot>>>);
 
@@ -51,12 +52,12 @@ impl PlayingSpot {
         Self::default()
     }
 
-    /// La vista si ridisegna: nessun posto finché una riga visibile non lo segna di nuovo.
+    /// The view redraws: no spot until a visible row marks it again.
     pub fn clear(&self) {
         self.0.borrow_mut().clear();
     }
 
-    /// Una riga ha dipinto il suo segnaposto: il posto si aggiunge (oltre [`MAX_SPOTS`] si scarta).
+    /// A row has painted its placeholder: the spot is added (beyond [`MAX_SPOTS`] it is dropped).
     fn mark(&self, spot: Spot) {
         let mut spots = self.0.borrow_mut();
         if spots.len() < MAX_SPOTS {
@@ -70,12 +71,12 @@ impl PlayingSpot {
         self.0.borrow().clone()
     }
 
-    /// Il segnaposto che una riga mette al posto dell'equalizzatore, della sua misura.
+    /// The placeholder a row puts in place of the equaliser, of its size.
     pub fn marker(&self, state: PlayState) -> Marker {
         Marker { spot: self.clone(), state }
     }
 
-    /// Dipinge l'equalizzatore annotato, se c'è, sotto la maschera della lista da cui viene.
+    /// Paints the annotated equaliser, if there is one, under the mask of the list it comes from.
     fn paint(&self, window: &mut Window, cx: &mut App) {
         let spots = self.0.borrow();
         for spot in spots.iter() {
@@ -87,7 +88,7 @@ impl PlayingSpot {
     }
 }
 
-/// Lo sprite e la tinta di ogni stato, come `Equalizer`: lime animato, `eq_rest` in pausa, `loader`.
+/// The sprite and the tint of each state, as `Equalizer`: lime animated, `eq_rest` when paused, `loader`.
 fn look(state: PlayState) -> (&'static str, Option<Rgba>) {
     match state {
         PlayState::Playing => (sprite::EQ, Some(STATE_ON)),
@@ -96,7 +97,7 @@ fn look(state: PlayState) -> (&'static str, Option<Rgba>) {
     }
 }
 
-/// Il segnaposto: vuoto, grande quanto lo sprite, e nel paint annota dove sta.
+/// The placeholder: empty, as big as the sprite, and in the paint it notes where it is.
 #[derive(IntoElement)]
 pub struct Marker {
     spot: PlayingSpot,
@@ -112,15 +113,15 @@ impl RenderOnce for Marker {
             |_, _, _| (),
             move |slot, (), window, _| spot.mark(Spot { slot, mask: window.content_mask(), state }),
         )
-        .w(px(w))
-        .h(px(h))
+        .w(dp(w))
+        .h(dp(h))
         .flex_none()
     }
 }
 
-/// Lo strato di `Shell` sopra una vista: dipinge l'equalizzatore annotato dalle sue righe. Va messo dopo
-/// la vista (nello stesso contenitore, `relative`), così si dipinge dopo di lei e sotto ciò che viene dopo
-/// (pannello che galleggia, menu, dialoghi). Non ha hitbox: il mouse arriva alla pagina.
+/// `Shell`'s layer over a view: it paints the equaliser annotated by its rows. It must be put after
+/// the view (in the same container, `relative`), so it is painted after it and under what comes after
+/// (floating panel, menus, dialogs). It has no hitbox: the mouse reaches the page.
 pub fn overlay(spot: PlayingSpot) -> gpui::Div {
     div()
         .absolute()
@@ -153,7 +154,7 @@ mod tests {
     fn a_view_keeps_a_few_spots_and_drops_the_rest() {
         let spot = PlayingSpot::new();
         let mark = |x: f32| Spot {
-            slot: Bounds { origin: gpui::point(px(x), px(0.0)), size: Default::default() },
+            slot: Bounds { origin: gpui::point(gpui::px(x), gpui::px(0.0)), size: Default::default() },
             mask: ContentMask { bounds: Bounds::default() },
             state: PlayState::Paused,
         };

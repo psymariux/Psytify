@@ -1,19 +1,19 @@
-//! Agganci verso la piattaforma che il core non sa raggiungere da solo: chi li conosce (su Android il
-//! guscio in `android/`) li registra all'avvio, prima di `run`. Sul desktop valgono i predefiniti.
+//! Hooks to the platform that the core cannot reach by itself (on Android the shell in `android/`)
+//! register them at startup, before `run`. On desktop the defaults apply.
 
 use std::sync::OnceLock;
 
-/// Chi apre un indirizzo nel browser del sistema, dove il crate `open` non arriva (su Android il
-/// guscio, con un Intent). Restituisce `false` se non ci riesce.
+/// Who opens an address in the system browser, where the `open` crate does not reach (on Android the
+/// shell, with an Intent). Returns `false` if it fails.
 type UrlOpener = Box<dyn Fn(&str) -> bool + Send + Sync>;
 static URL_OPENER: OnceLock<UrlOpener> = OnceLock::new();
 
-/// Registra chi apre un indirizzo nel browser del sistema. Vale la prima chiamata.
+/// Registers who opens an address in the system browser. The first call counts.
 pub fn set_url_opener(open: impl Fn(&str) -> bool + Send + Sync + 'static) {
     let _ = URL_OPENER.set(Box::new(open));
 }
 
-/// Apre `url` nel browser: con l'aggancio del guscio se c'è, altrimenti col crate `open`.
+/// Opens `url` in the browser: with the shell's hook if there is one, otherwise with the `open` crate.
 pub fn open_url(url: &str) -> bool {
     match URL_OPENER.get() {
         Some(open) => open(url),
@@ -21,8 +21,8 @@ pub fn open_url(url: &str) -> bool {
     }
 }
 
-/// Apre una cartella nel gestore di file del sistema (`xdg-open`, Esplora risorse). Su Android non
-/// c'è un gestore da aprire da qui: restituisce `false`, e l'interfaccia non offre il tasto.
+/// Opens a folder in the system file manager (`xdg-open`, Windows Explorer). On Android there is no
+/// file manager to open from here: returns `false`, and the interface does not offer the button.
 pub fn open_path(path: &std::path::Path) -> bool {
     #[cfg(target_os = "android")]
     {

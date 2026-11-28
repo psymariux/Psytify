@@ -1,10 +1,10 @@
-//! Aiuti del catalogo che servono sia alla logica sia alle viste: stanno qui perché il core non
-//! dipende dall'interfaccia.
+//! Catalog helpers needed by both the logic and the views: they live here because the core
+//! does not depend on the interface.
 
 use crate::api::ArtistPage;
 use crate::error::AppError;
 
-/// Stato di un dato caricato dalla rete.
+/// State of a piece of data loaded from the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Load<T> {
     Idle,
@@ -13,7 +13,7 @@ pub enum Load<T> {
     Failed(AppError),
 }
 
-// A mano: `derive(Default)` pretenderebbe `T: Default`, e `Arc<Album>` & co. non lo sono.
+// By hand: `derive(Default)` would require `T: Default`, and `Arc<Album>` & co. are not.
 #[allow(clippy::derivable_impls)]
 impl<T> Default for Load<T> {
     fn default() -> Self {
@@ -22,7 +22,7 @@ impl<T> Default for Load<T> {
 }
 
 impl<T> Load<T> {
-    /// Non c'è niente da mostrare e niente in arrivo: da chiedere, o da riprovare dopo un errore.
+    /// Nothing to show and nothing on the way: to ask for, or to retry after an error.
     pub fn needs_load(&self) -> bool {
         matches!(self, Self::Idle | Self::Failed(_))
     }
@@ -38,7 +38,7 @@ impl<T> Load<T> {
         matches!(self, Self::Loading)
     }
 
-    /// L'esito di una richiesta come stato.
+    /// The outcome of a request as a state.
     pub fn of(result: Result<T, AppError>) -> Self {
         match result {
             Ok(value) => Self::Ready(value),
@@ -47,18 +47,18 @@ impl<T> Load<T> {
     }
 }
 
-/// Il testo della ricerca com'è per il backend: senza caratteri di controllo, da 1 a 100 caratteri.
+/// The search text as the backend expects it: no control characters, from 1 to 100 characters.
 pub fn clean_query(raw: &str) -> Option<String> {
     let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
     let trimmed: String = cleaned.trim().chars().take(MAX_QUERY_CHARS).collect();
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-/// Caratteri di una ricerca, al massimo.
+/// Maximum characters of a search.
 pub const MAX_QUERY_CHARS: usize = 100;
 
-/// L'immagine dell'artista è la sua foto ufficiale; senza, la copertina del suo primo album con
-/// un'immagine, o di un suo brano.
+/// The artist image is their official photo; without it, the cover of their first album with
+/// an image, or of one of their tracks.
 pub fn portrait_url(page: &ArtistPage) -> Option<&str> {
     page.image_url
         .as_deref()

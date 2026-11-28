@@ -1,22 +1,20 @@
-//! La pagina «Jam» (`Page::Jam`): l'ascolto insieme, come il client Iced (`client/src/ui/pages/jam.rs`) e
-//! la direzione artistica («Jam: the code in `TYPE_NUMERIC_PIXEL` with a copy button, members as avatars in
-//! a row, live badge `LIVE` while connected»). Una pagina della barra laterale, fra Scaricati e Amici, come
-//! nel client Iced: non una scheda del pannello laterale, che resta della coda e del testo.
+//! «Jam» (`Page::Jam`): listening together, and the
+//! art direction («Jam: the code in `TYPE_NUMERIC_PIXEL` with a copy button, members as avatars in a row,
+//! live badge `LIVE` while connected»). A sidebar page between Scaricati and Amici.
 //!
-//! Senza jam: gli inviti degli amici (Entra, Ignora), poi la scheda «Ascolta insieme» con il nome da
-//! mostrare in stanza, «Crea una jam» e l'ingresso con un codice (sei lettere o cifre, filtrate e in
-//! maiuscolo mentre si scrive; «Entra» si accende solo con un codice valido, `jam::valid_code`). Se la
-//! jam si è chiusa da sola (la stanza non risponde, il collegamento è caduto) la scheda lo dice in
-//! `TEXT_ERROR` sotto i pulsanti, con «Riprova». Il core non ha uno stato «in riconnessione»: un
-//! collegamento perso chiude la jam (`JamEvent::Closed`), e la pagina torna qui.
+//! Without a jam: the friends' invitations (Entra, Ignora), then the «Ascolta insieme» card with the name to
+//! show in the room, «Crea una jam» and joining with a code (six letters or digits, filtered and upper-cased
+//! while typing; «Entra» lights up only with a valid code, `jam::valid_code`). If the jam closed on its own
+//! the card says so in `TEXT_ERROR` under the buttons, with «Riprova». The core has no «reconnecting» state:
+//! a lost link closes the jam (`JamEvent::Closed`) and the page comes back here.
 //!
-//! In connessione: il loader e «Connessione in corso…», con «Esci dalla jam». In stanza: il codice in tipo
-//! pixel con il pulsante per copiarlo e il badge `LIVE`, chi c'è come avatar in fila, poi l'elenco delle
-//! persone (`PersonRow`, «Tu» segna chi sei) e gli amici da invitare (Scegli / Scelto, «Invia l'invito»).
+//! Connecting: the loader and «Connessione in corso…», with «Esci dalla jam». In the room: the code in the
+//! pixel face with the copy button and the `LIVE` badge, who is there as avatars in a row, then the people
+//! (`PersonRow`, «Tu» marks you) and the friends to invite (Scegli / Scelto, «Invia l'invito»). Everything
+//! sits at the frame margins and enters with the page-enter move.
 //!
-//! Le righe e i testi sono una funzione pura delle viste della jam e sociale (`model`, `rows`), rifatta
-//! quando il core pubblica uno dei due domini; la pagina si ridisegna solo se il risultato cambia.
-//! `render` non legge l'istantanea. Nessun timer: una jam ferma non sveglia niente.
+//! Rows and texts are a pure function of the jam and social views (`model`, `rows`), rebuilt when the core
+//! publishes either; the page redraws only if the result changes. No timer: an idle jam wakes nothing.
 
 use gpui::{
     AnyElement, AppContext, ClickEvent, ClipboardItem, Context, Entity, EventEmitter, InteractiveElement,
@@ -30,33 +28,35 @@ use psytify_design::sprite;
 use psytify_design::tokens::color::{
     SURFACE_CANVAS, TEXT_ERROR, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY,
 };
-use psytify_design::tokens::size::{SEARCH_FIELD_MAX_W, TRACK_ROW_H, cover::AVATAR_S};
-use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6};
-use psytify_design::tokens::type_::{TYPE_BODY, TYPE_HEADING, TYPE_LABEL, TYPE_META};
+use psytify_design::tokens::size::{SEARCH_FIELD_MAX_W, TRACK_ROW_H, cover::ART_ROW};
+use psytify_design::tokens::space::{SPACE_2, SPACE_3, SPACE_4, SPACE_5};
+use psytify_design::tokens::type_::{TYPE_BODY, TYPE_HEADING, TYPE_META};
 
 use super::PageEvent;
+use super::page_frame::PageFrame;
 use super::people::{line_chars, status};
 use crate::components::badge::{Badge, BadgeKind};
 use crate::components::button::Button;
 use crate::components::card::Card;
+use crate::components::frame::Frame;
 use crate::components::icon_button::IconButton;
 use crate::components::indicators::LoadingIndicator;
 use crate::components::person_row::{PersonRow, Status};
 use crate::components::search_field::SearchField;
-use crate::components::section::{PageTitle, note, section_heading};
+use crate::components::section::{PageTitle, note_at, section_heading_at};
 use crate::components::tile::Cover;
 use crate::components::tooltip::with_tooltip;
 use crate::core_model::{Changed, CoreModel};
 use crate::notices::Notice;
-use crate::theme::{Ap, TypeStyle, cased, col, dp};
+use crate::theme::{TypeStyle, col, dp};
 
-/// Il filtro del codice mentre si scrive: lettere e cifre ASCII, in maiuscolo (come il client Iced). Il
-/// campo ne tiene al più [`CODE_LEN`].
+/// The code filter while typing: ASCII letters and digits, in upper case. The
+/// field keeps at most [`CODE_LEN`] of them.
 pub fn code_chars(text: &str) -> String {
     text.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()).collect()
 }
 
-/// Dove si è con la jam.
+/// Where one is with the jam.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Stage {
     #[default]
@@ -65,14 +65,14 @@ enum Stage {
     Open,
 }
 
-/// Una persona in stanza.
+/// A person in the room.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MemberLine {
     name: SharedString,
     you: bool,
 }
 
-/// L'invito di un amico, con i testi pronti.
+/// A friend's invitation, with the texts ready.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct InviteLine {
     code: String,
@@ -80,7 +80,7 @@ struct InviteLine {
     line: SharedString,
 }
 
-/// Un amico da invitare.
+/// A friend to invite.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FriendLine {
     handle: String,
@@ -89,42 +89,42 @@ struct FriendLine {
     status: Status,
 }
 
-/// Gli amici da invitare, come li può mostrare la pagina.
+/// The friends to invite, as the page can show them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 enum Invitable {
-    /// Senza accesso o senza nome utente.
+    /// Without sign-in or without a username.
     #[default]
     SignedOut,
     Loading,
     Ready(Vec<FriendLine>),
 }
 
-/// L'errore che ha chiuso la jam, se non lo si è già lasciato.
+/// The error that closed the jam, if it has not already been left.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Failure {
     seq: u64,
     text: SharedString,
-    /// «Riprova» ha senso: un codice sbagliato si corregge, non si riprova.
+    /// «Riprova» makes sense: a wrong code is corrected, not retried.
     retry: bool,
 }
 
-/// Tutto ciò che la pagina mostra.
+/// Everything the page shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Model {
     stage: Stage,
-    /// Il codice della stanza (vuoto finché la stanza non lo dice).
+    /// The room's code (empty until the room says it).
     code: SharedString,
     members: Vec<MemberLine>,
     /// «3 di 8».
     count: SharedString,
     invites: Vec<InviteLine>,
     friends: Invitable,
-    /// Gli inviti stanno partendo.
+    /// The invitations are being sent.
     inviting: bool,
     failure: Option<Failure>,
 }
 
-/// Le frasi di una riga di stato.
+/// The phrases of a status row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Line {
     SignIn,
@@ -142,20 +142,20 @@ impl Line {
     }
 }
 
-/// Una riga della lista, nell'ordine in cui si disegna.
+/// A row of the list, in the order it is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
-    /// «Inviti» e quanti.
+    /// «Inviti» and how many.
     InvitesHeading(usize),
     Invite(usize),
-    /// La scheda «Ascolta insieme»: nome, crea, codice, entra.
+    /// The «Ascolta insieme» card: name, create, code, join.
     Start,
-    /// La scheda della stanza: codice, `LIVE`, avatar (o il loader mentre si collega).
+    /// The room card: code, `LIVE`, avatars (or the loader while connecting).
     Room,
-    /// «Persone» e «N di 8».
+    /// «Persone» and «N di 8».
     MembersHeading,
     Member(usize),
-    /// «Invita amici» e quanti se ne sono scelti.
+    /// «Invita amici» and how many have been chosen.
     InviteHeading,
     Friend(usize),
     Note(Line),
@@ -163,8 +163,8 @@ enum Row {
     Send,
 }
 
-/// Le persone e i testi della pagina, dalle due viste. Pura. `dismissed` è l'ultimo evento della jam già
-/// lasciato (scrivendo o ripartendo): un errore più vecchio non si mostra più.
+/// The people and the texts of the page, from the two views. Pure. `dismissed` is the last event of the jam already
+/// left (by writing or starting again): an older error is no longer shown.
 fn model(jam: &JamView, social: &SocialView, dismissed: u64) -> Model {
     let stage = match jam.phase {
         JamPhase::Idle => Stage::Idle,
@@ -186,7 +186,7 @@ fn model(jam: &JamView, social: &SocialView, dismissed: u64) -> Model {
             line: format!("@{} ti invita in una jam", invite.from_handle).into(),
         })
         .collect();
-    // Gli amici da invitare servono solo in stanza: fuori, la loro presenza che cambia non ridisegna niente.
+    // The friends to invite are needed only in the room: outside, their changing presence redraws nothing.
     let friends = match (&social.account, social.friends.ready()) {
         _ if stage != Stage::Open => Invitable::default(),
         (Account::SignedIn(me), Some(friends)) if me.profile.is_some() => Invitable::Ready(
@@ -225,12 +225,12 @@ fn model(jam: &JamView, social: &SocialView, dismissed: u64) -> Model {
     }
 }
 
-/// Un evento che lascia la pagina senza jam e merita una riga sotto i pulsanti (oltre all'avviso).
+/// An event that leaves the page without a jam and deserves a line under the buttons (besides the notice).
 fn ends_the_jam(event: &JamEvent) -> bool {
     matches!(event, JamEvent::BadCode | JamEvent::Rejected(_) | JamEvent::Closed(_))
 }
 
-/// Le righe della pagina. Pura.
+/// The page's rows. Pure.
 fn rows(model: &Model) -> Vec<Row> {
     let mut rows = Vec::new();
     match model.stage {
@@ -260,15 +260,15 @@ fn rows(model: &Model) -> Vec<Row> {
     rows
 }
 
-/// L'ultimo modo in cui si è provato ad avviare una jam: «Riprova» rifà quello.
+/// The last way a jam start was tried: «Riprova» redoes that.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Attempt {
     Create,
     Join,
 }
 
-/// Il comando di «Riprova», con i campi di adesso. Senza un tentativo noto (la jam l'ha avviata un altro
-/// frontend) si entra se il codice è valido, altrimenti si crea.
+/// The «Riprova» command, with the fields as they are now. Without a known attempt (the jam was started by another
+/// frontend) one joins if the code is valid, otherwise one creates.
 fn retry(attempt: Option<Attempt>, name: &str, code: &str) -> JamCmd {
     let attempt = attempt.unwrap_or(if jam::valid_code(code) { Attempt::Join } else { Attempt::Create });
     match attempt {
@@ -277,8 +277,8 @@ fn retry(attempt: Option<Attempt>, name: &str, code: &str) -> JamCmd {
     }
 }
 
-/// «Entra» su un invito: l'invito si toglie (anche dal server) e si entra nella stanza; se si è già in una
-/// jam si resta lì, con l'avviso del client Iced.
+/// «Entra» on an invitation: the invitation is removed (also from the server) and one joins the room; if already in a
+/// jam, one stays there, with the usual notice.
 fn accept(code: &str, active: bool, name: &str) -> Result<(SocialCmd, JamCmd), Notice> {
     if active {
         return Err(Notice::info("Sei già in una jam: esci prima da quella"));
@@ -289,7 +289,7 @@ fn accept(code: &str, active: bool, name: &str) -> Result<(SocialCmd, JamCmd), N
     ))
 }
 
-/// Sceglie un amico da invitare o lo toglie dalla scelta; non più dei posti della stanza.
+/// Chooses a friend to invite or removes them from the choice; no more than the room's seats.
 fn toggle(chosen: &mut Vec<String>, handle: &str) {
     if let Some(at) = chosen.iter().position(|h| h == handle) {
         chosen.remove(at);
@@ -298,12 +298,12 @@ fn toggle(chosen: &mut Vec<String>, handle: &str) {
     }
 }
 
-/// L'invito agli amici scelti, se si può mandare.
+/// The invitation to the chosen friends, if it can be sent.
 fn invite(chosen: &[String], inviting: bool) -> Option<SocialCmd> {
     (!chosen.is_empty() && !inviting).then(|| SocialCmd::InviteToJam(chosen.to_vec()))
 }
 
-/// «N scelti» (vuoto se nessuno).
+/// «N scelti» (empty if none).
 fn chosen_label(chosen: usize) -> SharedString {
     match chosen {
         0 => SharedString::default(),
@@ -316,25 +316,26 @@ pub struct JamPage {
     core: Entity<CoreModel>,
     model: Model,
     rows: Vec<Row>,
-    /// Gli amici scelti per l'invito (nomi utente); si dimenticano a jam finita o a inviti partiti.
+    /// The friends chosen for the invitation (usernames); forgotten when the jam ends or the invitations leave.
     chosen: Vec<String>,
     name: Entity<SearchField>,
     code: Entity<SearchField>,
-    /// Il codice scritto è valido: «Entra» è acceso.
+    /// The code written is valid: «Entra» is lit.
     code_ok: bool,
     attempt: Option<Attempt>,
-    /// L'ultimo evento della jam lasciato alle spalle (vedi `model`).
+    /// The last jam event left behind (see `model`).
     dismissed: u64,
-    /// L'ultimo evento sociale letto (per «inviti mandati», che svuota la scelta).
+    /// The last social event read (for «inviti mandati», which empties the choice).
     social_seen: u64,
     list: ListState,
+    frame: PageFrame,
     _changes: Subscription,
 }
 
 impl EventEmitter<PageEvent> for JamPage {}
 
-/// Un campo del modulo: 40 dp, senza icone; ogni tasto e Invio tornano alla pagina dopo che il campo ha
-/// finito il suo aggiornamento (`App::defer`: il campo è ancora in prestito mentre chiama).
+/// A form field: 40 dp, no icons; every key and Enter return to the page after the field has
+/// finished its update (`App::defer`: the field is still borrowed while it calls).
 fn field(
     page: &WeakEntity<JamPage>,
     id: &'static str,
@@ -394,14 +395,28 @@ impl JamPage {
             dismissed: 0,
             social_seen: social.events.back().map_or(0, |raised| raised.seq),
             list,
+            frame: PageFrame::default(),
             _changes: changes,
+        }
+    }
+
+    /// The page comes into view (`Shell::page_shown`).
+    pub fn enter(&mut self, rise: bool, cx: &mut Context<Self>) {
+        self.frame.enter(rise, cx);
+        cx.notify();
+    }
+
+    fn set_frame(&mut self, frame: Frame, cx: &mut Context<Self>) {
+        if frame != self.frame.frame {
+            self.frame.frame = frame;
+            cx.notify();
         }
     }
 
     fn core_changed(&mut self, core: &Entity<CoreModel>, cx: &mut Context<Self>) {
         let (jam, social) = (core.read(cx).jam_view(), core.read(cx).social_view());
         let mut dirty = false;
-        // Inviti partiti: la scelta si svuota (come nel client Iced).
+        // Invitations sent: the choice is emptied.
         let seen = self.social_seen;
         if social
             .events
@@ -423,7 +438,7 @@ impl JamPage {
         }
     }
 
-    /// Rifà il modello; `true` se è cambiato (e allora la lista si rimisura).
+    /// Redoes the model; `true` if it changed (and then the list is measured again).
     fn rebuild(&mut self, jam: &JamView, social: &SocialView) -> bool {
         let model = model(jam, social, self.dismissed);
         if model == self.model {
@@ -434,8 +449,8 @@ impl JamPage {
         let old = self.rows.len();
         self.rows = rows(&self.model);
         if same_stage {
-            // Lo stesso stato (un amico che cambia brano, una persona che entra): la lista si rimisura e
-            // resta dove la si era scorsa.
+            // The same state (a friend changes track, a person comes in): the list is measured again and
+            // stays where it was scrolled.
             let top = self.list.logical_scroll_top();
             self.list.splice(0..old, self.rows.len());
             if top.item_ix < self.rows.len() {
@@ -454,7 +469,7 @@ impl JamPage {
         }
     }
 
-    /// Si è scritto in un campo: «Entra» segue il codice e l'errore mostrato si lascia.
+    /// Something was typed in a field: «Entra» follows the code and the error shown is left.
     fn edited(&mut self, cx: &mut Context<Self>) {
         let ok = jam::valid_code(self.code.read(cx).text());
         if ok != self.code_ok {
@@ -467,25 +482,25 @@ impl JamPage {
         }
     }
 
-    /// Il nome scritto (vuoto: il core usa quello del profilo).
+    /// The name written (empty: the core uses the profile's).
     fn typed_name(&self, cx: &gpui::App) -> String {
         self.name.read(cx).text().trim().to_owned()
     }
 
-    /// «Crea una jam», «Entra» o Invio in un campo.
+    /// «Crea una jam», «Entra» or Enter in a field.
     fn start(&mut self, attempt: Attempt, cx: &mut Context<Self>) {
         if self.model.stage != Stage::Idle {
             return;
         }
-        // Un codice incompleto (Invio nel campo: il pulsante è spento) lo rifiuta il core, con il suo
-        // avviso e la riga sotto i pulsanti, come nel client Iced.
+        // An incomplete code (Enter in the field: the button is off) is refused by the core, with its
+        // notice and the line under the buttons.
         let code = self.code.read(cx).text().to_owned();
         self.attempt = Some(attempt);
         let command = retry(Some(attempt), &self.typed_name(cx), &code);
         self.send(command, cx);
     }
 
-    /// Manda un comando che avvia la jam: l'errore di prima si lascia.
+    /// Sends a command that starts the jam: the earlier error is left.
     fn send(&mut self, command: JamCmd, cx: &mut Context<Self>) {
         if let Some(failure) = &self.model.failure {
             self.dismissed = failure.seq;
@@ -532,40 +547,67 @@ impl JamPage {
     }
 
     fn item(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let element = self.row(ix, window, cx);
+        // One step per block: a heading or a card starts one.
+        let section = 1 + self
+            .rows
+            .iter()
+            .take(ix + 1)
+            .filter(|row| {
+                matches!(
+                    row,
+                    Row::InvitesHeading(_)
+                        | Row::Start
+                        | Row::Room
+                        | Row::MembersHeading
+                        | Row::InviteHeading
+                )
+            })
+            .count();
+        self.frame.wrap(element, section, window)
+    }
+
+    fn row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(row) = self.rows.get(ix).copied() else { return div().into_any_element() };
+        let margin = self.frame.margin();
         match row {
             Row::InvitesHeading(count) => {
-                section_heading("Inviti".into(), count.to_string().into()).into_any_element()
+                section_heading_at("Inviti".into(), count.to_string().into(), margin).into_any_element()
             }
             Row::Invite(ix) => self.invite_row(ix, cx),
             Row::Start => self.start_card(cx),
             Row::Room => self.room_card(window, cx),
             Row::MembersHeading => {
-                section_heading("Persone".into(), self.model.count.clone()).into_any_element()
+                section_heading_at("Persone".into(), self.model.count.clone(), margin).into_any_element()
             }
             Row::Member(ix) => match self.model.members.get(ix) {
                 Some(member) => {
                     let line = if member.you { "Tu" } else { "Nella jam" };
-                    PersonRow::new(("jam-member", ix), member.name.clone(), Status::Plain(line.into()))
-                        .into_any_element()
+                    self.frame.row(PersonRow::new(
+                        ("jam-member", ix),
+                        member.name.clone(),
+                        Status::Plain(line.into()),
+                    ))
                 }
                 None => div().into_any_element(),
             },
             Row::InviteHeading => {
-                section_heading("Invita amici".into(), chosen_label(self.chosen.len())).into_any_element()
+                section_heading_at("Invita amici".into(), chosen_label(self.chosen.len()), margin)
+                    .into_any_element()
             }
             Row::Friend(ix) => self.friend_row(ix, cx),
             Row::Note(line) => {
-                note(div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(line.text()))
+                note_at(div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child(line.text()), margin)
                     .into_any_element()
             }
-            Row::Send => note(
+            Row::Send => note_at(
                 Button::new("jam-invite-send", "Invia l'invito")
                     .primary()
                     .icon(sprite::ICON_USER_PLUS)
                     .loading(self.model.inviting)
                     .disabled(self.chosen.is_empty() || self.model.inviting)
                     .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.send_invites(cx))),
+                margin,
             )
             .into_any_element(),
         }
@@ -574,7 +616,7 @@ impl JamPage {
     fn invite_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
         let Some(invite) = self.model.invites.get(ix) else { return div().into_any_element() };
         let (join, dismiss) = (invite.code.clone(), invite.code.clone());
-        PersonRow::new(("jam-invite", ix), invite.name.clone(), Status::Plain(invite.line.clone()))
+        let row = PersonRow::new(("jam-invite", ix), invite.name.clone(), Status::Plain(invite.line.clone()))
             .action(
                 Button::new(("jam-invite-join", ix), "Entra")
                     .secondary()
@@ -584,8 +626,8 @@ impl JamPage {
                 move |this, _: &ClickEvent, _, cx| {
                     this.core.read(cx).social(SocialCmd::DismissInvite(dismiss.clone()));
                 },
-            )))
-            .into_any_element()
+            )));
+        self.frame.row(row)
     }
 
     fn friend_row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -598,17 +640,16 @@ impl JamPage {
         } else {
             Button::new(("jam-friend", ix), "Scegli").secondary()
         };
-        PersonRow::new(("jam-friend-row", ix), friend.name.clone(), friend.status.clone())
-            .avatar(friend.avatar.clone())
-            .action(
-                button.on_click(
+        self.frame.row(
+            PersonRow::new(("jam-friend-row", ix), friend.name.clone(), friend.status.clone())
+                .avatar(friend.avatar.clone())
+                .action(button.on_click(
                     cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_friend(&handle, cx)),
-                ),
-            )
-            .into_any_element()
+                )),
+        )
     }
 
-    /// La scheda per avviare una jam: nome, «Crea una jam», codice ed «Entra», l'errore e «Riprova».
+    /// The card to start a jam: name, «Crea una jam», code and «Entra», the error and «Riprova».
     fn start_card(&self, cx: &mut Context<Self>) -> AnyElement {
         let mut body =
             div()
@@ -661,19 +702,24 @@ impl JamPage {
             }
             body = body.child(line);
         }
-        padded(Card::new().child(body)).into_any_element()
+        padded(Card::new().child(body), self.frame.margin()).into_any_element()
     }
 
-    /// La scheda della stanza: «Codice» con il badge `LIVE`, il codice in tipo pixel e «Copia», la frase,
-    /// gli avatar in fila. Mentre ci si collega: il loader e «Connessione in corso…».
-    fn room_card(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let ap = Ap::of(window);
+    /// The room card: «Codice» with the `LIVE` badge, the code in the pixel face and «Copia», the line, the
+    /// avatars in a row. While connecting: the loader and «Connessione in corso…».
+    fn room_card(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.model.stage == Stage::Connecting {
-            return padded(Card::new().child(
-                div().flex().items_center().gap(dp(SPACE_4)).child(LoadingIndicator::new()).child(
-                    div().type_role(TYPE_BODY).text_color(col(TEXT_SECONDARY)).child("Connessione in corso…"),
+            return padded(
+                Card::new().child(
+                    div().flex().items_center().gap(dp(SPACE_4)).child(LoadingIndicator::new()).child(
+                        div()
+                            .type_role(TYPE_BODY)
+                            .text_color(col(TEXT_SECONDARY))
+                            .child("Connessione in corso…"),
+                    ),
                 ),
-            ))
+                self.frame.margin(),
+            )
             .into_any_element();
         }
         let code =
@@ -681,7 +727,7 @@ impl JamPage {
         let avatars = self.model.members.iter().enumerate().map(|(ix, member)| {
             let name = if member.you { format!("{} (tu)", member.name) } else { member.name.to_string() };
             with_tooltip(
-                div().id(("jam-avatar", ix)).flex_none().child(Cover::new(AVATAR_S).circle()),
+                div().id(("jam-avatar", ix)).flex_none().child(Cover::new(ART_ROW).circle()),
                 name,
                 None,
             )
@@ -695,12 +741,7 @@ impl JamPage {
                     .flex()
                     .items_center()
                     .gap(dp(SPACE_3))
-                    .child(
-                        div()
-                            .type_role(TYPE_LABEL)
-                            .text_color(col(TEXT_SECONDARY))
-                            .child(cased("Codice", TYPE_LABEL)),
-                    )
+                    .child(div().type_role(TYPE_META).text_color(col(TEXT_SECONDARY)).child("Codice"))
                     .child(Badge::new("LIVE", BadgeKind::Live)),
             )
             .child(
@@ -708,7 +749,7 @@ impl JamPage {
                     .flex()
                     .items_center()
                     .gap(dp(SPACE_3))
-                    .child(div().text_color(col(TEXT_PRIMARY)).pixel_type(ap, true).child(code))
+                    .child(div().text_color(col(TEXT_PRIMARY)).pixel_type(true).child(code))
                     .child(
                         IconButton::new("jam-copy", sprite::ICON_COPY)
                             .tooltip("Copia il codice", None)
@@ -731,23 +772,24 @@ impl JamPage {
                         .child(self.model.count.clone()),
                 ),
             );
-        padded(Card::new().child(body)).into_any_element()
+        padded(Card::new().child(body), self.frame.margin()).into_any_element()
     }
 }
 
-/// Una scheda della pagina, allineata alle intestazioni e larga al più quanto un campo di ricerca.
-fn padded(card: Card) -> gpui::Div {
-    div().w_full().px(dp(SPACE_6)).py(dp(SPACE_3)).child(div().max_w(dp(SEARCH_FIELD_MAX_W)).child(card))
+/// A card of the page at the frame margin, at most as wide as a search field.
+fn padded(card: Card, margin: f32) -> gpui::Div {
+    div().w_full().px(dp(margin)).py(dp(SPACE_3)).child(div().max_w(dp(SEARCH_FIELD_MAX_W)).child(card))
 }
 
 impl Render for JamPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.frame.begin(window, Some(&self.list));
         let meta = match self.model.stage {
             Stage::Idle => "Ascolta insieme ad altri",
             Stage::Connecting => "Connessione in corso…",
             Stage::Open => "Collegato alla stanza",
         };
-        let mut title = PageTitle::screen("Jam").meta(meta);
+        let mut title = PageTitle::screen("Jam").margin(self.frame.margin()).meta(meta);
         if self.model.stage != Stage::Idle {
             title =
                 title.action(Button::new("jam-leave", "Esci dalla jam").secondary().on_click(
@@ -760,11 +802,13 @@ impl Render for JamPage {
         )
         .size_full();
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
             .bg(col(SURFACE_CANVAS))
-            .child(title)
+            .child(self.frame.measure(cx.entity().downgrade(), Self::set_frame))
+            .child(self.frame.wrap(title.into_any_element(), 0, window))
             .child(div().flex_1().min_h_0().child(list))
     }
 }
@@ -847,7 +891,7 @@ mod tests {
         let model = model(&JamView::default(), &social, 0);
         assert_eq!(rows(&model), vec![Row::InvitesHeading(1), Row::Invite(0), Row::Start]);
         assert_eq!(model.invites[0].line, "@luca ti invita in una jam");
-        // Già in una jam gli inviti non si mostrano (come nel client Iced).
+        // Already in a jam the invitations are not shown.
         let model = super::model(&open(&["Psy"], 0), &social, 0);
         assert!(!rows(&model).contains(&Row::Invite(0)));
     }
@@ -883,7 +927,7 @@ mod tests {
                 Row::Send
             ]
         );
-        // Senza accesso, in caricamento o senza amici: una riga che lo dice, niente «Invia».
+        // Without sign-in, loading or without friends: a line that says so, no «Invia».
         let tail = |social: &SocialView| rows(&super::model(&open(&["Psy"], 0), social, 0)).pop();
         assert_eq!(tail(&SocialView::default()), Some(Row::Note(Line::SignIn)));
         assert_eq!(tail(&signed_in(Load::Loading)), Some(Row::Note(Line::Loading)));
@@ -901,7 +945,7 @@ mod tests {
         assert!(!bad.retry, "un codice sbagliato si corregge, non si riprova");
         assert!(model(&raised(3, JamEvent::Left), &social, 0).failure.is_none());
         assert!(model(&raised(3, JamEvent::TracksMissing), &social, 0).failure.is_none());
-        // In stanza un rifiuto è solo un avviso.
+        // In the room a refusal is only a notice.
         let mut busy = open(&["Psy"], 0);
         busy.events = raised(5, JamEvent::Rejected("Troppi cambiamenti".to_owned())).events;
         assert!(model(&busy, &social, 0).failure.is_none());
@@ -913,7 +957,7 @@ mod tests {
         assert!(matches!(create, JamCmd::Create { name } if name == "Psy"));
         let join = retry(Some(Attempt::Join), "", "K7Q2MX");
         assert!(matches!(join, JamCmd::Join { code, name } if code == "K7Q2MX" && name.is_empty()));
-        // Senza un tentativo noto: entra se il codice è valido, altrimenti crea.
+        // Without a known attempt: join if the code is valid, otherwise create.
         assert!(matches!(retry(None, "", "K7Q2MX"), JamCmd::Join { .. }));
         assert!(matches!(retry(None, "", "K7Q"), JamCmd::Create { .. }));
     }

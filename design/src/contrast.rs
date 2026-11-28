@@ -1,29 +1,29 @@
-//! Contrasto WCAG 2.x: luminanza relativa e rapporto fra due colori opachi. Serve ai test che
-//! verificano le affermazioni del documento dei token e a chi calcola colori nuovi.
+//! WCAG 2.x contrast: relative luminance and contrast ratio between two opaque colours. Used by the tests that
+//! check the claims of the token document, and by anyone computing new colours.
 
 use crate::tokens::color::Rgba;
 
-/// Canale sRGB (0-255) in luce lineare.
+/// sRGB channel (0-255) in linear light.
 fn linearize(channel: u8) -> f64 {
     let c = f64::from(channel) / 255.0;
     if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
-/// Luminanza relativa (0 = nero, 1 = bianco); l'alfa è ignorato.
+/// Relative luminance (0 = black, 1 = white); alpha is ignored.
 pub fn relative_luminance(color: Rgba) -> f64 {
     0.2126 * linearize(color.r()) + 0.7152 * linearize(color.g()) + 0.0722 * linearize(color.b())
 }
 
-/// Rapporto di contrasto, da 1 (uguali) a 21 (nero su bianco); simmetrico.
+/// Contrast ratio, from 1 (equal) to 21 (black on white); symmetric.
 pub fn contrast_ratio(a: Rgba, b: Rgba) -> f64 {
     let (la, lb) = (relative_luminance(a), relative_luminance(b));
     let (lighter, darker) = if la >= lb { (la, lb) } else { (lb, la) };
     (lighter + 0.05) / (darker + 0.05)
 }
 
-/// Soglia WCAG AA per il testo normale.
+/// WCAG AA threshold for normal text.
 pub const AA_TEXT: f64 = 4.5;
-/// Soglia WCAG per componenti dell'interfaccia (bordi dei controlli).
+/// WCAG threshold for interface components (control borders).
 pub const UI_COMPONENT: f64 = 3.0;
 
 #[cfg(test)]
@@ -58,16 +58,16 @@ mod tests {
             let ratio = contrast_ratio(CONTROL_BORDER, bg);
             assert!(ratio >= UI_COMPONENT, "{bg:?}: {ratio:.2}");
         }
-        // Il bordo in hover è più chiaro e quindi ancora più contrastato.
+        // The border on hover is lighter and so even more contrasted.
         for bg in color::SURFACES {
             assert!(contrast_ratio(CONTROL_BORDER_HOVER, bg) >= contrast_ratio(CONTROL_BORDER, bg));
         }
     }
 
-    /// Ogni cifra della tabella 1.2 del documento, con due decimali di tolleranza di arrotondamento.
+    /// Every figure in table 1.2 of the document, with two decimals of rounding tolerance.
     #[test]
     fn contrast_table_of_the_tokens_doc_is_exact() {
-        // (primo piano, [su DEEP_BLACK, NEAR_BLACK, GRAPHITE, CHARCOAL]); None = «—».
+        // (foreground, [on DEEP_BLACK, NEAR_BLACK, GRAPHITE, CHARCOAL]); None = «—».
         let table: [(&str, Rgba, [Option<f64>; 4]); 9] = [
             ("WARM_WHITE", WARM_WHITE, [Some(17.19), Some(15.89), Some(14.38), Some(12.02)]),
             ("PURE_WHITE", PURE_WHITE, [Some(21.00), Some(19.42), Some(17.57), Some(14.69)]),
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn decorative_greys_stay_decorative() {
-        // IRON non è mai l'unico segnale: sotto 3:1 su ogni superficie, come dichiarato.
+        // IRON is never the only signal: below 3:1 on every surface, as declared.
         for bg in color::SURFACES {
             assert!(contrast_ratio(IRON, bg) < UI_COMPONENT);
         }

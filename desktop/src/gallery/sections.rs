@@ -1,4 +1,4 @@
-//! Sezioni della galleria: una funzione per famiglia di componenti.
+//! Gallery sections: one function per family of components.
 
 use gpui::{
     AnyElement, App, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString,
@@ -35,15 +35,15 @@ use crate::components::{Button, IconButton, Preview};
 use crate::pixel::{PixelSprite, SpriteStore};
 use crate::theme::{Ap, TypeStyle, cased, col, dp};
 
-/// Adatta una callback «con valore» dei componenti (`Fn(T, &mut Window, &mut App)`) a un metodo
-/// della galleria, tenendo solo un riferimento debole alla vista.
+/// Adapts a "with value" callback of the components (`Fn(T, &mut Window, &mut App)`) to a method
+/// of the gallery, keeping only a weak reference to the view.
 fn value_cb<T: 'static>(
     cx: &Context<Gallery>,
     f: impl Fn(&mut Gallery, T, &mut Context<Gallery>) + 'static,
 ) -> impl Fn(T, &mut Window, &mut App) + 'static {
     let this = cx.weak_entity();
     move |value, _window, app| {
-        // Se la vista è già chiusa non c'è nulla da aggiornare.
+        // If the view is already closed there is nothing to update.
         let _ = this.update(app, |gallery, cx| f(gallery, value, cx));
     }
 }
@@ -123,10 +123,12 @@ pub fn body(g: &mut Gallery, window: &mut Window, cx: &mut Context<Gallery>) -> 
         section("TrackRow", track_rows()),
         section("Titolo di pagina, intestazione di sezione, riga di lista e nota", page_parts()),
         section("AlbumTile e ArtistTile", tiles()),
+        section("Sidebar v2 · library rows, rail covers and the Jam card", sidebar_parts(window, cx)),
         section("Shelf (frecce, rotella in orizzontale, «Mostra tutto») e Shortcut", shelves(g, cx)),
         section("Equalizer, LoadingIndicator, DownloadIndicator", indicators()),
         section("Toast e Dialog", overlays(cx)),
         section("EmptyState e Nastro", empty_states()),
+        section("Now playing v2 · side panel, stage, dissolve and like", super::now_playing::now_playing()),
     ];
     div().flex().flex_col().children(sections).into_any_element()
 }
@@ -759,7 +761,7 @@ fn page_parts() -> AnyElement {
                     .meta("300 brani · 17 h 2 min")
                     .into_any_element(),
                 ))
-                .child(framed(PageHeader::loading(false).into_any_element()))
+                .child(framed(PageHeader::loading(false, 24.0).into_any_element()))
                 .into_any_element(),
         ))
         .child(cell(
@@ -838,6 +840,56 @@ fn page_parts() -> AnyElement {
         .into_any_element()
 }
 
+/// The v2 sidebar parts in their states: library rows (rest, hover, selected), the rail, the Jam card.
+fn sidebar_parts(window: &mut Window, cx: &mut Context<Gallery>) -> AnyElement {
+    use crate::app::sidebar::{JamCard, LibraryItem, jam_card_element};
+    use psytify_design::tokens::color::SURFACE_CHROME;
+    use psytify_design::tokens::size::{SIDEBAR_DEFAULT_W, SIDEBAR_RAIL_W};
+    let item = |id: &'static str, art: RowArt, title: &'static str, meta: &'static str| {
+        LibraryItem::new(id, art, title.into(), meta.into())
+    };
+    let expanded = div()
+        .w(dp(SIDEBAR_DEFAULT_W))
+        .flex()
+        .flex_col()
+        .bg(col(SURFACE_CHROME))
+        .child(item(
+            "sb-liked",
+            RowArt::Sprite(sprite::ICON_HEART_FILL),
+            "Brani che ti piacciono",
+            "Playlist · 24 brani",
+        ))
+        .child(item("sb-hover", RowArt::Cover(None), "Notte", "Playlist · 12 brani").preview(Preview::Hover))
+        .child(item("sb-sel", RowArt::Cover(None), "Discovery", "Album · Daft Punk").selected(true))
+        .child(item("sb-artist", RowArt::Round(None), "Orbit Choir", "Artista"));
+    let rail = div()
+        .w(dp(SIDEBAR_RAIL_W))
+        .flex()
+        .flex_col()
+        .bg(col(SURFACE_CHROME))
+        .child(
+            item("sb-r0", RowArt::Sprite(sprite::ICON_HEART_FILL), "Brani che ti piacciono", "Playlist")
+                .rail(true),
+        )
+        .child(item("sb-r1", RowArt::Cover(None), "Notte", "Playlist").rail(true).selected(true))
+        .child(item("sb-r2", RowArt::Round(None), "Orbit Choir", "Artista").rail(true));
+    let card = JamCard {
+        members: vec!["ada".into(), "bruno".into(), "cleo".into(), "dario".into(), "eva".into()],
+        meta: "5 persone".into(),
+    };
+    let jam = div().w(dp(SIDEBAR_DEFAULT_W)).p(dp(SPACE_3)).bg(col(SURFACE_CHROME)).child(jam_card_element(
+        &card,
+        std::rc::Rc::new(|_, _, _| {}),
+        window,
+        cx,
+    ));
+    row(vec![
+        cell("expanded: rest, hover, selected, artist", expanded),
+        cell("rail (72 dp)", rail),
+        cell("Jam card (56 dp, LIVE)", jam),
+    ])
+}
+
 fn tiles() -> AnyElement {
     row(vec![
         cell("rest", AlbumTile::new("at-rest", "Neon Harbour", "2024 · Album").side(160.0)),
@@ -893,7 +945,7 @@ fn tiles() -> AnyElement {
     ])
 }
 
-/// Copertine di prova dello scaffale (12: tre pagine da quattro nella cornice).
+/// Test covers of the shelf (12: three pages of four in the frame).
 const SHELF_DEMO: [&str; 12] = [
     "Neon Harbour",
     "Paper Lanterns",
@@ -913,7 +965,7 @@ fn shelves(g: &Gallery, cx: &mut Context<Gallery>) -> AnyElement {
     use crate::components::shelf::{Shelf, ShelfPage};
     use crate::components::shortcut::Shortcut;
     use psytify_design::tokens::size::GRID_GAP;
-    // La cornice tiene quattro copertine da 160: le frecce spostano di una pagina, la rotella di una.
+    // The frame holds four covers of 160: the arrows move by a page, the wheel by one.
     let page = ShelfPage::new(g.shelf_start, 4, SHELF_DEMO.len());
     let tiles = page.range().map(|ix| {
         let mut tile = AlbumTile::new(("shelf-demo", ix), SHELF_DEMO[ix], "Album · Ada Vale").side(160.0);

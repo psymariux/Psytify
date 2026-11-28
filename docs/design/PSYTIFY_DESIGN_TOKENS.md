@@ -1,7 +1,7 @@
 # Psytify design tokens
 
 Status: v1, 2026-11-22. Owner: art direction. Replaces the tokens in `docs/STYLE.md` and
-`client/src/ui/theme.rs` once `psytify-design` lands (migration step 3b).
+the Iced theme once `psytify-design` landed (migration step 3b; the Iced app is gone).
 
 These are framework-neutral data. `psytify-design` stores them as plain constants (colors as `[u8; 4]`
 RGBA, lengths as `f32` dp, durations as `u32` ms). GPUI and Iced each convert them to their own types.
@@ -55,6 +55,7 @@ Frontends use the aliases, never the raw greys, so a re-tune touches one table.
 | `FOCUS_RING` | `PURE_WHITE` | `STATE_ON` | `LIME` |
 | `LEDGE_PRIMARY` | `STONE` | `LEDGE_SECONDARY` | `CHARCOAL` |
 | `SHADOW_FLOAT` | `DEEP_BLACK` | `CARET` | `PURE_WHITE` |
+| `SHADOW_HARD` | `IRON` | | |
 
 ### 1.2 Contrast (WCAG 2.x, computed with the relative-luminance formula)
 
@@ -149,6 +150,7 @@ No border radius anywhere (`RADIUS_NONE = 0`). Roundness is a stepped notch draw
 | `MARKER_W` | 2 AP | selected-nav marker bar, error marker on toasts |
 | `LEDGE_OFFSET` | (1 AP, 1 AP) | hard ledge under primary and secondary buttons (blur 0) |
 | `SHADOW_FLOAT_OFFSET` | (2 AP, 2 AP) | menus, dialogs, toasts, drag ghost (blur 0, `SHADOW_FLOAT`) |
+| hard ledge | (2 AP, 2 AP) | a hovered tile, the sidebar laid over the canvas (blur 0, `SHADOW_HARD`; desktop v2 §3) |
 
 Blur is 0 everywhere. A ledge reads as the side of a key: the button sits 1 AP up-left of a darker/lighter slab;
 pressed, it translates by `LEDGE_OFFSET` and the slab disappears (section 8).
@@ -161,34 +163,31 @@ strings can be any script and any length.
 
 | Token | Family | File | Licence (verified 2026-11-22) |
 |---|---|---|---|
-| `FAMILY_UI` | Inter 4.1 (400, 500, 600) | `client/assets/fonts/Inter-*.ttf` (bundled) | SIL OFL 1.1, `OFL.txt` bundled |
+| `FAMILY_UI` | Inter 4.1 (400, 500, 600) | `design/assets/fonts/Inter-*.ttf` (bundled) | SIL OFL 1.1, `OFL.txt` bundled |
 | `FAMILY_PIXEL` | Departure Mono 1.500 (Regular) | to bundle: `DepartureMono-Regular.otf` from `github.com/rektdeckard/departure-mono` `public/assets/` | SIL OFL 1.1: `public/assets/LICENSE` in that repo ("Copyright 2022–2024 Helena Zhang"); the repo-root `LICENSE` is MIT and covers only the website. Name table ID 13 also states OFL 1.1. Bundle the OFL text as `DepartureMono-OFL.txt` and add a CREDITS line. sha256 of the checked file: `4d53f663155cf8bf7ffc8e688776e719625f7bbb80a8d90073438b249261a2e0` |
 
 Departure Mono metrics: 550 units/em, one font pixel = 50 units, so at 11 px it is one device px per font pixel;
 cap height 8 font px, x-height 6, advance 7. Covers Italian (à è é ì ò ù, « », –, …). Features: `tnum`, `zero`,
 `case`, `ss01`, `ss02`.
 
-**Pixel type size rule:** font pixel = 1 AP. Device size = `11 * ap_device` px (22 dp nominal), line height
-`14 * ap_device` px (28 dp), text origin snapped to whole device px, tracking 0. No other pixel size exists:
-no 11 dp micro labels (half an AP), no 44 dp display (two APs). Verify in step 3b that cosmic-text (GPUI, Iced)
-renders an exact multiple without hinting blur; if it blurs, rasterise the needed strings once into sprites.
+**Ramp (desktop v2, `type_::RAMP`).** Five sizes and a lyric pair; every role maps onto one of them. Sizes are
+dp and follow the UI zoom (section 6.3).
 
-| Token | Family / weight | Size / line (dp) | Tracking | Features | Case | Use |
-|---|---|---|---|---|---|---|
-| `TYPE_DISPLAY` | Inter 600 | 32 / 40 | −0.32 px (−1 %) | — | as written | album, artist, playlist, profile name in a page header |
-| `TYPE_PAGE_TITLE` | Departure Mono 400 | 22 / 28 (= 11 / 14 AP-px) | 0 | `tnum` | sentence | app screen titles: Home, Cerca, Libreria, Coda, Testo, Impostazioni |
-| `TYPE_WORDMARK` | Departure Mono 400 | 22 / 28 | 0 | — | `Psytify` | title bar, splash, sign-in, about |
-| `TYPE_HEADING` | Inter 600 | 16 / 24 | −0.08 px | — | sentence | section headings, dialog titles |
-| `TYPE_TRACK_TITLE` | Inter 500 | 14 / 20 | 0 | — | as written | track and tile titles |
-| `TYPE_ARTIST` | Inter 400 | 13 / 18 | 0 | — | as written | artist lines, tile subtitles (`TEXT_SECONDARY`) |
-| `TYPE_BODY` | Inter 400 | 14 / 20 | 0 | — | sentence | paragraphs, settings descriptions, toasts |
-| `TYPE_META` | Inter 400 | 12 / 16 | 0 | `tnum` | sentence | metadata, dates, counts (`TEXT_TERTIARY`) |
-| `TYPE_NAV` | Inter 500 | 13 / 20 | 0 | — | sentence | sidebar items, in-page tabs, menu items |
-| `TYPE_BUTTON` | Inter 600 | 13 / 16 | +0.13 px | — | sentence | button labels |
-| `TYPE_LABEL` | Inter 600 | 11 / 16 | +0.66 px (+6 %) | `tnum` | UPPERCASE | kickers, column headers, badges (`FLAC 24/96`, `LOSSLESS`, `LIVE`) |
-| `TYPE_NUMERIC` | Inter 400 | 12 / 16 | 0 | `tnum` | — | durations, track numbers, elapsed/remaining in the player bar, sizes |
-| `TYPE_NUMERIC_PIXEL` | Departure Mono 400 | 22 / 28 | 0 | `tnum`, `zero` | — | elapsed/remaining in the focus view, sleep-timer countdown, jam code, listening stats |
-| `TYPE_LYRIC` | Inter 600 | 24 / 32 (focus), 18 / 26 (panel) | −0.24 / −0.18 px | — | as written | synced lyrics |
+| Step | Family / weight | Size / line (dp) | Case | Roles |
+|---|---|---|---|---|
+| `DISPLAY` | Departure Mono 400 | 40 / 44 | as written | `TYPE_DISPLAY` (page header names), `TYPE_PAGE_TITLE` (screen titles, `tnum`, sentence) |
+| `TITLE` | Inter 600 | 22 / 28 | sentence | `TYPE_HEADING` (section headings, dialog titles); in the pixel face: `TYPE_WORDMARK`, `TYPE_NUMERIC_PIXEL` (`tnum`, `zero`) |
+| `BODY` | Inter 500 | 15 / 20 | as written | `TYPE_TRACK_TITLE`, `TYPE_NAV` (sentence); `TYPE_BODY` at 400 |
+| `META` | Inter 400 | 13 / 18 | sentence | `TYPE_ARTIST`, `TYPE_META` and `TYPE_NUMERIC` (`tnum`); `TYPE_BUTTON` at 600 |
+| `CAPTION` | Departure Mono 400 | 11 / 14 | UPPERCASE | `TYPE_LABEL` (kickers, column headers, badges: `LOSSLESS`, `LIVE`), `tnum` |
+| `LYRIC_PANEL` / `LYRIC_STAGE` | Inter 600 | 20 / 28, 32 / 40 | as written | `TYPE_LYRIC_PANEL`, `TYPE_LYRIC_FOCUS` |
+
+**Pixel type size rule:** one font pixel is a whole number of device px. A pixel-face role is drawn at
+`11 * k` device px, `k = max(1, round(target / 11))` with ties rounding up (the caption at zoom 1.5 is 22, not 11), where `target` is the role size in
+device px (dp x scale x zoom); the line height scales with it (`type_::pixel_face_device`). Text origins snap to
+whole device px, tracking 0. So `CAPTION` is 11 device px at 1x, `TITLE` in the pixel face 22, `DISPLAY` 44.
+
+The Iced (Android) app keeps the v1 sizes through `type_::v1` (display 32, heading 16, body 14, meta 12).
 
 Phone overrides (`type_::phone`): `TYPE_DISPLAY` 26 / 32; `TYPE_TRACK_TITLE` 16 / 22; `TYPE_ARTIST` 14 / 20;
 `TYPE_BODY` 15 / 22; `TYPE_NAV` (tab labels) Inter 500 11 / 16; `TYPE_LYRIC` 22 / 30. Pixel type is unchanged
@@ -204,12 +203,18 @@ Truncation: one line with "…" for titles and artists in rows and tiles; `TYPE_
 |---|---|---|
 | `WINDOW_MIN_W` x `WINDOW_MIN_H` | 960 x 600 | |
 | `TITLE_BAR_H` | 40 | client-side decorations; mark, wordmark, history, search, account, window controls |
-| `SIDEBAR_W` | 240 | 120 AP; flush, `SURFACE_CHROME`, 1 AP `LINE_SUBTLE` on its right edge |
-| `SIDEBAR_RAIL_W` | 56 | collapsed: icons only |
+| `SIDEBAR_W` | 240 | the Iced sidebar |
+| `SIDEBAR_DEFAULT_W` | 264 | expanded sidebar (desktop v2 §4); flush, `SURFACE_CHROME`, 1 AP `LINE_SUBTLE` on its right edge |
+| `SIDEBAR_MIN_W` / `SIDEBAR_MAX_W` | 220 / 360 | drag range of the right edge (`SIDEBAR_GRIP_W` 8 hit strip) |
+| `SIDEBAR_RAIL_W` | 72 | rail: nav icons and 40 dp library covers |
+| `JAM_CARD_H` | 56 | the sidebar Jam card while a jam is live |
 | `SIDE_PANEL_W` | 320 | now playing / queue / lyrics |
 | `PLAYER_BAR_H` | 72 | bottom strip, 1 AP `LINE_SUBTLE` on its top edge |
-| `PAGE_GUTTER` | 24 | content padding left/right/top |
-| `CONTENT_MAX_W` | 1440 | content column cap on very wide windows |
+| `PAGE_GUTTER` | 24 | content padding left/right/top (pages not yet on the frame) |
+| `FRAME_MARGIN` / `FRAME_MARGIN_NARROW` | 32 / 24 | canvas margin each side; narrow under `BP_FRAME_NARROW` (1200) of window. No content cap |
+| `TILE_MIN` / `TILE_GAP` | 168 / 24 | fluid tile grid: as many columns as fit, tiles stretch to fill the row (`size::tile_grid`) |
+| `FLOW_COL_MIN` / `FLOW_GAP` | 420 / 24 | flowing columns for row lists: 1 under `BP_FLOW_2` (900), 2 up to `BP_FLOW_3` (1500), 3 above (`size::flow_columns`) |
+| `MEASURE_CH` | 72 | longest line of running text, in characters |
 | `CONTROL_H` | 32 | buttons, fields, icon buttons |
 | `CONTROL_H_LARGE` | 40 | page Play button, transport play/pause |
 | `ICON` | 24 | a 12 AP sprite |
@@ -226,12 +231,12 @@ Truncation: one line with "…" for titles and artists in rows and tiles; `TYPE_
 | `DIALOG_W` | 400 | |
 | `SEARCH_FIELD_MAX_W` | 480 | |
 | `SIGN_IN_W` | 360 | the sign-in column (art direction, "Sign-in / social") |
-| `SEEK_TRACK_H` | 4 | 2 AP; hit area 24 |
+| `SEEK_TRACK_H` | 4 | 2 AP on hover (1 AP at rest, with a 2 x 4 AP thumb on hover; desktop v2 §3); hit area 24 |
 | `VOLUME_W` | 96 | |
 
-Breakpoints (window width): `BP_RAIL = 1100` (below: sidebar becomes the rail), `BP_PANEL_DOCK = 1360`
-(below: the side panel overlays the content instead of docking), `BP_WIDE = 1600` (above: tiles grow, content
-caps at `CONTENT_MAX_W`).
+Breakpoints (window width in dp, after zoom): `BP_RAIL = 1000` (below: the sidebar is a rail whatever the setting,
+the toggle lays the expanded sidebar over the canvas), `BP_PANEL_DOCK = 1360` (below: the side panel overlays the
+content instead of docking), `BP_FRAME_NARROW = 1200` (below: 24 dp margins).
 
 ### 6.2 Artwork (`size::cover`)
 
@@ -247,10 +252,22 @@ Multiples of 16 dp so the 24 AP placeholder centres on whole APs.
 | `COVER_FOCUS_MAX` | 640 | focus view |
 | `AVATAR_S` / `AVATAR_M` / `AVATAR_L` | 32 / 96 / 160 | rows / profile / artist header (pixel-circle mask) |
 
+Desktop v2 art ramp (`cover::ART_RAMP`): `ART_ROW` 40 (rows, sidebar library), `ART_SHORTCUT` 56 (Home
+shortcuts), tiles from the fluid grid (at least `TILE_MIN` 168), `ART_HEADER` 232 (page headers), `ART_PANEL` 280
+(side panel), `ART_STAGE_MAX` 720 (the stage).
+
 Covers are photos: linear filtering, square, no radius, no tint extraction. Missing cover: `GRAPHITE` field with
 `album_placeholder` (24 AP) centred at 1 AP if the cover is ≥ 64 dp, else `icon_library` tinted `STONE`.
 
-### 6.3 Phone (Iced)
+### 6.3 Zoom (`zoom`, desktop v2 §1)
+
+Every dp length, type size included, is multiplied by one global zoom `z`. `Auto`: `z = clamp(width / 1600, 1, 1.5)`
+snapped to steps of `STEP` 0.125, kept until the window is 48 dp (`HYSTERESIS`) narrower than the step needs.
+Pinned values (`PRESETS`): 90, 100, 112, 125, 150 %; Ctrl+= / Ctrl+- step through them, Ctrl+0 goes back to `Auto`.
+The art pixel follows the zoom: `ap_device(scale * z)`, so sprites, lines and pixel type stay whole and the covers
+and the sprite cache rebuild when it changes.
+
+### 6.4 Phone (Iced)
 
 | Token | dp | Note |
 |---|---|---|
@@ -277,13 +294,18 @@ Two clocks. The **sprite clock** steps frames at the durations in `design/assets
 | `MOTION_HOVER` | 70 | `EASE_OUT` | hover fill/border/icon tint |
 | `MOTION_FAST` | 100 | `EASE_OUT` | tooltip and menu appear (opacity only), toggle knob (2 steps of 50) |
 | `MOTION_BASE` | 160 | `EASE_OUT` | page content fade-in, toast in/out, dialog in (opacity + scrim) |
-| `MOTION_PANEL` | 200 | `EASE_OUT` | side panel / rail open, sheet slide; offsets quantised to `ap_device` |
+| `MOTION_PANEL` | 200 | `EASE_OUT` | side panel / rail open, sidebar width, sheet slide; offsets quantised to `ap_device` |
+| `MOTION_ENTER` | 220 | `EASE_OUT` | page enter: each section rises `ENTER_RISE_AP` (4 AP) with opacity, staggered by `STAGGER_MS` (40) for at most `STAGGER_MAX_STEPS` (6); no rise on Back and Forward |
 | `MOTION_LYRICS` | 280 | `EASE_OUT` | lyric line scroll, quantised to whole device px |
 | `TOOLTIP_DELAY` | 500 | — | |
 | `TOAST_HOLD` | 4000 | — | |
 | `CARET_BLINK` | 530 on / 530 off | step | text caret |
 | `PROGRESS_TICK` | 250 | — | seek bar and time refresh (no per-frame updates) |
 | `SPRITE_FRAME_MIN` | 80 | step | no sprite frame shorter than this |
+
+Stepped moves (`STEP_FRAMES` = 3): the tile play button, the shortcut play button and the selection marker step
+in over three frames instead of easing. Every eased translation lands on whole APs on every frame, and a view asks
+for frames only while something runs (desktop v2 §3).
 
 `EASE_OUT` = cubic-bezier(0.2, 0.0, 0.0, 1.0). No springs, no overshoot, no bounce, no parallax, no blur
 transitions. Sprite and idle loops run only while visible and the window is focused; they pause on frame 0.
@@ -312,7 +334,7 @@ transitions. Sprite and idle loops run only while visible and the window is focu
 ## 10. Sprites (`sprite`)
 
 Native sizes and frame data live in `design/assets/pixel/export/sprites.json` (generated). `psytify-design`
-embeds the 1x PNGs, decodes them once (`sprite::sheet()`, 159,744 bytes of RGBA for the 72 sprites) and exposes
+embeds the 1x PNGs, decodes them once (`sprite::sheet()`, 160,896 bytes of RGBA for the 74 sprites) and exposes
 `sprite::upscale_nearest(&Frame, factor)` and `sprite::upscale_tinted(&Frame, factor, tint)` (tint applies to
 mask sprites: the 56 icons plus `eq`, `eq_rest`, `mark`, `mark_play`, `liked_cover`). `factor` is
 `scale::art_px(scale_factor)` (this document's `ap_device`; the doc name `space::ap_device` is `scale::art_px`

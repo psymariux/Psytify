@@ -1,6 +1,6 @@
-//! Gli effetti che il riduttore chiede all'host. Sono dati, non chiusure: i test controllano che
-//! cosa è stato chiesto senza eseguirlo. L'host arma e annulla i timer, esegue sul runtime i lavori
-//! asincroni dei domini ([`Job`]) e ne riporta l'esito al riduttore ([`Done`]).
+//! What the reducer asks of the host. These are data, not closures: the tests check
+//! what was asked without running it. The host arms and cancels the timers, runs the domains'
+//! async jobs ([`Job`]) on the runtime and reports their outcome to the reducer ([`Done`]).
 
 use std::time::Duration;
 
@@ -12,44 +12,44 @@ use crate::state::system::{DiscordOp, MediaOp};
 use crate::state::video;
 use crate::state::{catalog, downloads, external, jam, library, playback, settings, social};
 
-/// Un effetto da eseguire.
+/// An effect to run.
 #[derive(Debug)]
 pub(crate) enum Effect {
-    /// Arma un timer che scade fra `after`. Riarmare la stessa chiave annulla il timer precedente:
-    /// un debounce è un riarmo.
+    /// Arms a timer that fires after `after`. Re-arming the same key cancels the previous timer:
+    /// a debounce is a re-arm.
     Timer { key: TimerKey, after: Duration },
-    /// Annulla un timer armato; se non c'è, niente.
+    /// Cancels an armed timer; if there is none, nothing.
     CancelTimer(TimerKey),
-    /// Un'operazione sull'uscita audio. L'host la esegue subito, sul thread del core, e ciò che
-    /// l'audio risponde torna nello stesso giro come `Input::Audio`.
+    /// An operation on the audio output. The host runs it at once, on the core's thread, and what
+    /// the audio answers comes back in the same round as `Input::Audio`.
     Audio(AudioOp),
-    /// Il brano o il volume da mostrare al sistema: l'host lo manda al collegamento multimediale che
-    /// tiene, se è pronto.
+    /// The track or volume to show to the system: the host sends it to the media link it holds,
+    /// if it is ready.
     Media(MediaOp),
-    /// Accende, spegne o aggiorna Discord Rich Presence.
+    /// Turns Discord Rich Presence on, off or updates it.
     Discord(DiscordOp),
-    /// Un'operazione sul collegamento alla stanza della jam, che l'host tiene sul proprio thread: lo
-    /// avvia, gli manda lo stato locale, lo chiude. Gli eventi della stanza tornano come `Input::Jam`.
+    /// An operation on the jam room link, which the host holds on its own thread: it starts it,
+    /// sends it the local state, closes it. The room's events come back as `Input::Jam`.
     Jam(JamOp),
-    /// Apre un indirizzo nel browser del sistema (l'accesso con GitHub, Google o Discord): l'host
-    /// lo esegue subito con `platform::open_url`, e se non si apre risponde con
-    /// `Done::Social(BrowserFailed)`. L'indirizzo è un `Secret`: nei log non compare.
+    /// Opens an address in the system browser (sign-in with GitHub, Google or Discord): the host
+    /// runs it at once with `platform::open_url`, and if it does not open it answers with
+    /// `Done::Social(BrowserFailed)`. The address is a `Secret`: it does not appear in logs.
     OpenUrl(crate::auth::Secret),
-    /// Apre (`true`) o chiude il collegamento che ascolta il movimento chiesto dal sistema
-    /// (`system_motion::events`), che l'host tiene sul thread del core: le letture tornano come
+    /// Opens (`true`) or closes the link that listens to the motion requested by the system
+    /// (`system_motion::events`), which the host holds on the core's thread: the readings come back as
     /// `Input::SystemMotion`.
     WatchMotion(bool),
-    /// Esegue un lavoro sul runtime; il suo esito torna al dominio come `Input::Done`.
+    /// Runs a job on the runtime; its outcome returns to the domain as `Input::Done`.
     Run(Job),
-    /// La chiusura chiesta con `Input::Shutdown` è pronta: `config.json` ha l'ultimo stato, o
-    /// l'ultima scrittura è fallita per questo motivo. Dopo, il core si ferma.
+    /// The shutdown requested with `Input::Shutdown` is ready: `config.json` has the last state, or
+    /// the last write failed for this reason. After this, the core stops.
     Flushed(Result<(), AppError>),
 }
 
-/// La chiave di un timer: il dominio e il timer, dichiarato nel modulo del dominio. Un dominio
-/// toglie il suo `expect` quando arma il primo timer. La jam non ne ha: gira sugli eventi del suo
-/// collegamento. Il videoclip ne ha uno solo, armato mentre un videoclip mostrato aspetta la
-/// versione completa.
+/// The key of a timer: the domain and the timer, declared in the domain's module. A domain
+/// removes its `expect` when it arms the first timer. The jam has none: it runs on the events of its
+/// link. The music video has only one, armed while a shown video waits for the
+/// full version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimerKey {
     Settings(settings::Timer),
@@ -64,8 +64,8 @@ pub(crate) enum TimerKey {
     Video(video::Timer),
 }
 
-/// Un lavoro asincrono (rete, file): il dominio e il lavoro, dichiarato nel modulo del dominio.
-/// Un dominio toglie il suo `expect` quando chiede il primo lavoro.
+/// An async job (network, files): the domain and the job, declared in the domain's module.
+/// A domain removes its `expect` when it asks for the first job.
 #[derive(Debug)]
 pub(crate) enum Job {
     Settings(settings::Job),
@@ -81,7 +81,7 @@ pub(crate) enum Job {
     Video(video::Job),
 }
 
-/// L'esito di un [`Job`], per il dominio che l'ha chiesto.
+/// The outcome of a [`Job`], for the domain that asked for it.
 #[derive(Debug)]
 pub(crate) enum Done {
     Settings(settings::Done),
@@ -97,8 +97,8 @@ pub(crate) enum Done {
 }
 
 impl Job {
-    /// Esegue il lavoro. Gira sul runtime, fuori dal riduttore: è l'unico posto dove un dominio
-    /// tocca la rete o i file.
+    /// Runs the job. It runs on the runtime, outside the reducer: it is the only place where a domain
+    /// touches the network or files.
     pub(crate) async fn run(self) -> Done {
         match self {
             Self::Settings(job) => Done::Settings(job.run().await),
@@ -114,8 +114,8 @@ impl Job {
         }
     }
 
-    /// L'esito da consegnare se il lavoro finisce in un panic: il dominio riceve comunque una
-    /// risposta e non resta ad aspettare (alla chiusura, il core non si fermerebbe più).
+    /// The outcome to deliver if the job ends in a panic: the domain still gets a
+    /// reply and does not keep waiting (at shutdown, the core would never stop).
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::Settings(job) => Done::Settings(job.lost()),

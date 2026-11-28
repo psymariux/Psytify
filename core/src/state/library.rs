@@ -1,16 +1,16 @@
-//! Libreria e gusti (passo 4.2): playlist locali, brani piaciuti, album salvati, artisti seguiti,
-//! ascolti e tempo ascoltato, «Novità» già viste, cronologia delle ricerche e feed della Home.
+//! Library and tastes (step 4.2): local playlists, liked tracks, saved albums, followed artists,
+//! plays and listening time, "Novità" already seen, search history and the Home feed.
 //!
-//! Il dominio possiede questi campi di `config.json` e li consegna alle impostazioni
-//! ([`Settings::store_library`](super::settings::Settings::store_library)), che scrivono il file:
-//! un comando che non cambia niente non pubblica e non fa scrivere. Le liste sono [`Shared`]: la
-//! vista, la configurazione e le copie dei frontend sono gli stessi `Arc`, e una lista si copia
-//! solo quando cambia mentre un frontend tiene ancora la precedente.
+//! The domain owns these `config.json` fields and hands them to the settings
+//! ([`Settings::store_library`](super::settings::Settings::store_library)), which write the file:
+//! a command that changes nothing does not publish and does not cause a write. The lists are [`Shared`]: the
+//! view, the configuration and the frontends' copies are the same `Arc`s, and a list is copied
+//! only when it changes while a frontend still holds the previous one.
 //!
-//! Il feed della Home si calcola qui, una volta per cambiamento (arrivo dei brani recenti, un
-//! artista seguito, e a ogni rientro sulla Home se gli ascolti sono cambiati), mai nella `view`. Il
-//! conteggio degli ascolti resta un comando: chi sente il brano (il dominio della riproduzione, dal
-//! passo 4.3) decide quando mandarlo.
+//! The Home feed is computed here, once per change (arrival of recent tracks, a followed
+//! artist, and at each return to the Home if the plays have changed), never in the `view`. The
+//! count of plays stays a command: whoever hears the track (the playback domain, from
+//! step 4.3) decides when to send it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,14 +25,14 @@ use crate::effect::Effect;
 use crate::feed::Feed;
 use crate::shared::Shared;
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone)]
 pub enum LibraryCmd {
-    /// Mette o toglie «mi piace»: il brano appena piaciuto va in testa.
+    /// Adds or removes "mi piace": the track just liked goes to the top.
     ToggleLike(Track),
-    /// Una playlist nuova, con l'identificatore scelto da chi la chiede (il frontend la apre appena
-    /// compare nella vista). `pending` sono i brani di una playlist esterna ancora da importare.
-    /// Oltre [`MAX_PLAYLISTS`] non si crea.
+    /// A new playlist, with the identifier chosen by whoever asks (the frontend opens it as soon as it
+    /// appears in the view). `pending` are the tracks of an external playlist still to be imported.
+    /// Beyond [`MAX_PLAYLISTS`] none is created.
     CreatePlaylist {
         id: Uuid,
         name: String,
@@ -44,7 +44,7 @@ pub enum LibraryCmd {
         name: String,
     },
     DeletePlaylist(Uuid),
-    /// In fondo alla playlist; se c'è già, non cambia niente.
+    /// At the end of the playlist; if it is already there, nothing changes.
     AddToPlaylist {
         id: Uuid,
         track: Track,
@@ -53,24 +53,24 @@ pub enum LibraryCmd {
         id: Uuid,
         index: usize,
     },
-    /// Visibile sul profilo, o di nuovo privata.
+    /// Visible on the profile, or private again.
     SetPlaylistPublic {
         id: Uuid,
         public: bool,
     },
-    /// Un brano della playlist esterna è stato importato (`track`) o non è disponibile (`None`):
-    /// esce dai brani ancora da importare.
+    /// A track of the external playlist has been imported (`track`) or is not available (`None`):
+    /// leaves the tracks still to import.
     ImportedToPlaylist {
         id: Uuid,
         source: SourceKind,
         item: String,
         track: Option<Track>,
     },
-    /// Segue o smette di seguire. La prima volta che si segue qualcuno, le uscite già in catalogo
-    /// non sono «novità».
+    /// Follows or stops following. The first time one follows someone, the releases already in the catalog
+    /// are not "novità".
     ToggleFollow(FollowedArtist),
     ToggleSaveAlbum(SavedAlbum),
-    /// L'immagine di un artista seguito. Con `only_if_missing` solo se non ne ha una.
+    /// The image of a followed artist. With `only_if_missing` only if it has none.
     SetFollowedCover {
         id: Uuid,
         cover_url: Option<String>,
@@ -80,89 +80,89 @@ pub enum LibraryCmd {
         id: Uuid,
         cover_url: Option<String>,
     },
-    /// Un brano contato come ascoltato, a `at` secondi dal 1970.
+    /// A track counted as listened to, at `at` seconds from 1970.
     CountPlay {
         track: Track,
         at: u64,
     },
-    /// Il brano è partito: va in testa agli ascoltati di recente.
+    /// The track has started: it goes to the top of the recently listened.
     RememberListen(Track),
-    /// Altri millisecondi ascoltati: si sommano al totale. Li manda il dominio della riproduzione, che
-    /// li conta con la posizione vera dell'audio e li consegna a gruppi (mai a ogni battito).
+    /// Other milliseconds listened to: they are added to the total. They are sent by the playback domain, which
+    /// counts them with the audio's real position and hands them over in groups (never at each tick).
     Listen(u64),
     RememberSearch(String),
-    /// Toglie una ricerca dalla cronologia, o tutte con `None`.
+    /// Removes a search from the history, or all of them with `None`.
     ForgetSearch(Option<String>),
-    /// Ciò che c'è in «Novità» si considera visto.
+    /// What is in "Novità" is considered seen.
     MarkNewsSeen,
-    /// `new` al posto di ogni copia salvata del brano `old` (mi piace, recenti, playlist, ascolti).
+    /// `new` in place of each saved copy of the track `old` (liked, recent, playlists, plays).
     ReplaceTrack {
         old: Uuid,
         new: Track,
     },
-    /// Le copertine che il catalogo ha appena rimandato, per brano.
+    /// The covers the catalog has just sent back, per track.
     PatchCovers(Arc<HashMap<Uuid, Option<String>>>),
-    /// I brani recenti del catalogo, da cui nasce il feed della Home; `None` quando il catalogo
-    /// cambia e la Home si ricarica.
+    /// The catalog's recent tracks, from which the Home feed comes; `None` when the catalog
+    /// changes and the Home reloads.
     HomeTracks(Option<Arc<[Track]>>),
-    /// Rientrando sulla Home: se gli ascolti o gli artisti sono cambiati dall'ultima volta, il feed
-    /// si rifà (i mix restano gli stessi: li tiene fermi il seme della sessione).
+    /// Returning to the Home: if the plays or the artists have changed since last time, the feed
+    /// is rebuilt (the mixes stay the same: the session's seed keeps them fixed).
     RefreshFeed,
 }
 
-/// Ciò che i frontend vedono del dominio.
+/// What the frontends see of the domain.
 #[derive(Debug, Clone, Default)]
 pub struct LibraryView {
     pub playlists: Shared<Playlist>,
-    /// Il più recente in testa.
+    /// The most recent at the top.
     pub liked: Shared<Track>,
-    /// Ultimi brani ascoltati, il più recente in testa.
+    /// Last tracks listened to, the most recent at the top.
     pub recent: Shared<Track>,
     pub followed: Shared<FollowedArtist>,
     pub saved_albums: Shared<SavedAlbum>,
-    /// Ascolti per brano, i più ascoltati prima.
+    /// Plays per track, the most played first.
     pub stats: Shared<PlayStat>,
-    /// Tempo ascoltato in tutto, in millisecondi, all'ultima consegna di [`LibraryCmd::Listen`].
+    /// Listening time in total, in milliseconds, at the last delivery of [`LibraryCmd::Listen`].
     pub listened_ms: u64,
-    /// L'uscita più recente vista in «Novità» (`created_at` del brano).
+    /// The most recent release seen in "Novità" (the track's `created_at`).
     pub news_seen: String,
-    /// Uscite degli artisti seguiti arrivate dopo `news_seen`.
+    /// Releases of the followed artists that arrived after `news_seen`.
     pub unread_news: usize,
     pub search_history: Shared<String>,
-    /// Il feed della Home, già calcolato: la vista non fa conti.
+    /// The Home feed, already computed: the view does no sums.
     pub feed: Arc<Feed>,
-    /// I brani recenti da cui nasce `feed`: un frontend che li ha mandati sa così che il feed è
-    /// il loro (`Arc::ptr_eq`).
+    /// The recent tracks `feed` comes from: a frontend that sent them knows the feed is
+    /// theirs (`Arc::ptr_eq`).
     pub feed_source: Option<Arc<[Track]>>,
 }
 
-/// I timer del dominio.
+/// The domain's timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Timer {}
 
-/// I lavori asincroni del dominio (rete, file), che l'host esegue sul runtime.
+/// The domain's async jobs (network, files), which the host runs on the runtime.
 #[derive(Debug)]
 pub(crate) enum Job {}
 
-/// L'esito di un [`Job`], che torna al dominio.
+/// The outcome of a [`Job`], which goes back to the domain.
 #[derive(Debug)]
 pub(crate) enum Done {}
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug, Default)]
 pub(crate) struct Library {
     pub(crate) view: Arc<LibraryView>,
-    /// Il seme dei mix: lo stesso per tutta la sessione.
+    /// The seed of the mixes: the same for the whole session.
     seed: u64,
-    /// Un campo di `config.json` è cambiato e le impostazioni non l'hanno ancora (`take_persist`).
+    /// A `config.json` field has changed and the settings have not taken it yet (`take_persist`).
     persist: bool,
-    /// Gli ascolti o gli artisti sono cambiati dopo l'ultima costruzione del feed.
+    /// The plays or the artists have changed since the last build of the feed.
     feed_stale: bool,
 }
 
 impl Library {
-    /// Il dominio con i campi letti all'avvio. Una ricerca senza lettere né cifre (un «,» scappato
-    /// con Ctrl+,) non torna, e il file si corregge alla prossima scrittura.
+    /// The domain with the fields read at startup. A search with no letters or digits (a stray ","
+    /// typed with Ctrl+,) does not come back, and the file is corrected at the next write.
     pub(crate) fn new(fields: LibraryFields, seed: u64) -> Self {
         let mut search_history = fields.search_history;
         let worth = |query: &String| config::worth_remembering(query);
@@ -185,7 +185,7 @@ impl Library {
         Self { view: Arc::new(view), seed, persist, feed_stale: false }
     }
 
-    /// I campi di `config.json` di questo dominio come stanno adesso.
+    /// This domain's `config.json` fields as they are now.
     pub(crate) fn fields(&self) -> LibraryFields {
         LibraryFields {
             playlists: self.view.playlists.clone(),
@@ -200,7 +200,7 @@ impl Library {
         }
     }
 
-    /// Dice se c'è qualcosa da consegnare alle impostazioni, e lo azzera.
+    /// Says whether there is something to hand to the settings, and resets it.
     pub(crate) fn take_persist(&mut self) -> bool {
         std::mem::take(&mut self.persist)
     }
@@ -293,7 +293,7 @@ impl Library {
                 self.feed_stale = true;
             }
             LibraryCmd::RememberListen(track) => {
-                // Lo stesso brano già in testa: la lista resterebbe uguale.
+                // The same track already at the top: the list would stay the same.
                 if self.view.recent.first() != Some(&track) {
                     config::remember_listen(self.edit().recent.make_mut(), &track);
                 }
@@ -360,20 +360,20 @@ impl Library {
         match done {}
     }
 
-    /// La vista da cambiare: copiata se un frontend tiene ancora la precedente. Si chiama solo
-    /// quando qualcosa cambia davvero, e segna che le impostazioni devono scrivere il file.
+    /// The view to change: copied if a frontend still holds the previous one. It is called only
+    /// when something really changes, and marks that the settings must write the file.
     fn edit(&mut self) -> &mut LibraryView {
         self.persist = true;
         Arc::make_mut(&mut self.view)
     }
 
-    /// La playlist da cambiare, dopo che chi chiama ha controllato che cambia.
+    /// The playlist to change, after whoever calls has checked that it changes.
     fn playlist_mut(&mut self, id: Uuid) -> Option<&mut Playlist> {
         self.edit().playlists.make_mut().iter_mut().find(|p| p.id == id)
     }
 
     fn toggle_follow(&mut self, artist: FollowedArtist) {
-        // La prima volta che si segue qualcuno, le uscite già in catalogo non sono «novità».
+        // The first time one follows someone, the releases already in the catalog are not "novità".
         let first_seen = match self.view.feed.releases.first() {
             Some(newest) if self.view.news_seen.is_empty() => Some(newest.created_at.clone()),
             _ => None,
@@ -387,8 +387,8 @@ impl Library {
         self.rebuild_feed(None);
     }
 
-    /// Rifà il feed dai brani recenti (`tracks`, o quelli del feed attuale se `None`). Senza brani
-    /// recenti non c'è feed. Se il risultato è quello che c'è già, non pubblica.
+    /// Rebuilds the feed from the recent tracks (`tracks`, or those of the current feed if `None`). Without
+    /// recent tracks there is no feed. If the result is the one already there, it does not publish.
     fn rebuild_feed(&mut self, tracks: Option<Arc<[Track]>>) {
         self.feed_stale = false;
         let Some(source) = tracks.or_else(|| self.view.feed_source.clone()) else { return };
@@ -397,7 +397,7 @@ impl Library {
         if same_source && *self.view.feed == feed {
             return;
         }
-        // Il feed non si scrive su disco: niente `edit`, quindi niente `persist`.
+        // The feed is not written to disk: no `edit`, so no `persist`.
         let view = Arc::make_mut(&mut self.view);
         view.feed = Arc::new(feed);
         view.feed_source = Some(source);
@@ -468,7 +468,7 @@ impl Library {
     }
 }
 
-/// Aggiorna il conteggio delle uscite non viste, se è cambiato.
+/// Updates the count of unseen releases, if it has changed.
 fn refresh_unread(view: &mut LibraryView) {
     let seen = view.news_seen.as_str();
     let unread = view.feed.news.iter().filter(|release| release.created_at.as_str() > seen).count();
@@ -487,9 +487,9 @@ impl Job {
     }
 }
 
-/// I passi 0 di questo dominio (`mixes_stay_fixed_for_the_session`, gli ascolti e i brani di
-/// recente di `playback.rs`, la cronologia delle ricerche), portati sul riduttore: i comandi si
-/// danno a mano e si guarda la vista.
+/// This domain's step 0 (`mixes_stay_fixed_for_the_session`, the plays and the recent tracks of
+/// `playback.rs`, the search history), brought to the reducer: the commands
+/// are handed over by hand and the view is checked.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,7 +504,7 @@ mod tests {
         library.apply(command, Instant::now(), &mut Vec::new());
     }
 
-    /// Una vista che non ha cambiato puntatore non viene pubblicata.
+    /// A view that has not changed its pointer is not published.
     fn changes(library: &mut Library, command: LibraryCmd) -> bool {
         let before = Arc::clone(&library.view);
         send(library, command);
@@ -585,8 +585,8 @@ mod tests {
         assert_eq!(library.view.playlists.len(), MAX_PLAYLISTS);
     }
 
-    /// Una playlist salvata da una fonte esterna: i brani escono da `pending` uno alla volta, anche
-    /// quando non sono disponibili.
+    /// A playlist saved from an external source: the tracks come out of `pending` one at a time, even
+    /// when they are not available.
     #[test]
     fn imports_leave_the_pending_list_one_at_a_time() {
         let item = |id: &str| SourceItem {
@@ -752,7 +752,7 @@ mod tests {
         assert!(!changes(&mut library, LibraryCmd::ReplaceTrack { old: old.id, new: healed }));
     }
 
-    // ---------- Feed della Home ----------
+    // ---------- Home feed ----------
 
     fn played(library: &mut Library, plays: &[(u128, u32)]) {
         for &(n, times) in plays {
@@ -762,8 +762,8 @@ mod tests {
         }
     }
 
-    /// `mixes_stay_fixed_for_the_session`: i mix nascono dal seme della sessione e il feed si rifà
-    /// solo quando serve, senza cambiarli.
+    /// `mixes_stay_fixed_for_the_session`: the mixes are born from the session's seed and the feed is rebuilt
+    /// only when needed, without changing them.
     #[test]
     fn mixes_stay_fixed_for_the_session() {
         let mut library = library();
@@ -774,13 +774,13 @@ mod tests {
         assert_eq!(mixes.len(), 3, "un mix per ciascuno dei tre artisti ascoltati");
         assert_eq!(mixes, Feed::build(&recent, &[], &library.view.stats, 7).mixes, "from the session seed");
 
-        // Un artista seguito dopo: il feed si rifà (l'artista compare), e rientrando sulla Home
-        // ancora, ma i mix restano gli stessi, brano per brano.
+        // A followed artist afterwards: the feed is rebuilt (the artist appears), and returning to the Home
+        // again, but the mixes stay the same, track by track.
         send(&mut library, LibraryCmd::ToggleFollow(artist(5000)));
         send(&mut library, LibraryCmd::RefreshFeed);
         assert_eq!(library.view.feed.artists.first().map(|card| card.artist.id), Some(artist(5000).id));
         assert_eq!(library.view.feed.mixes, mixes);
-        // È il seme a tenerli fermi: con un altro, gli stessi ascolti danno un altro ordine.
+        // It is the seed that keeps them fixed: with another, the same plays give another order.
         let stats = &library.view.stats;
         assert_ne!(Feed::build(&recent, &[], stats, 1).mixes, Feed::build(&recent, &[], stats, 2).mixes);
     }
@@ -815,8 +815,8 @@ mod tests {
         assert!(!changes(&mut library, LibraryCmd::RefreshFeed), "no tracks, no feed");
     }
 
-    /// La prima volta che si segue qualcuno le uscite già in catalogo non sono «novità»; da lì in
-    /// poi contano quelle più recenti, finché non si guarda «Novità».
+    /// The first time one follows someone, the releases already in the catalog are not "novità"; from there on
+    /// the most recent ones count, until "Novità" is looked at.
     #[test]
     fn news_count_only_what_comes_after_the_first_follow_and_after_the_last_visit() {
         let dated = |n: u128, created: &str, by: u128| {
@@ -840,7 +840,7 @@ mod tests {
         assert_eq!((library.view.news_seen.as_str(), library.view.unread_news), ("2026-02-01", 0));
         assert!(!changes(&mut library, LibraryCmd::MarkNewsSeen));
 
-        // Smettere di seguire non cancella ciò che si è visto.
+        // Stopping to follow does not delete what has been seen.
         send(&mut library, LibraryCmd::ToggleFollow(artist(10)));
         assert!(library.view.feed.news.is_empty() && library.view.followed.is_empty());
         assert_eq!(library.view.news_seen, "2026-02-01");

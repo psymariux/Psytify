@@ -1,8 +1,8 @@
-//! Barra del titolo lato client (decorazioni CSD, Wayland e X11): marchio, wordmark pixel,
-//! cronologia (Indietro e Avanti, accesi solo se c'è un passo), ricerca, l'account (l'avatar nel cerchio
-//! pixel, «Accedi» o «Accesso in corso…»; niente se il login non è configurato), comandi finestra, più i
-//! bordi di ridimensionamento della finestra.
-//! `mark` a riposo e `mark_play` (lime) mentre suona: il marchio è la luce di riproduzione.
+//! Client-side title bar (CSD decorations, Wayland and X11): mark, pixel wordmark,
+//! history (Indietro and Avanti, lit only if there is a step), search, the account (the avatar in the circle
+//! pixel, «Accedi» or «Accesso in corso…»; nothing if the sign-in is not configured), window controls, plus the
+//! window's resize edges.
+//! `mark` at rest and `mark_play` (lime) while it plays: the mark is the playback light.
 
 use gpui::{
     AnyElement, App, Bounds, CursorStyle, Div, Entity, HitboxBehavior, InteractiveElement, IntoElement,
@@ -22,9 +22,9 @@ use crate::components::separator::Separator;
 use crate::components::tile::Cover;
 use crate::components::tooltip::with_tooltip;
 use crate::pixel::PixelSprite;
-use crate::theme::{Ap, TypeStyle, col, dp};
+use crate::theme::{TypeStyle, col, dp};
 
-/// Spessore in dp della fascia sensibile al ridimensionamento lungo i bordi.
+/// Thickness in dp of the resize band along the edges.
 const RESIZE_BAND: f32 = 5.0;
 
 fn edge_at(pos: Point<Pixels>, size: Size<Pixels>) -> Option<ResizeEdge> {
@@ -53,7 +53,7 @@ fn resize_cursor(edge: ResizeEdge) -> CursorStyle {
     }
 }
 
-/// Avvolge il contenuto della finestra con i bordi che ridimensionano (solo con decorazioni client).
+/// Wraps the window's content with the edges that resize (only with client decorations).
 pub fn window_frame(content: impl IntoElement) -> AnyElement {
     let edges = canvas(
         |_, window, _| {
@@ -81,7 +81,7 @@ pub fn window_frame(content: impl IntoElement) -> AnyElement {
             }
         })
         .on_mouse_move(|event, window, _| {
-            // Il cursore di ridimensionamento si aggiorna al paint: ridisegna solo vicino ai bordi.
+            // The resize cursor updates at paint: it redraws only near the edges.
             if edge_at(event.position, window.viewport_size()).is_some() {
                 window.refresh();
             }
@@ -91,10 +91,10 @@ pub fn window_frame(content: impl IntoElement) -> AnyElement {
         .into_any_element()
 }
 
-/// Chi chiude la finestra: la galleria esce subito, l'app aspetta che il core abbia salvato.
+/// Who closes the window: the gallery quits at once, the app waits for the core to save.
 pub type OnClose = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
 
-/// I tasti della cronologia: accesi solo se c'è un passo da fare, con chi lo fa.
+/// The history keys: lit only if there is a step to take, with whoever takes it.
 #[derive(Clone)]
 pub struct HistoryButtons {
     pub on_back: Option<OnClose>,
@@ -102,38 +102,40 @@ pub struct HistoryButtons {
 }
 
 impl HistoryButtons {
-    /// Tutti e due spenti (la galleria, o una cronologia vuota).
+    /// Both off (the gallery, or an empty history).
     pub fn none() -> Self {
         Self { on_back: None, on_forward: None }
     }
 }
 
-/// L'account nella barra, come lo dice il core (`SocialView::account`).
+/// The account in the bar, as the core tells it (`SocialView::account`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum AccountChip {
-    /// Il login non è configurato: niente pulsante.
+    /// Sign-in is not configured: no button.
     #[default]
     Hidden,
-    /// Un accesso (o il ripristino della sessione) è in corso.
+    /// A sign-in (or the restoring of the session) is in progress.
     Working,
-    /// Si può accedere: l'icona della persona apre «Accedi a Psytify».
+    /// Sign-in is possible: the person icon opens «Accedi a Psytify».
     SignedOut,
-    /// L'avatar nel cerchio pixel apre il proprio profilo; il nome va nel suggerimento.
+    /// The avatar in the pixel circle opens one's own profile; the name goes in the hint.
     SignedIn { avatar: Option<SharedString>, name: SharedString },
 }
 
-/// Stato che la barra mostra.
+/// State that the bar shows.
 pub struct TitleBarState {
     pub search: Entity<SearchField>,
     pub playing: bool,
     pub history: HistoryButtons,
     pub account: AccountChip,
-    /// Chi apre l'accesso o il profilo (un clic sull'account).
+    /// Whoever opens the sign-in or the profile (a click on the account).
     pub on_account: Option<OnClose>,
     pub on_close: OnClose,
+    /// Ctrl+B: the sidebar between expanded and rail.
+    pub on_sidebar: Option<OnClose>,
 }
 
-/// L'account a destra della ricerca (anche nella galleria).
+/// The account to the right of the search (also in the gallery).
 pub fn account(chip: AccountChip, on_account: Option<OnClose>) -> Option<AnyElement> {
     match chip {
         AccountChip::Hidden => None,
@@ -174,7 +176,7 @@ pub fn account(chip: AccountChip, on_account: Option<OnClose>) -> Option<AnyElem
     }
 }
 
-/// Un tasto della cronologia: spento senza un passo da fare.
+/// A history key: off without a step to take.
 fn history_button(
     id: &'static str,
     icon: &'static str,
@@ -189,7 +191,7 @@ fn history_button(
     }
 }
 
-/// La barra del titolo con il filetto sotto (la galleria).
+/// The title bar with the hairline under it (the gallery).
 pub fn title_bar(state: TitleBarState, window: &mut Window, cx: &mut App) -> AnyElement {
     div()
         .flex()
@@ -201,12 +203,17 @@ pub fn title_bar(state: TitleBarState, window: &mut Window, cx: &mut App) -> Any
         .into_any_element()
 }
 
-/// La riga della barra del titolo, alta `TITLE_BAR_H`, senza il filetto: `Shell` la tiene in una vista in
-/// cache e mette il filetto fuori (BACKLOG 23).
-pub fn title_row(state: TitleBarState, window: &mut Window, _cx: &mut App) -> Div {
+/// The title bar's row, `TITLE_BAR_H` high, without the hairline: `Shell` keeps it in a view in
+/// cache and puts the hairline outside (BACKLOG 23).
+pub fn title_row(state: TitleBarState, _window: &mut Window, _cx: &mut App) -> Div {
     let on_close = state.on_close;
+    let sidebar =
+        IconButton::new("sidebar-toggle", sprite::ICON_LIST).tooltip("Barra laterale", Some("Ctrl B"));
+    let sidebar = match state.on_sidebar {
+        Some(toggle) => sidebar.on_click(move |_, window, cx| toggle(window, cx)),
+        None => sidebar,
+    };
     let account = account(state.account, state.on_account);
-    let ap = Ap::of(window);
     let mark = if state.playing {
         PixelSprite::new(sprite::MARK_PLAY)
     } else {
@@ -220,7 +227,7 @@ pub fn title_row(state: TitleBarState, window: &mut Window, _cx: &mut App) -> Di
                 window.start_window_move();
             }
         });
-    // Larga quanto chi la contiene anche da sola, come radice di una vista in cache.
+    // As wide as whoever contains it, even alone, as the root of a cached view.
     div()
         .w_full()
         .h(dp(TITLE_BAR_H))
@@ -236,8 +243,9 @@ pub fn title_row(state: TitleBarState, window: &mut Window, _cx: &mut App) -> Di
                 .items_center()
                 .gap(dp(SPACE_3))
                 .child(mark)
-                .child(div().pixel_type(ap, false).text_color(col(TEXT_PRIMARY)).child("Psytify")),
+                .child(div().pixel_type(false).text_color(col(TEXT_PRIMARY)).child("Psytify")),
         )
+        .child(sidebar)
         .child(
             div()
                 .flex()

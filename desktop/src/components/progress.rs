@@ -1,11 +1,11 @@
-//! ProgressBar (seek) e Slider (volume): stessa anatomia, area sensibile di 24 dp attorno a un
-//! binario di 2 AP. Segmenti da sinistra: trascorso `WARM_WHITE`, bufferizzato `IRON`, resto a
-//! dither 50 % `CHARCOAL`/`GRAPHITE`. Trascinabile con il mouse (anche fuori dal binario), ←/→ e
-//! rotella per i passi.
+//! ProgressBar (seek) and Slider (volume): the same anatomy, a 24 dp hit area around a track that grows
+//! from 1 to 2 AP on hover and shows a 2 x 4 AP thumb. Segmenti da sinistra: trascorso `WARM_WHITE`, bufferizzato `IRON`, resto a
+//! dither 50 % `CHARCOAL`/`GRAPHITE`. Draggable with the mouse (also outside the track), ←/→ and
+//! the wheel for the steps.
 //!
-//! Il valore è sempre 0..=1 e arriva dal chiamante; durante il trascinamento si mostra il valore
-//! locale. `on_change` scatta a ogni movimento (slider) o solo al rilascio (seek, che non deve
-//! chiedere un seek al player a ogni pixel).
+//! The value is always 0..=1 and comes from the caller; while dragging, the local value is shown.
+//! `on_change` fires at every movement (slider) or only on release (seek, which must not ask the
+//! player for a seek at every pixel).
 
 use std::rc::Rc;
 
@@ -17,16 +17,18 @@ use gpui::{
 use psytify_design::tokens::color::{
     CHARCOAL, GRAPHITE, IRON, PURE_WHITE, STONE, SURFACE_RAISED, WARM_WHITE,
 };
+use psytify_design::tokens::motion::MOTION_HOVER;
 use psytify_design::tokens::size::{SEEK_HIT_H, VOLUME_W};
 
 use super::control::Preview;
 use super::tooltip::TooltipBox;
+use crate::motion::{ap_round, follow};
 use crate::pixel::shape::{focus_ring, static_ring};
-use crate::theme::{Ap, col, dp};
+use crate::theme::{Ap, col, dp, to_dp};
 
-/// Callback con il nuovo valore (0..=1).
+/// Callback with the new value (0..=1).
 pub type OnValue = Rc<dyn Fn(f32, &mut Window, &mut App)>;
-/// Testo dell'anteprima (tempo di destinazione, percentuale) per un valore 0..=1.
+/// Preview text (target time, percentage) for a value 0..=1.
 pub type Label = Rc<dyn Fn(f32) -> String>;
 
 struct TrackState {
@@ -57,7 +59,7 @@ pub struct ProgressBar {
 }
 
 impl ProgressBar {
-    /// Barra di avanzamento: larga quanto il contenitore, commit al rilascio, passo 2 %.
+    /// Progress bar: as wide as its container, commits on release, step 2 %.
     pub fn new(id: impl Into<ElementId>, value: f32) -> Self {
         Self {
             id: id.into(),
@@ -74,7 +76,7 @@ impl ProgressBar {
         }
     }
 
-    /// Slider (volume): `VOLUME_W` di larghezza, commit a ogni movimento, passo 5 %.
+    /// Slider (volume): `VOLUME_W` wide, commits at every movement, step 5 %.
     pub fn slider(id: impl Into<ElementId>, value: f32) -> Self {
         let mut s = Self::new(id, value);
         s.width = Some(VOLUME_W);
@@ -113,15 +115,15 @@ impl ProgressBar {
         self
     }
 
-    /// Scatta al rilascio del mouse, dopo l'ultimo `on_change`: lo slider del volume manda il volume a
-    /// ogni movimento e lo salva solo qui.
+    /// Fires on mouse release, after the last `on_change`: the volume slider sends the volume at
+    /// every movement and saves it only here.
     pub fn on_commit(mut self, handler: impl Fn(f32, &mut Window, &mut App) + 'static) -> Self {
         self.on_commit = Some(Rc::new(handler));
         self
     }
 }
 
-/// Dipinge i segmenti del binario sulla griglia dei pixel fisici.
+/// Paints the track's segments on the grid of physical pixels.
 #[allow(clippy::too_many_arguments)]
 fn paint_track(
     window: &mut Window,
@@ -130,12 +132,13 @@ fn paint_track(
     value: f32,
     buffered: Option<f32>,
     head: psytify_design::tokens::color::Rgba,
+    track_ap: u32,
     show_thumb: bool,
     disabled: bool,
 ) {
     let scale = ap.scale;
     let d = ap.device as f32;
-    let track_h = 2.0 * d;
+    let track_h = track_ap as f32 * d;
     let x0 = (f32::from(bounds.origin.x) * scale).round();
     let w = (f32::from(bounds.size.width) * scale).round();
     let y0 =
@@ -152,10 +155,10 @@ fn paint_track(
     let elapsed_color = if disabled { STONE } else { head };
     rect(window, x0, y0, elapsed, track_h, elapsed_color);
     rect(window, x0 + elapsed, y0, buffer - elapsed, track_h, IRON);
-    // Il resto è un dither a scacchiera di quadrati di 1 AP: CHARCOAL e GRAPHITE.
+    // The rest is a checkerboard dither of 1 AP squares: CHARCOAL and GRAPHITE.
     let cols = ((w - buffer) / d).ceil() as u32;
     for c in 0..cols {
-        for r in 0..2u32 {
+        for r in 0..track_ap {
             let color = if (c + r) % 2 == 0 { CHARCOAL } else { GRAPHITE };
             let cx = x0 + buffer + c as f32 * d;
             let cw = d.min(x0 + w - cx);
@@ -163,9 +166,9 @@ fn paint_track(
         }
     }
     if show_thumb && !disabled {
-        // Pomello 2 x 6 AP sulla testa.
+        // A 2 x 4 AP thumb on the head, centred on the track.
         let tx = (x0 + elapsed - d).clamp(x0, (x0 + w - 2.0 * d).max(x0));
-        rect(window, tx, y0 - 2.0 * d, 2.0 * d, 6.0 * d, PURE_WHITE);
+        rect(window, tx, y0 + track_h / 2.0 - 2.0 * d, 2.0 * d, 4.0 * d, PURE_WHITE);
     }
 }
 
@@ -190,6 +193,10 @@ impl RenderOnce for ProgressBar {
             Preview::Pressed => (true, true),
         };
         let shown = drag.unwrap_or(self.value);
+        // The track grows from 1 to 2 AP on hover (and while dragging), with the thumb once it is 2 AP.
+        let grow_id = ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "grow".into());
+        let grow = follow(grow_id, if hovered || dragging { 1.0 } else { 0.0 }, MOTION_HOVER, window, cx);
+        let track_ap = 1 + ap_round(grow);
         let head = if hovered || dragging { PURE_WHITE } else { WARM_WHITE };
         let disabled = self.disabled;
         let buffered = self.buffered;
@@ -199,7 +206,7 @@ impl RenderOnce for ProgressBar {
             move |bounds, (), window, cx| {
                 paint_state.update(cx, |s, _| s.bounds = bounds);
                 let ap = Ap::of(window);
-                paint_track(window, bounds, ap, shown, buffered, head, hovered || dragging, disabled);
+                paint_track(window, bounds, ap, shown, buffered, head, track_ap, track_ap > 1, disabled);
             },
         )
         .absolute()
@@ -220,7 +227,7 @@ impl RenderOnce for ProgressBar {
         let commit_on_release = self.commit_on_release;
         let step = self.step;
         let (down, wheel, key, mv) = (state.clone(), state.clone(), state.clone(), state.clone());
-        // Ascoltatori globali del trascinamento: esistono solo mentre si trascina.
+        // Global drag listeners: they exist only while dragging.
         let drag_listeners = {
             let state = state.clone();
             let on_change = on_change.clone();
@@ -264,7 +271,7 @@ impl RenderOnce for ProgressBar {
         let key_change = on_change.clone();
         let wheel_change = on_change.clone();
         let down_change = on_change.clone();
-        // Rotella e frecce non hanno un rilascio: ogni passo è già un valore definitivo.
+        // The wheel and the arrows have no release: each step is already a final value.
         let key_commit = on_commit.clone();
         let wheel_commit = on_commit.clone();
         let value = self.value;
@@ -331,19 +338,19 @@ impl RenderOnce for ProgressBar {
             })
             .child(track)
             .child(drag_listeners);
-        // Anteprima (tempo o percentuale) sopra il puntatore, mentre si sta sopra o si trascina.
+        // Preview (time or percentage) above the pointer, while hovering or dragging.
         if let (Some(label), true) = (&self.label, hovered || dragging) {
             let frac = drag.or(hover).unwrap_or(self.value);
-            let width = f32::from(state.read(cx).bounds.size.width);
+            let width = to_dp(state.read(cx).bounds.size.width);
             root = root.child(
                 div()
                     .absolute()
                     .bottom(dp(SEEK_HIT_H))
-                    .left(px((width * frac - 24.0).max(0.0)))
+                    .left(dp((width * frac - 24.0).max(0.0)))
                     .child(TooltipBox::new(label(frac))),
             );
         }
-        // Anello di focus sul binario (1 AP di margine), solo da tastiera.
+        // Focus ring on the track (1 AP margin), keyboard only.
         let ring_host = div().absolute().left(px(0.0)).right(px(0.0)).top(dp(10.0)).h(ap.n(2));
         let ring_host = if self.preview == Preview::Focused {
             ring_host.child(static_ring(1, col(PURE_WHITE), ap))

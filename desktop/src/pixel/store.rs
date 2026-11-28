@@ -1,13 +1,14 @@
-//! Deposito degli sprite del desktop: possiede la [`UpscaleCache`] di `psytify-design` (pixel
-//! ingranditi in RGBA, con limite di voci e di byte) e, per ogni voce, la `RenderImage` BGRA che GPUI
-//! carica nell'atlante. Lo possiede l'app (un `Global`), non i singoli sprite.
+//! The desktop's sprite store: it owns the [`UpscaleCache`] of `psytify-design` (pixels
+//! upscaled in RGBA, with a limit of entries and bytes) and, for each entry, the BGRA `RenderImage` that GPUI
+//! loads into the atlas. The app owns it (a `Global`), not the single sprites.
 //!
-//! Perché due livelli: GPUI vuole BGRA e un `Arc<RenderImage>` con identità stabile (ogni nuova
+//! Why two levels: GPUI wants BGRA and an `Arc<RenderImage>` with a stable identity (each new
 //! `RenderImage` ha un id nuovo e quindi un nuovo caricamento nell'atlante). L'immagine BGRA si crea
-//! una volta per voce di cache e si scarta insieme a lei; quando una voce esce dalla cache la sua
+//! once per cache entry and is dropped together with it; when an entry leaves the cache its
 //! immagine finisce in `retired` e `drain_retired` la toglie dall'atlante al prossimo disegno.
 //!
-//! Al cambio del fattore di scala si svuota tutto (gli sprite si rifanno alla nuova `art_px`).
+//! When the effective scale (window scale times UI zoom) changes everything is dropped: the sprites are
+//! rebuilt at the new `art_px`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -28,12 +29,12 @@ pub struct Texture {
 }
 
 struct ImageEntry {
-    /// Si riconosce una voce uscita dalla cache perché i suoi pixel non hanno più proprietari.
+    /// An entry that left the cache is recognised because its pixels no longer have owners.
     pixels: Weak<Pixels>,
     texture: Texture,
 }
 
-/// Cache globale degli sprite ingranditi e orologio delle animazioni.
+/// Global cache of the upscaled sprites and the animation clock.
 pub struct SpriteStore {
     sheet: Option<&'static SpriteSheet>,
     cache: UpscaleCache,
@@ -44,17 +45,17 @@ pub struct SpriteStore {
     /// Movimento ridotto chiesto dall'ambiente (`PSYTIFY_REDUCE_MOTION`): vale sempre.
     reduce_motion: bool,
     /// Movimento ridotto voluto dalle impostazioni (la preferenza `motion` di `config.json`) e, se la
-    /// preferenza segue il sistema, da ciò che il sistema chiede (`settings_page::follow_motion`).
+    /// preference follows the system, from what the system asks (`settings_page::follow_motion`).
     reduce_motion_pref: bool,
-    /// Il ridisegno programmato (uno solo efficace per volta, vedi `anim`).
+    /// The scheduled redraw (only one effective at a time, see `anim`).
     pub(super) refresh: super::anim::RefreshClock,
 }
 
 impl Global for SpriteStore {}
 
 impl SpriteStore {
-    /// Crea il deposito. Se il foglio incorporato non si decodifica (bug di build) lo segnala una volta
-    /// su stderr e gli sprite non si disegnano, ma l'app continua.
+    /// Creates the store. If the embedded sheet does not decode (build bug) it reports it once
+    /// on stderr and the sprites are not drawn, but the app goes on.
     pub fn new(reduce_motion: bool) -> Self {
         let sheet = match sprite::sheet() {
             Ok(sheet) => Some(sheet),
@@ -76,7 +77,7 @@ impl SpriteStore {
         }
     }
 
-    /// Installa il deposito come global dell'app.
+    /// Installs the store as the app's global.
     pub fn install(cx: &mut App, reduce_motion: bool) {
         cx.set_global(Self::new(reduce_motion));
     }
@@ -85,13 +86,13 @@ impl SpriteStore {
         self.sheet
     }
 
-    /// Con `reduce_motion` gli sprite restano sul frame 0 e non si programmano ridisegni; le altre
-    /// animazioni (lo scorrimento del testo, il lampeggio del cursore) diventano tagli.
+    /// With `reduce_motion` the sprites stay on frame 0 and no redraw is scheduled; the other
+    /// animations (text scrolling, the caret blink) become cuts.
     pub fn reduce_motion(&self) -> bool {
         self.reduce_motion || self.reduce_motion_pref
     }
 
-    /// La scelta delle impostazioni. Chi la cambia ridisegna le finestre (`App::refresh_windows`): gli
+    /// The settings' choice. Whoever changes it redraws the windows (`App::refresh_windows`): the
     /// sprite fermi ripartono, quelli in moto si fermano al frame 0.
     pub fn set_reduce_motion_pref(&mut self, on: bool) -> bool {
         let changed = self.reduce_motion_pref != on;
@@ -99,22 +100,22 @@ impl SpriteStore {
         changed
     }
 
-    /// Il movimento ridotto è imposto dall'ambiente: l'interruttore delle impostazioni non lo toglie.
+    /// Reduced motion is imposed by the environment: the settings switch does not remove it.
     pub fn reduce_motion_forced(&self) -> bool {
         self.reduce_motion
     }
 
-    /// Millisecondi dall'avvio: l'orologio comune a tutte le animazioni degli sprite.
+    /// Milliseconds since start-up: the clock common to all the sprite animations.
     pub fn elapsed_ms(&self) -> u64 {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 
-    /// Voci e byte della cache dei pixel (per la galleria).
+    /// Entries and bytes of the pixel cache (for the gallery).
     pub fn cache_stats(&self) -> (usize, usize) {
         (self.cache.len(), self.cache.bytes())
     }
 
-    /// Svuota tutto se il fattore di scala è cambiato dall'ultimo disegno.
+    /// Drops everything if the effective scale (window scale times zoom) changed since the last paint.
     pub fn ensure_scale(&mut self, scale: f32) {
         let bits = scale.to_bits();
         if bits != self.scale_bits {
@@ -124,15 +125,15 @@ impl SpriteStore {
         }
     }
 
-    /// Toglie dall'atlante le immagini scartate (da chiamare mentre si disegna).
+    /// Removes the discarded images from the atlas (to call while drawing).
     pub fn drain_retired(&mut self, window: &mut Window) {
         for image in self.retired.drain(..) {
-            // L'errore possibile è solo «immagine sconosciuta»: non c'è nulla da recuperare.
+            // The only possible error is "unknown image": there is nothing to recover.
             let _ = window.drop_image(image);
         }
     }
 
-    /// Frame `frame` dello sprite `name` ingrandito di `ap_device`, tinto se è una maschera.
+    /// Frame `frame` of the sprite `name` upscaled by `ap_device`, tinted if it is a mask.
     pub fn texture(
         &mut self,
         name: &str,
@@ -154,7 +155,7 @@ impl SpriteStore {
         Some(texture)
     }
 
-    /// Scarta le immagini le cui voci di cache sono state sfrattate.
+    /// Drops the images whose cache entries have been evicted.
     fn prune(&mut self) {
         let dead: Vec<usize> = self
             .images
@@ -170,7 +171,7 @@ impl SpriteStore {
     }
 }
 
-/// RGBA non premoltiplicato -> BGRA come lo vuole l'atlante di GPUI.
+/// Non-premultiplied RGBA -> BGRA as GPUI's atlas wants it.
 fn to_texture(pixels: &Pixels) -> Option<Texture> {
     let mut bgra = pixels.rgba.clone();
     for px in bgra.as_chunks_mut::<4>().0 {

@@ -1,38 +1,38 @@
-//! Angoli, bordi, ledge e ombre (sezione 4). Larghezze e offset in pixel d'arte (AP): si disegnano
-//! `ap_device` pixel fisici per AP (vedi `scale::art_px`). Niente raggio: l'arrotondamento è una tacca a gradini.
+//! Corners, borders, ledges and shadows (section 4). Widths and offsets in art pixels (AP): drawn as
+//! `ap_device` physical pixels per AP (see `scale::art_px`). No radius: rounding is a stepped notch.
 
-/// Nessun raggio di curvatura, mai (`RADIUS_NONE = 0`).
+/// No curvature radius, ever (`RADIUS_NONE = 0`).
 pub const RADIUS_NONE: f32 = 0.0;
 
-/// Forma di un angolo, tutta sulla griglia AP.
+/// Shape of a corner, all on the AP grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Corner {
-    /// Copertine, righe, tile, pannelli, separatori.
+    /// Covers, rows, tiles, panels, separators.
     Square,
-    /// Taglio di 1 AP per angolo: pulsanti, campi, badge, tooltip, toast, toggle.
+    /// Cut of 1 AP per corner: buttons, fields, badges, tooltips, toasts, toggles.
     Notch1,
-    /// Taglio a due gradini (1 AP + 1 AP, 45 gradi): menu, dialoghi, sheet, card.
+    /// Two-step cut (1 AP + 1 AP, 45 degrees): menus, dialogs, sheets, cards.
     Notch2,
-    /// Cerchio rasterizzato a risoluzione AP (diametro = lato / AP): foto artista, avatar.
+    /// Circle rasterised at AP resolution (diameter = side / AP): artist photos, avatars.
     PixelCircle,
 }
 
-/// Quanti AP si tagliano per angolo in ciascuna forma a tacca.
+/// How many AP are cut per corner in each notched shape.
 pub const NOTCH_0: u32 = 0;
 pub const NOTCH_1: u32 = 1;
 pub const NOTCH_2: u32 = 2;
 
-/// Unica larghezza di bordo e separatore.
+/// The only border and separator width.
 pub const BORDER_W: u32 = 1;
 pub const FOCUS_RING_W: u32 = 1;
-/// Spazio fra il bordo del controllo e l'anello (ci passa la superficie).
+/// Gap between the control border and the ring (room for the surface).
 pub const FOCUS_RING_GAP: u32 = 1;
-/// Barra di navigazione selezionata e marcatore d'errore dei toast.
+/// Selected navigation bar and the toast error marker.
 pub const MARKER_W: u32 = 2;
 
-/// Spessore della ledge dura sotto i pulsanti primario e secondario (sfocatura 0): (x, y) in AP.
+/// Thickness of the hard ledge under the primary and secondary buttons (blur 0): (x, y) in AP.
 pub const LEDGE_OFFSET: (u32, u32) = (1, 1);
-/// Ombra dura di menu, dialoghi, toast, ghost del drag (sfocatura 0, colore `SHADOW_FLOAT`): (x, y) in AP.
+/// Hard shadow of menus, dialogs, toasts, drag ghost (blur 0, colour `SHADOW_FLOAT`): (x, y) in AP.
 pub const SHADOW_FLOAT_OFFSET: (u32, u32) = (2, 2);
-/// La sfocatura è 0 ovunque.
+/// The blur is 0 everywhere.
 pub const BLUR: f32 = 0.0;

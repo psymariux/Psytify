@@ -1,5 +1,5 @@
-//! Menu e menu contestuale: pannello di `MENU_W` con voci di 32 dp. Il pannello (`MenuPanel`) è puro
-//! disegno; `popup` lo ancora al puntatore, sopra tutto, dentro la finestra.
+//! Menu and context menu: a panel `MENU_W` wide with 32 dp entries. The panel (`MenuPanel`) is pure
+//! drawing; `popup` anchors it to the pointer, above everything, inside the window.
 
 use gpui::{
     Anchor, AnyElement, App, ElementId, IntoElement, ParentElement, Point, RenderOnce, SharedString, Styled,
@@ -106,7 +106,7 @@ impl RenderOnce for MenuItem {
         } else {
             (ICON_IDLE, TEXT_PRIMARY)
         };
-        // Colonna delle icone sempre presente, così le etichette restano allineate.
+        // The icon column is always there, so the labels stay aligned.
         let icon_name = if self.checked { Some(sprite::ICON_CHECK) } else { self.icon };
         let icon_col =
             div().w(dp(24.0)).flex_none().children(icon_name.map(|n| PixelSprite::new(n).tint(icon_tint)));
@@ -154,7 +154,7 @@ impl MenuPanel {
         self
     }
 
-    /// Un elemento qualsiasi nel pannello (una lista che scorre di voci).
+    /// Any element in the panel (a list that scrolls its entries).
     pub fn child(mut self, child: impl IntoElement) -> Self {
         self.children.push(child.into_any_element());
         self
@@ -187,7 +187,7 @@ impl RenderOnce for MenuPanel {
     }
 }
 
-/// Ancora un elemento al punto `at` (angolo in alto a sinistra), sopra il resto e dentro la finestra.
+/// Anchors an element at the point `at` (top-left corner), above the rest and inside the window.
 pub fn popup(at: Point<gpui::Pixels>, content: impl IntoElement) -> impl IntoElement {
     deferred(
         anchored()

@@ -1,8 +1,8 @@
-//! Il pannello della coda (320 dp a destra): intestazione con conteggio e durata, poi le voci
-//! nell'ordine di ascolto. Il brano in corso ha l'equalizzatore al posto del numero (lime solo se
-//! suona, `STONE` in pausa, il loader mentre carica); un clic su una voce la fa partire, «Rimuovi» la
-//! toglie. La lista è una `uniform_list`: si costruiscono solo le righe visibili, e i testi di ogni voce
-//! si rifanno una volta quando la coda cambia, non a ogni disegno.
+//! The queue panel (320 dp on the right): header with count and duration, then the entries
+//! in listening order. The playing track has the equaliser in place of its number (lime only while it
+//! plays, `STONE` when paused, the loader while loading); a click on an entry plays it, «Rimuovi» removes
+//! it. The list is a `uniform_list`: only the visible rows are built, and the texts of each entry
+//! are rebuilt once when the queue changes, not at every draw.
 
 use std::sync::Arc;
 
@@ -29,21 +29,21 @@ use crate::theme::{TypeStyle, col, dp};
 pub struct QueuePanel {
     core: Entity<CoreModel>,
     queue: Arc<Queue>,
-    /// Posizione del brano in corso nell'ordine di ascolto, e come mostrarlo.
+    /// Position of the playing track in listening order, and how to show it.
     current: Option<(usize, PlayState)>,
-    /// Il testo «N brani · durata» e i testi di ogni voce, rifatti solo quando la coda cambia.
+    /// The text «N brani · duration» and the texts of each entry, rebuilt only when the queue changes.
     summary: SharedString,
     rows: Vec<QueueRowData>,
     scroll: UniformListScrollHandle,
-    /// L'ultimo brano a cui la lista è stata portata: si scorre solo quando il brano cambia.
+    /// The last track the list was brought to: it scrolls only when the track changes.
     scrolled_to: Option<usize>,
-    /// Il posto dell'equalizzatore del brano in corso: lo dipinge `Shell` (BACKLOG 23).
+    /// The equaliser spot of the playing track: `Shell` paints it (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
 
 impl QueuePanel {
-    /// Il posto dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// This view's equaliser spot, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -69,7 +69,7 @@ impl QueuePanel {
         panel
     }
 
-    /// Rilegge il dominio della riproduzione: nuova coda, nuovo brano in corso o nuovo stato.
+    /// Reads the playback domain again: new queue, new playing track or new state.
     fn refresh(&mut self, core: &Entity<CoreModel>, cx: &mut Context<Self>) {
         let snapshot = core.read(cx).snapshot();
         let view = &snapshot.playback;
@@ -130,7 +130,7 @@ impl QueuePanel {
 
 impl Render for QueuePanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Il posto si segna di nuovo nel paint di questo fotogramma, se la riga in corso è visibile.
+        // The spot is marked again in this frame's paint, if the playing row is visible.
         self.spot.clear();
         let len = self.queue.len();
         let clear = {

@@ -1,10 +1,10 @@
-//! Le decisioni del videoclip, pure: quando una pipeline deve esistere, che cosa fare quando il core
-//! pubblica un videoclip nuovo, come applicare al player ciò che le regole di sincronia del core decidono
-//! (`psytify_core::video::Alignment`) e quando controllare lo scarto. Le applica `stage.rs`.
+//! The video's decisions, pure: when a pipeline must exist, what to do when the core
+//! publishes a new video, how to apply to the player what the core's sync rules decide
+//! (`psytify_core::video::Alignment`) and when to check the drift. `stage.rs` applies them.
 //!
-//! **Quando esiste una pipeline.** Solo per il brano in corso, solo mentre un posto dell'interfaccia
-//! mostra il videoclip (il pannello sul videoclip o la vista immersiva sul videoclip), solo mentre il brano
-//! suona o si sta caricando, e solo per il videoclip che il core ha pronto per quel brano. Pausa, fermo,
+//! **When a pipeline exists.** Only for the track playing, only while an interface spot
+//! shows the video (the panel on the video or the immersive view on the video), only while the track
+//! plays or is loading, and only for the video that the core has ready for that track. Paused, stopped,
 //! errore, cambio di brano, videoclip nascosto: nessuna pipeline, nessun thread, nessun fotogramma
 //! (`05-video-spike.md` §5).
 
@@ -14,58 +14,58 @@ use psytify_core::video::Adjust;
 use psytify_design::tokens::motion::PROGRESS_TICK_MS;
 use uuid::Uuid;
 
-/// Il videoclip che deve essere aperto: il brano e il numero d'ordine dell'indirizzo del core.
+/// The video that must be open: the track and the sequence number of the core's address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Want {
     pub track: Uuid,
     pub seq: u64,
 }
 
-/// Che cosa si sa per decidere.
+/// What is known to decide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Inputs {
-    /// Un posto dell'interfaccia mostra il videoclip.
+    /// An interface spot shows the video.
     pub shown: bool,
     /// Il brano in corso, se suona o si sta caricando (in pausa, fermo o in errore: `None`).
     pub running: Option<Uuid>,
-    /// Il brano di cui parla la vista del video del core, e il `seq` del videoclip pronto (`None` se non
-    /// è pronto: fermo, in preparazione o non riuscito).
+    /// The track the core's video view talks about, and the `seq` of the ready video (`None` if it
+    /// is not ready: stopped, preparing or failed).
     pub ready: Option<Want>,
 }
 
-/// Il videoclip che deve essere aperto adesso, se ce n'è uno.
+/// The video that must be open now, if there is one.
 pub fn wanted(inputs: Inputs) -> Option<Want> {
     let ready = inputs.ready?;
     (inputs.shown && inputs.running == Some(ready.track)).then_some(ready)
 }
 
-/// La pipeline che c'è: per quale videoclip, se si è già aperta e quale versione migliore si sta aprendo
+/// The pipeline there is: for which video, if it has already opened and which better version is opening
 /// di fianco.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Current {
     pub track: Uuid,
     pub seq: u64,
-    /// La pipeline si è aperta (altrimenti si sta ancora aprendo su un altro thread).
+    /// The pipeline has opened (otherwise it is still opening on another thread).
     pub open: bool,
-    /// Il `seq` della versione migliore che si apre di fianco.
+    /// The `seq` of the better version that opens alongside.
     pub upgrading: Option<u64>,
 }
 
 /// Che cosa fare.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Niente: quello che c'è va bene (o non c'è niente e niente serve).
+    /// Nothing: what there is is fine (or there is nothing and nothing is needed).
     Keep,
-    /// Chiudere quello che c'è (se c'è) e aprire questo.
+    /// Close what there is (if any) and open this.
     Open(Want),
-    /// Aprire di fianco una versione migliore dello stesso brano e sostituirla quando è pronta, senza
+    /// Open a better version of the same track alongside and replace it when it is ready, without
     /// fermarsi.
     Upgrade(Want),
-    /// Chiudere: nessuno vuole più un videoclip.
+    /// Close: nobody wants a video any more.
     Close,
 }
 
-/// Dalla pipeline che c'è a quella che serve (le stesse regole del client Iced, `open_clip`).
+/// From the pipeline there is to the one needed (the same rules as `open_clip`).
 pub fn plan(current: Option<Current>, want: Option<Want>) -> Action {
     match (current, want) {
         (None, None) => Action::Keep,
@@ -80,13 +80,13 @@ pub fn plan(current: Option<Current>, want: Option<Want>) -> Action {
     }
 }
 
-/// Ciò che si può fare al player perché segua l'audio.
+/// What can be done to the player so that it follows the audio.
 pub trait Controls {
     fn set_paused(&mut self, paused: bool);
     fn seek(&mut self, position: Duration);
 }
 
-/// Fa al player ciò che le regole del core hanno deciso: prima la pausa o la ripresa, poi il salto.
+/// Does to the player what the core's rules have decided: first the pause or the resume, then the seek.
 pub fn apply(player: &mut impl Controls, adjust: Adjust) {
     if let Some(paused) = adjust.pause {
         player.set_paused(paused);
@@ -96,9 +96,9 @@ pub fn apply(player: &mut impl Controls, adjust: Adjust) {
     }
 }
 
-/// Ogni quanto si controlla lo scarto fra video e audio: il battito della barra di avanzamento. Il controllo
-/// viaggia sulla sveglia dei fotogrammi che c'è già (nessun timer in più): si fa solo se è passato almeno
-/// questo dall'ultimo.
+/// How often the drift between video and audio is checked: the beat of the progress bar. The check
+/// rides on the frame wake-up that already exists (no extra timer): it is done only if at least
+/// this has passed since the last one.
 pub const CHECK_EVERY: Duration = Duration::from_millis(PROGRESS_TICK_MS as u64);
 
 /// È ora di controllare lo scarto.
@@ -126,7 +126,7 @@ mod tests {
         assert_eq!(wanted(Inputs { running: None, ..on }), None);
         assert_eq!(wanted(Inputs { running: Some(B), ..on }), None);
         assert_eq!(wanted(Inputs { ready: None, ..on }), None);
-        // La vista del core parla ancora del brano di prima: si aspetta la sua prossima pubblicazione.
+        // The core's view still talks about the previous track: its next publication is awaited.
         assert_eq!(wanted(Inputs { ready: ready(B, 4), ..on }), None);
     }
 
@@ -138,16 +138,16 @@ mod tests {
         assert_eq!(plan(Some(open), None), Action::Close);
         // Il primo videoclip si apre.
         assert_eq!(plan(None, ready(A, 1)), Action::Open(Want { track: A, seq: 1 }));
-        // Lo stesso: resta. Un seq nuovo dello stesso brano già aperto: la versione migliore di fianco.
+        // The same: it stays. A new seq of the same track already open: the better version alongside.
         assert_eq!(plan(Some(open), ready(A, 1)), Action::Keep);
         assert_eq!(plan(Some(open), ready(A, 2)), Action::Upgrade(Want { track: A, seq: 2 }));
-        // Mentre la versione migliore si apre non se ne apre un'altra copia.
+        // While the better version is opening, no other copy is opened.
         let upgrading = Current { upgrading: Some(2), ..open };
         assert_eq!(plan(Some(upgrading), ready(A, 2)), Action::Keep);
-        // Un seq nuovo mentre la prima pipeline si sta ancora aprendo: si ricomincia con quello.
+        // A new seq while the first pipeline is still opening: it restarts with that one.
         let opening = Current { open: false, ..open };
         assert_eq!(plan(Some(opening), ready(A, 2)), Action::Open(Want { track: A, seq: 2 }));
-        // Un altro brano: si chiude il vecchio e si apre il nuovo.
+        // Another track: the old one is closed and the new one opened.
         assert_eq!(plan(Some(open), ready(B, 3)), Action::Open(Want { track: B, seq: 3 }));
     }
 
@@ -183,7 +183,7 @@ mod tests {
         assert!(!check_due(Some(start), start + Duration::from_millis(33)));
         assert!(!check_due(Some(start), start + CHECK_EVERY - Duration::from_millis(1)));
         assert!(check_due(Some(start), start + CHECK_EVERY));
-        // Un orologio che torna indietro non rompe niente.
+        // A clock that goes back breaks nothing.
         assert!(!check_due(Some(start + CHECK_EVERY), start));
     }
 }

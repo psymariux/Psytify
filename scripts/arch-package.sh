@@ -2,8 +2,8 @@
 # Builds the Arch package of the desktop (GPUI) and the database of a pacman repository.
 #
 # Usage: [CHECK=0] [SIGN=<GPG key>] scripts/arch-package.sh [--install]
-#   --install   installs the package on this machine (pacman -U, asks for sudo)
-#   CHECK=0     skips `cargo test` (`makepkg` runs it by default)
+#   --install   installs the package on this PC (pacman -U, asks for sudo)
+#   CHECK=0     skips `cargo test` (by default `makepkg` runs it)
 #   SIGN=ID     signs the package and the database with the given GPG key
 #
 # Output in dist/arch/:
@@ -12,12 +12,12 @@
 # To publish the repository, upload the WHOLE dist/arch/ folder to an HTTPS server and add
 # to the clients' /etc/pacman.conf:
 #   [psytify]
-#   SigLevel = Optional TrustAll     # with SIGN=ID: Required DatabaseOptional
+#   SigLevel = Optional TrustAll     # con SIGN=ID: Required DatabaseOptional
 #   Server = https://<your-host>/arch/$arch
-# (remember that pacman looks for the files in <Server>/psytify.db: if the server has no
+# (remember that pacman looks for the files at <Server>/psytify.db: if the server has no
 # `x86_64` subfolder, use `Server = https://<host>/arch`).
 #
-# The PKGBUILD lives in desktop/ but `makepkg` would use `desktop/src` (the code) as its working folder:
+# The PKGBUILD is in desktop/, but `makepkg` would use `desktop/src` (the code) as the work folder:
 # here BUILDDIR, SRCDEST and PKGDEST point elsewhere.
 set -euo pipefail
 

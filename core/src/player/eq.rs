@@ -1,9 +1,9 @@
-//! Equalizzatore grafico a 10 bande: una cascata di filtri "peaking" (RBJ Audio EQ Cookbook) sul
-//! flusso dei campioni, prima dell'uscita audio.
+//! 10-band graphic equalizer: a cascade of "peaking" filters (RBJ Audio EQ Cookbook) on the
+//! sample stream, before the audio output.
 //!
-//! Le impostazioni stanno in un [`EqControl`] condiviso con la UI: cambiarle mentre suona è
-//! immediato, perché il filtro controlla la versione a ogni campione e ricalcola i coefficienti
-//! solo quando cambia. Con l'equalizzatore spento il segnale passa senza toccarlo.
+//! The settings sit in an [`EqControl`] shared with the UI: changing them while it plays is
+//! immediate, because the filter checks the version on every sample and recomputes the coefficients
+//! only when it changes. With the equalizer off the signal passes through untouched.
 
 use std::f32::consts::PI;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,21 +14,21 @@ use rodio::source::SeekError;
 use rodio::{ChannelCount, SampleRate, Source};
 use serde::{Deserialize, Serialize};
 
-/// Frequenze centrali delle bande, in Hz (ottave da 31 Hz a 16 kHz).
+/// Centre frequencies of the bands, in Hz (octaves from 31 Hz to 16 kHz).
 pub const BAND_FREQUENCIES: [f32; BANDS] =
     [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
 pub const BANDS: usize = 10;
-/// Guadagno massimo di una banda, in dB, in entrambi i versi.
+/// Maximum gain of a band, in dB, in both directions.
 pub const MAX_GAIN_DB: f32 = 12.0;
-/// Larghezza di banda: circa un'ottava e mezza, come un equalizzatore grafico da studio.
+/// Bandwidth: about one and a half octaves, like a studio graphic equalizer.
 const Q: f32 = 1.41;
 
-/// Le impostazioni dell'equalizzatore. Si salvano nella configurazione.
+/// The equalizer settings. They are saved in the configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub enabled: bool,
-    /// Guadagno di ogni banda in dB, da `-MAX_GAIN_DB` a `MAX_GAIN_DB`.
+    /// Gain of each band in dB, from `-MAX_GAIN_DB` to `MAX_GAIN_DB`.
     pub gains: [f32; BANDS],
 }
 
@@ -39,7 +39,7 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Guadagni portati nell'intervallo consentito: i valori letti da file non si fidano.
+    /// Gains brought into the allowed range: values read from a file are not trusted.
     pub fn clamped(mut self) -> Self {
         for gain in &mut self.gains {
             *gain = if gain.is_finite() { gain.clamp(-MAX_GAIN_DB, MAX_GAIN_DB) } else { 0.0 };
@@ -48,7 +48,7 @@ impl Settings {
     }
 }
 
-/// Preset di fabbrica, con il nome mostrato nella UI.
+/// Factory presets, with the name shown in the UI.
 pub const PRESETS: [(&str, [f32; BANDS]); 5] = [
     ("Piatto", [0.0; BANDS]),
     ("Bassi", [6.0, 5.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
@@ -57,11 +57,11 @@ pub const PRESETS: [(&str, [f32; BANDS]); 5] = [
     ("Acustico", [2.0, 2.0, 1.0, 0.0, 1.0, 1.0, 2.0, 3.0, 3.0, 2.0]),
 ];
 
-/// Impostazioni condivise tra la UI (che le cambia) e il flusso audio (che le legge).
+/// Settings shared between the UI (which changes them) and the audio stream (which reads them).
 #[derive(Debug, Default)]
 pub struct EqControl {
     settings: Mutex<Settings>,
-    /// Cresce a ogni modifica: il filtro confronta questo numero prima di ricalcolare.
+    /// Grows at each change: the filter compares this number before recomputing.
     version: AtomicU64,
 }
 
@@ -84,7 +84,7 @@ impl EqControl {
     }
 }
 
-/// Coefficienti di un filtro biquad, già normalizzati (a0 = 1).
+/// Coefficients of a biquad filter, already normalised (a0 = 1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Coefficients {
     b0: f32,
@@ -95,11 +95,11 @@ struct Coefficients {
 }
 
 impl Coefficients {
-    /// Filtro che non cambia il segnale.
+    /// A filter that does not change the signal.
     const IDENTITY: Self = Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 };
 
-    /// Campana di guadagno `gain_db` attorno a `frequency`. Sopra la frequenza di Nyquist, o a
-    /// guadagno zero, il filtro è neutro.
+    /// Gain bell `gain_db` around `frequency`. Above the Nyquist frequency, or at
+    /// zero gain, the filter is neutral.
     fn peaking(frequency: f32, gain_db: f32, sample_rate: f32) -> Self {
         if frequency >= sample_rate / 2.0 || gain_db.abs() < 1e-3 {
             return Self::IDENTITY;
@@ -119,7 +119,7 @@ impl Coefficients {
     }
 }
 
-/// Memoria di un filtro: gli ultimi due campioni in ingresso e in uscita di un canale.
+/// Memory of a filter: the last two input and output samples of a channel.
 #[derive(Debug, Clone, Copy, Default)]
 struct State {
     x1: f32,
@@ -139,19 +139,19 @@ impl State {
     }
 }
 
-/// Sorgente con l'equalizzatore applicato. Il tipo di campione è `f32`: chi legge da rodio
-/// converte prima con `convert_samples`.
+/// Source with the equalizer applied. The sample type is `f32`: whoever reads from rodio
+/// converts first with `convert_samples`.
 pub struct Equalized<S> {
     input: S,
     control: Arc<EqControl>,
-    /// Versione delle impostazioni usate per i coefficienti correnti.
+    /// Version of the settings used for the current coefficients.
     version: u64,
     enabled: bool,
     sample_rate: f32,
     coefficients: [Coefficients; BANDS],
-    /// Memoria per canale e per banda.
+    /// Memory per channel and per band.
     states: Vec<[State; BANDS]>,
-    /// Canale del prossimo campione (i campioni sono intercalati).
+    /// Channel of the next sample (the samples are interleaved).
     channel: usize,
 }
 
@@ -162,7 +162,7 @@ impl<S: Source<Item = f32>> Equalized<S> {
         let mut equalized = Self {
             input,
             control,
-            // Un valore impossibile: alla prima lettura i coefficienti si ricalcolano.
+            // An impossible value: at the first read the coefficients are recomputed.
             version: u64::MAX,
             enabled: false,
             sample_rate,
@@ -174,7 +174,7 @@ impl<S: Source<Item = f32>> Equalized<S> {
         equalized
     }
 
-    /// Legge le impostazioni solo se sono cambiate dall'ultima volta.
+    /// Reads the settings only if they have changed since the last time.
     fn refresh(&mut self) {
         let version = self.control.version.load(Ordering::Acquire);
         if version == self.version {
@@ -229,7 +229,7 @@ impl<S: Source<Item = f32>> Source for Equalized<S> {
 
     fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
         self.input.try_seek(pos)?;
-        // La memoria dei filtri appartiene al punto di prima: si azzera.
+        // The filters' memory belongs to the previous point: it is zeroed.
         for states in &mut self.states {
             *states = [State::default(); BANDS];
         }
@@ -242,7 +242,7 @@ impl<S: Source<Item = f32>> Source for Equalized<S> {
 mod tests {
     use super::*;
 
-    /// Segnale costante, in una sola uscita, per le prove sul guadagno.
+    /// Constant signal, in a single output, for the gain tests.
     struct Dc {
         left: usize,
     }
@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn a_boost_at_the_signal_frequency_raises_its_level() {
-        // Un tono a 1 kHz passa per la banda da 1 kHz: con +12 dB il livello sale.
+        // A 1 kHz tone passes through the 1 kHz band: with +12 dB the level rises.
         let tone = |n: usize| (2.0 * PI * 1000.0 * n as f32 / 44_100.0).sin() * 0.1;
         let samples: Vec<f32> = (0..8192).map(tone).collect();
         let flat = EqControl::new(Settings { enabled: true, gains: [0.0; BANDS] });
@@ -322,7 +322,7 @@ mod tests {
         }
         let flat_out: Vec<f32> = Equalized::new(Samples(samples.clone().into_iter()), flat).collect();
         let boosted_out: Vec<f32> = Equalized::new(Samples(samples.into_iter()), boosted).collect();
-        // Si salta il transitorio iniziale del filtro.
+        // The initial transient of the filter is skipped.
         let (a, b) = (rms_of(&flat_out[4096..]), rms_of(&boosted_out[4096..]));
         assert!(b > a * 3.0, "boosted {b} should be about 4x the flat {a}");
     }
@@ -334,7 +334,7 @@ mod tests {
         let before: Vec<f32> = eq.by_ref().take(100).collect();
         assert!(before.iter().all(|s| (s - 0.5).abs() < 1e-6));
         control.set(Settings { enabled: false, gains: [0.0; BANDS] });
-        // La modifica vale dal campione successivo, senza ricreare la sorgente.
+        // The change applies from the next sample, without recreating the source.
         assert!(eq.next().is_some());
         assert!(!eq.enabled);
     }

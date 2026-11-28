@@ -6,6 +6,37 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-28
+
+### Added
+
+- Android: a new native app in Kotlin and Jetpack Compose over the same Rust core (`android-app/`,
+  `mobile/`). It updates the previous app in place and keeps its data. It has Home, search, library, album
+  and artist pages, the full player with queue, synced lyrics and the video clip, the lock-screen and
+  notification controls, downloads and offline playback, sign-in, friends, profiles, Jam and settings,
+  plus TalkBack support, large fonts and an in-app update.
+- Desktop: the v2 redesign.
+  - Interface zoom (automatic with the window, or Ctrl+= / Ctrl+- / Ctrl+0) and one type scale.
+  - Pages that fill the window.
+  - Hover and press animations, page entrances and sliding panels, all off with «Riduci il movimento».
+  - A sidebar that shrinks to icons (Ctrl+B), resizes by dragging and shows your library.
+  - A side panel that shows the cover and the lyrics together, with the video clip in the same place.
+  - The Stage (F) replaces the focus view and the full-screen video.
+  - Sharper large covers.
+- The playback position is kept across restarts.
+
+### Changed
+
+- The previous Android app (Iced) is retired; the Kotlin app replaces it.
+- Source comments and documentation are in English.
+- The core uses zbus 6 for the media controls and the reduced-motion watcher.
+
+### Security
+
+- rustix 1.1.6 (RUSTSEC-2026-0486).
+
+## [0.1.0] - 2026-11-27
+
 ### Fixed
 
 - Phone: the avatar drawer opens from the left, floats a little away from the screen edges with rounded
@@ -72,4 +103,6 @@ All notable changes are documented here. The format follows
 
 - `PSYTIFY_DEFAULT_CLERK_CLIENT_ID` and `clerk_client_id` are no longer used by the client.
 
-[Unreleased]: https://github.com/psymariux/Psytify/commits/main
+[Unreleased]: https://github.com/psymariux/Psytify/compare/v0.2.0...main
+[0.2.0]: https://github.com/psymariux/Psytify/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/psymariux/Psytify/releases/tag/v0.1.0

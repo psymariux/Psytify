@@ -1,6 +1,6 @@
 [package]
 name = "psytify-design"
-version = "0.1.0"
+version = "0.2.0"
 description = "Token del design di Psytify (colori, spazi, raggi, tipografia) e sprite pixel art come dati semplici"
 edition.workspace = true
 rust-version.workspace = true

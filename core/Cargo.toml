@@ -2,7 +2,7 @@
 name = "psytify-core"
 # Same version as the client: `CARGO_PKG_VERSION` ends up in the user agent of requests to the
 # backend and to Clerk (`psytify/<version>`), which must not change when the code moves here.
-version = "0.1.0"
+version = "0.2.0"
 description = "Il core di Psytify senza UI: API, riproduzione, configurazione e stato condivisi dai frontend"
 edition.workspace = true
 rust-version.workspace = true

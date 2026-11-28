@@ -15,7 +15,7 @@ val rust = layout.buildDirectory.dir("generated/rust")
 val release = providers.environmentVariable("PSYTIFY_BUILD_TAG").orNull
     ?.removePrefix("v")
     ?.takeIf { Regex("""\d{1,3}\.\d{1,3}\.\d{1,3}""").matches(it) }
-    ?: "0.1.0"
+    ?: "0.2.0"
 val releaseCode = release.split('.').map(String::toInt).let { (major, minor, patch) ->
     (2 shl 24) + (major shl 16) + (minor.coerceAtMost(255) shl 8) + patch.coerceAtMost(255)
 }

@@ -1,6 +1,6 @@
 [package]
 name = "psytify-mobile"
-version = "0.1.0"
+version = "0.2.0"
 description = "The Psytify core for the Kotlin Android app: a UniFFI bridge with commands in and per-domain snapshots out"
 edition.workspace = true
 rust-version.workspace = true

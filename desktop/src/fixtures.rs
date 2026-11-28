@@ -1,16 +1,16 @@
-//! Dati di prova delle schermate sociali e della jam (feature `fixtures`, spenta di default e mai in un
-//! binario di rilascio): `--fixture NOME` mostra una vista sociale finta (e, per i nomi `jam-*`, anche una
-//! vista della jam finta) al posto di quella del core, così le schermate dell'accesso (codice, attesa del
-//! browser, errore), degli amici, dei profili e della jam (inviti, in connessione, in stanza, errore) si
-//! fotografano senza un accesso vero, senza aprire una stanza e senza mandare niente a Clerk o al server.
-//! Con i dati di prova i comandi sociali e della jam non partono (`CoreModel::social`, `CoreModel::jam`);
-//! il resto dell'app è quello vero.
+//! Test data for the social and jam screens (feature `fixtures`, off by default and never in a
+//! release binary): `--fixture NAME` shows a fake social view (and, for the `jam-*` names, also a
+//! fake jam view) in place of the core's, so the sign-in screens (code, wait for the
+//! browser, error), the friends, the profiles and the jam (invitations, connecting, in a room, error) are
+//! photographed without a real sign-in, without opening a room and without sending anything to Clerk or the server.
+//! With the test data the social and jam commands do not start (`CoreModel::social`, `CoreModel::jam`);
+//! the rest of the app is the real one.
 //!
-//! I nomi `update-*` mettono un aggiornamento di prova (`CoreModel::update_view`) al posto di quello del
-//! core, per la fascia e le Impostazioni: i comandi dell'aggiornamento allora non partono e nessun
-//! pacchetto si scarica davvero.
+//! The `update-*` names put a test update (`CoreModel::update_view`) in place of the
+//! core's, for the banner and the Settings: the update commands then do not start and no
+//! package is really downloaded.
 //!
-//! Le persone e i brani sono inventati; avatar e copertine non hanno indirizzo (il segnaposto).
+//! People and tracks are invented; avatars and covers have no address (the placeholder).
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -282,7 +282,7 @@ fn member(n: u128, name: &str) -> Member {
     Member { id: Uuid::from_u128(0xF1C5_4000 + n), name: name.to_owned() }
 }
 
-/// La vista della jam di prova `name` (solo per i nomi `jam-*` che ne hanno una: gli inviti sono della
+/// The test jam view `name` (only for the `jam-*` names that have one: the invitations are of the
 /// vista sociale, la jam resta ferma).
 pub fn jam(name: &str) -> Option<Arc<JamView>> {
     let open = |members: Vec<Member>, you: u128| JamView {
@@ -294,7 +294,7 @@ pub fn jam(name: &str) -> Option<Arc<JamView>> {
     };
     let view = match name {
         "jam-connecting" => JamView { phase: JamPhase::Connecting, ..JamView::default() },
-        // Appena creata: ci sei solo tu.
+        // Just created: only you are there.
         "jam-host" => open(vec![member(1, "Psy")], 1),
         "jam-guest" => open(
             vec![
@@ -305,7 +305,7 @@ pub fn jam(name: &str) -> Option<Arc<JamView>> {
             ],
             1,
         ),
-        // La stanza si è chiusa (la jam è finita da sola): la pagina lo dice e offre «Riprova».
+        // The room has closed (the jam ended on its own): the page says so and offers «Riprova».
         "jam-error" => JamView {
             events: Arc::new(VecDeque::from([JamRaised {
                 seq: 1,
@@ -321,8 +321,8 @@ pub fn jam(name: &str) -> Option<Arc<JamView>> {
 /// La release di prova: un numero inventato, mai chiesto al server.
 const UPDATE_TAG: &str = "v2026.12.1";
 
-/// L'aggiornamento di prova dei nomi `update-*`: offerto, in download, pronto, il download non riuscito
-/// (il core toglie l'offerta e lo dice con un avviso, vedi [`notice`]) o il controllo non riuscito.
+/// The test update for the `update-*` names: offered, downloading, ready, the download failed
+/// (the core removes the offer and says so with a notice, see [`notice`]) or the check failed.
 pub fn update(name: &str) -> Option<UpdateView> {
     let mut view = UpdateView::default();
     match name {
@@ -351,21 +351,21 @@ pub fn update(name: &str) -> Option<UpdateView> {
     Some(view)
 }
 
-/// L'avviso che accompagna i dati di prova, se ce n'è uno (come lo darebbe l'evento del core).
+/// The notice that goes with the test data, if there is one (as the core's event would give it).
 pub fn notice(name: &str) -> Option<Notice> {
     match name {
         "update-error" => Some(Notice::error(format!("Download non riuscito: {}", AppError::Network))),
         "update-check-failed" => {
             Some(Notice::error(format!("Controllo non riuscito: {}", AppError::Network)))
         }
-        // Come l'avviso del palco quando il core conta un videoclip fermato.
+        // Like the stage's notice when the core counts a video that stopped.
         #[cfg(feature = "video")]
         "video-failed" => Some(Notice::error(AppError::Video.to_string())),
         _ => None,
     }
 }
 
-/// I nomi dei videoclip di prova (solo con la feature `video`).
+/// The names of the test videos (only with the `video` feature).
 #[cfg(feature = "video")]
 pub const VIDEO_NAMES: [&str; 3] = ["video-loading", "video-ready", "video-failed"];
 
@@ -373,8 +373,8 @@ pub const VIDEO_NAMES: [&str; 3] = ["video-loading", "video-ready", "video-faile
 #[cfg(feature = "video")]
 pub const VIDEO_FILE_VAR: &str = "PSYTIFY_VIDEO_FIXTURE";
 
-/// Il videoclip di prova per il brano `track` (quello in corso all'avvio): in preparazione, pronto sul file
-/// di `PSYTIFY_VIDEO_FIXTURE` (senza il file resta in preparazione) o non riuscito.
+/// The test video for the track `track` (the one playing at start-up): preparing, ready on the file
+/// of `PSYTIFY_VIDEO_FIXTURE` (without the file it stays preparing) or failed.
 #[cfg(feature = "video")]
 pub fn video(name: &str, track: Option<Uuid>) -> Option<crate::video::ClipView> {
     use crate::video::{Clip, ClipView, Source};
@@ -403,7 +403,7 @@ pub fn known(name: &str) -> bool {
     NAMES.contains(&name)
 }
 
-/// Tutti i nomi, per il messaggio d'errore di `--fixture`.
+/// All the names, for the `--fixture` error message.
 pub fn names() -> String {
     let names = NAMES.join(", ");
     #[cfg(feature = "video")]

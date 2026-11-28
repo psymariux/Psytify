@@ -62,10 +62,10 @@ pub enum Surface {
     Stage,
 }
 
-/// Il posto del fotogramma in un riquadro: lo segna il pozzo (`VideoStage::well`) mentre si dipinge, con la
-/// maschera che lo taglia, e lo legge il palco quando dipinge, subito dopo. La vista che contiene il pozzo lo
-/// svuota all'inizio di ogni suo disegno (`clear`): riusata dalla cache, il posto resta quello di prima, che è
-/// ancora giusto (GPUI riusa una vista solo se ha gli stessi limiti e la stessa maschera).
+/// The frame's place in a box: the well (`VideoStage::well`) marks it while it is painted, with the
+/// mask that cuts it, and the stage reads it when it paints, right after. The view that contains the well
+/// empties it at the start of each draw (`clear`): reused from the cache, the place stays the previous one, which is
+/// still right (GPUI reuses a view only if it has the same bounds and the same mask).
 #[derive(Clone, Default)]
 pub struct Spot(Rc<Cell<Option<Place>>>);
 
@@ -78,44 +78,44 @@ impl Spot {
     }
 }
 
-/// Che cosa mostra il riquadro del videoclip (cambia di rado: non a ogni fotogramma).
+/// What the video box shows (it changes rarely: not at every frame).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
-    /// Il brano non ha un videoclip, o non c'è un brano.
+    /// The track has no video, or there is no track.
     None,
-    /// La copertina, senza attese: in pausa prima del primo fotogramma.
+    /// The cover, without waiting: paused before the first frame.
     Cover,
-    /// Il server prepara il videoclip, o la pipeline si apre.
+    /// The server is preparing the video, or the pipeline is opening.
     Loading,
-    /// Il videoclip (anche fermo sull'ultimo fotogramma, in pausa).
+    /// The video (also stopped on the last frame, paused).
     Playing,
-    /// Non si è aperto, nemmeno al secondo tentativo: «Il videoclip non si è aperto.» con «Riprova» (il
+    /// Did not open, not even at the second attempt: "Il videoclip non si è aperto." with «Riprova» (the
     /// testo dell'errore del core va nell'avviso).
     Failed,
 }
 
-/// Ciò che il palco dice a chi lo mostra.
+/// What the stage says to whoever shows it.
 pub enum StageEvent {
-    /// `status` è cambiato.
+    /// `status` has changed.
     Status,
-    /// Un videoclip si è fermato: l'avviso (gli avvisi li mostra `Shell`).
+    /// A video stopped: the notice (the notices are shown by `Shell`).
     Notice(Notice),
 }
 
 impl EventEmitter<StageEvent> for VideoStage {}
 
-/// La pipeline del videoclip che si vuole, aperta o in apertura.
+/// The track's video pipeline that is wanted, open or opening.
 struct Running {
     want: Want,
     pipeline: Option<Pipeline>,
     shared: Arc<Shared>,
     alignment: Alignment,
     last_check: Option<Instant>,
-    /// Il `seq` della versione migliore che si apre di fianco.
+    /// The `seq` of the better version that opens alongside.
     upgrading: Option<u64>,
     _open: Option<Task<()>>,
     _upgrade: Option<Task<()>>,
-    /// Aspetta le sveglie di GStreamer: c'è solo con la pipeline aperta.
+    /// Waits for GStreamer's wake-ups: there only with the pipeline open.
     _wake: Option<Task<()>>,
 }
 
@@ -129,7 +129,7 @@ impl Running {
         }
     }
 
-    /// Chiude tutto su un thread a parte; i task finiscono con lui.
+    /// Closes everything on a thread of its own; the tasks end with it.
     fn discard(self) {
         if let Some(pipeline) = self.pipeline {
             pipeline.discard();
@@ -146,18 +146,18 @@ pub struct VideoStage {
     surface: Option<Surface>,
     /// I pixel fisici del riquadro: li dice chi lo mostra, servono a scegliere quanto decodificare.
     surface_px: Size,
-    /// Il core sa che un posto mostra il videoclip (`VideoCmd::Show`).
+    /// The core knows that a spot shows the video (`VideoCmd::Show`).
     shown_sent: bool,
     running: Option<Running>,
-    /// L'ultimo fotogramma disegnato e il brano a cui appartiene.
+    /// The last frame drawn and the track it belongs to.
     image: Option<(Uuid, Arc<RenderImage>)>,
     /// Immagini da togliere dall'atlante al prossimo disegno.
     retired: Vec<Arc<RenderImage>>,
-    /// I posti del pannello e della vista immersiva.
+    /// The places of the panel and of the immersive view.
     panel_spot: Spot,
     stage_spot: Spot,
     status: Status,
-    /// I videoclip fermati già detti con un avviso.
+    /// The stopped videos already announced with a notice.
     failures_seen: u64,
     _changes: Subscription,
 }
@@ -196,8 +196,8 @@ impl VideoStage {
         &self.status
     }
 
-    /// Il posto che mostra il videoclip (o nessuno). Il core chiede il videoclip al server solo finché un
-    /// posto lo mostra, e prepara in anticipo quelli dei brani successivi solo allora.
+    /// The spot that shows the video (or none). The core asks the server for the video only while a
+    /// spot shows it, and prepares those of the next tracks in advance only then.
     pub fn set_surface(&mut self, surface: Option<Surface>, cx: &mut Context<Self>) {
         if self.surface == surface {
             return;
@@ -219,18 +219,18 @@ impl VideoStage {
         cx.notify();
     }
 
-    /// I pixel fisici del riquadro: chi mostra il palco li dice a ogni disegno (la pipeline rinegozia la
-    /// misura solo quando cambia abbastanza).
+    /// The physical pixels of the box: whoever shows the stage says them at every draw (the pipeline renegotiates the
+    /// measure only when it changes enough).
     pub fn set_surface_px(&mut self, surface: Size) {
         self.surface_px = surface;
     }
 
-    /// «Riprova» su un videoclip che non si apriva.
+    /// "Riprova" on a video that did not open.
     pub fn retry(&self, cx: &App) {
         self.send(VideoCmd::Retry, cx);
     }
 
-    /// Il posto del fotogramma in `surface`: la vista che mostra il riquadro lo svuota a ogni suo disegno.
+    /// The frame's place in `surface`: the view that shows the box empties it at each of its draws.
     pub fn spot(&self, surface: Surface) -> Spot {
         match surface {
             Surface::Panel => self.panel_spot.clone(),
@@ -273,7 +273,7 @@ impl VideoStage {
             let next = Arc::clone(&core.read(cx).snapshot().playback);
             let previous = std::mem::replace(&mut self.playback, next);
             self.track = video_track(&self.playback);
-            // Il video segue l'audio: un brano che parte, un salto, la ripresa.
+            // The video follows the audio: a track starting, a seek, the resume.
             if let Some(running) = self.running.as_mut()
                 && let Some(pipeline) = running.pipeline.as_mut()
                 && let Some(adjust) = running.alignment.follow(&previous, &self.playback, Instant::now())
@@ -293,7 +293,7 @@ impl VideoStage {
         self.reconcile(cx);
     }
 
-    /// Dalla pipeline che c'è a quella che serve (`plan`), poi lo stato.
+    /// From the pipeline there is to the one needed (`plan`), then the state.
     fn reconcile(&mut self, cx: &mut Context<Self>) {
         let current = self.playback.queue.current().map(|track| track.id);
         let running = current.filter(|_| {
@@ -311,7 +311,7 @@ impl VideoStage {
             }
             Action::Upgrade(want) => self.upgrade(want, cx),
         }
-        // Un altro brano: il fotogramma del brano di prima non resta sul display.
+        // Another track: the frame of the previous track does not stay on the display.
         if let Some((track, _)) = &self.image
             && Some(*track) != current
             && let Some((_, image)) = self.image.take()
@@ -328,7 +328,7 @@ impl VideoStage {
         }
     }
 
-    /// Apre su un thread a parte l'indirizzo del videoclip `want`, alla posizione dell'audio.
+    /// Opens on a thread of its own the address of the video `want`, at the audio's position.
     fn spawn_open(&self, want: Want) -> Option<(Arc<Shared>, oneshot::Receiver<Option<Pipeline>>)> {
         let url = self.view.ready_for(want.track)?.url().to_owned();
         let clock = self.playback.clock;
@@ -338,7 +338,7 @@ impl VideoStage {
         let for_thread = Arc::clone(&shared);
         let spawned = std::thread::Builder::new().name("video-open".into()).spawn(move || {
             let opened = Pipeline::open(&url, clock, surface, for_thread).ok();
-            // Nessuno aspetta più (il brano è cambiato): si chiude qui, su questo thread.
+            // Nobody waits any more (the track has changed): it is closed here, on this thread.
             if let Err(Some(pipeline)) = sender.send(opened) {
                 drop(pipeline);
             }
@@ -369,17 +369,17 @@ impl VideoStage {
         });
     }
 
-    /// La pipeline di `want` si è aperta (o no).
+    /// The pipeline of `want` has opened (or not).
     fn opened(&mut self, want: Want, pipeline: Option<Pipeline>, cx: &mut Context<Self>) {
         let Some(running) = self.running.as_mut().filter(|r| r.want == want && r.pipeline.is_none()) else {
-            // Arrivata tardi: il brano è cambiato o il videoclip è stato chiuso.
+            // Arrived late: the track has changed or the video has been closed.
             if let Some(pipeline) = pipeline {
                 pipeline.discard();
             }
             return;
         };
         let Some(pipeline) = pipeline else {
-            // Non si è aperta: il core ne chiede un altro indirizzo una volta, poi la ferma.
+            // It did not open: the core asks for another address once, then stops it.
             self.close();
             self.send(VideoCmd::Failed { seq: want.seq }, cx);
             self.refresh_status(cx);
@@ -414,7 +414,7 @@ impl VideoStage {
         cx.notify();
     }
 
-    /// Una versione migliore dello stesso brano: si apre di fianco e prende il posto di quella che suona.
+    /// A better version of the same track: it opens alongside and takes the place of the one playing.
     fn upgrade(&mut self, want: Want, cx: &mut Context<Self>) {
         let Some((_, receiver)) = self.spawn_open(want) else {
             self.send(VideoCmd::Failed { seq: want.seq }, cx);
@@ -452,9 +452,9 @@ impl VideoStage {
                 running.want = want;
                 self.start(cx);
             }
-            // Un altro indirizzo ha già preso il suo posto: questo non serve più.
+            // Another address has already taken its place: this one is no longer needed.
             Some(pipeline) => pipeline.discard(),
-            // Non si è aperta: resta la versione che suona, il core riprova più tardi.
+            // It did not open: the playing version stays, the core tries again later.
             None => self.send(VideoCmd::Failed { seq: want.seq }, cx),
         }
     }
@@ -464,7 +464,7 @@ impl VideoStage {
         let playback = Arc::clone(&self.playback);
         let Some(running) = self.running.as_mut() else { return };
         if running.shared.failed() {
-            // Lo stream è caduto: il core ne chiede un altro indirizzo una volta.
+            // The stream dropped: the core asks for another address once.
             let seq = running.want.seq;
             self.close();
             self.send(VideoCmd::Failed { seq }, cx);
@@ -485,7 +485,7 @@ impl VideoStage {
         }
     }
 
-    /// C'è un fotogramma del brano in corso: già disegnato, o pronto nel posto della pipeline.
+    /// There is a frame of the track playing: already drawn, or ready in the pipeline's place.
     fn has_frame(&self) -> bool {
         let Some(track) = self.track.as_ref().map(|(track, _)| *track) else { return false };
         self.image.as_ref().is_some_and(|(of, _)| *of == track)
@@ -512,7 +512,7 @@ impl VideoStage {
         }
     }
 
-    /// Prende il fotogramma più recente, se ce n'è uno nuovo, e lo fa diventare l'immagine da disegnare.
+    /// Takes the most recent frame, if there is a new one, and makes it the image to draw.
     fn take_frame(&mut self) {
         let Some(running) = self.running.as_mut() else { return };
         if let Some(pipeline) = running.pipeline.as_mut() {
@@ -534,7 +534,7 @@ fn video_track(playback: &PlaybackView) -> Option<(Uuid, Option<SharedString>)> 
     Some((track.id, track.cover_url.clone().map(SharedString::from)))
 }
 
-/// Il fotogramma dentro `bounds`, con le sue proporzioni, centrato, sulla griglia dei pixel fisici.
+/// The frame inside `bounds`, with its proportions, centred, on the grid of physical pixels.
 fn fitted(bounds: Bounds<Pixels>, image: &RenderImage, scale: f32) -> Bounds<Pixels> {
     let frame = image.size(0);
     let (fw, fh) = (i32::from(frame.width) as f32, i32::from(frame.height) as f32);
@@ -551,9 +551,9 @@ fn fitted(bounds: Bounds<Pixels>, image: &RenderImage, scale: f32) -> Bounds<Pix
 }
 
 impl Render for VideoStage {
-    /// Un velo grande quanto la finestra, senza zone attive: lascia l'atlante alle immagini di prima e dipinge
-    /// il fotogramma nel posto che il pozzo del riquadro ha segnato in questo disegno (il palco si dipinge
-    /// dopo pagina e pannelli). Senza un posto che lo mostra non dipinge niente.
+    /// A veil as large as the window, without active areas: it leaves the atlas to the previous images and paints
+    /// the frame in the place that the box's well marked in this draw (the stage is painted
+    /// after the page and panels). Without a place that shows it, it paints nothing.
     fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         self.take_frame();
         let retired = std::mem::take(&mut self.retired);
@@ -565,7 +565,7 @@ impl Render for VideoStage {
         canvas(
             |_, _, _| (),
             move |_, (), window, _| {
-                // Le immagini di prima lasciano l'atlante nello stesso disegno della nuova.
+                // The previous images leave the atlas in the same draw as the new one.
                 for old in retired {
                     let _ = window.drop_image(old);
                 }

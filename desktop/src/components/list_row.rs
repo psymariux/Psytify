@@ -35,13 +35,13 @@ use crate::theme::{Ap, TypeStyle, col, dp, fade};
 /// L'arte a sinistra del testo.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RowArt {
-    /// Una copertina (il segnaposto finché non arriva o se non c'è).
+    /// A cover (the placeholder until it arrives or if there is none).
     Cover(Option<SharedString>),
-    /// Una foto d'artista, nel cerchio.
+    /// An artist's photo, in the circle.
     Round(Option<SharedString>),
-    /// Uno sprite su campo `GRAPHITE` (il cuore di «Brani che ti piacciono»), tinto `ICON_ACTIVE`.
+    /// A sprite on a `GRAPHITE` field (the heart of «Brani che ti piacciono»), tinted `ICON_ACTIVE`.
     Sprite(&'static str),
-    /// Nessuna arte (una classifica di nomi, dove c'è già l'indice).
+    /// No art (a ranking of names, where the index is already there).
     None,
 }
 
@@ -53,11 +53,11 @@ pub struct ListRow {
     title: SharedString,
     detail: SharedString,
     detail_error: bool,
-    /// Un'etichetta dopo il titolo («Nuovo», «Album»).
+    /// A label after the title («Nuovo», «Album»).
     badge: Option<(SharedString, BadgeKind)>,
     steps: Option<f32>,
     playing: Option<PlayState>,
-    /// Dove `Shell` dipinge l'equalizzatore al posto della riga (vedi `playing_spot`).
+    /// Where `Shell` paints the equaliser in place of the row (see `playing_spot`).
     spot: Option<PlayingSpot>,
     selected: bool,
     actions: Vec<IconButton>,
@@ -89,13 +89,13 @@ impl ListRow {
         }
     }
 
-    /// La colonna del numero (da 1), come nelle liste di brani.
+    /// The number column (from 1), as in track lists.
     pub fn index(mut self, index: u32) -> Self {
         self.index = Some(index);
         self
     }
 
-    /// La seconda riga, già pronta.
+    /// The second line, already ready.
     pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
         self.detail = detail.into();
         self
@@ -107,8 +107,8 @@ impl ListRow {
         self
     }
 
-    /// Un'etichetta subito dopo il titolo: di conteggio («Nuovo» in «Novità») o neutra (il tipo di
-    /// un'uscita nel registro della Home).
+    /// A label right after the title: a count («Nuovo» in «Novità») or neutral (the kind of
+    /// a release in the Home's log).
     pub fn badge(mut self, text: impl Into<SharedString>, kind: BadgeKind) -> Self {
         self.badge = Some((text.into(), kind));
         self
@@ -120,7 +120,7 @@ impl ListRow {
         self
     }
 
-    /// La riga è il brano in corso: l'equalizzatore al posto dell'indice.
+    /// The row is the playing track: the equaliser in place of the index.
     pub fn playing(mut self, state: PlayState) -> Self {
         self.playing = Some(state);
         self
@@ -133,7 +133,7 @@ impl ListRow {
         self
     }
 
-    /// La voce è la pagina aperta: fill `SURFACE_SELECTED`.
+    /// The entry is the open page: `SURFACE_SELECTED` fill.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
@@ -145,7 +145,7 @@ impl ListRow {
         self
     }
 
-    /// Un'azione che compare solo al passaggio del mouse; lo spazio resta.
+    /// An action that appears only on mouse hover; the space stays.
     pub fn hover_action(mut self, button: IconButton) -> Self {
         self.hover_actions.push(button);
         self
@@ -162,7 +162,7 @@ impl ListRow {
         self
     }
 
-    /// Il gesto della riga: chi la usa decide se basta un clic (aprire) o serve il doppio (suonare).
+    /// The row's gesture: whoever uses it decides whether a click (open) is enough or a double one (play) is needed.
     pub fn on_click(mut self, handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(std::rc::Rc::new(handler));
         self
@@ -181,7 +181,7 @@ pub fn row_art(art: RowArt, side: f32) -> AnyElement {
     }
 }
 
-/// Un'azione che non deve far partire anche il gesto della riga.
+/// An action that must not also trigger the row's gesture.
 fn stop_propagation(button: IconButton) -> AnyElement {
     div()
         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())

@@ -1,12 +1,12 @@
-//! Il ponte fra il core e GPUI: un'entità che possiede il `Core`, tiene l'ultima istantanea e dice alle
-//! viste quali domini sono cambiati.
+//! The bridge between the core and GPUI: an entity that owns the `Core`, keeps the last snapshot and tells the
+//! views which domains have changed.
 //!
-//! Il core gira sul suo thread, con un runtime proprio da due thread (`RuntimeChoice::Own`): GPUI ha il
-//! suo executor e non usa tokio. Le istantanee arrivano su un `tokio::sync::watch`, che non dipende dal
-//! runtime, quindi basta un task di GPUI che aspetta `changed()`: nessun ciclo di sondaggio, nessun
-//! risveglio se il core non pubblica. Il core pubblica solo quando una vista cambia davvero, e
-//! `CoreModel::apply` confronta le versioni dei domini: una vista viene notificata solo per il suo
-//! dominio (l'istantanea contiene un `Arc` per dominio, la posizione del brano non c'è, vedi
+//! The core runs on its own thread, with a runtime of its own of two threads (`RuntimeChoice::Own`): GPUI has
+//! its own executor, not tokio. The snapshots arrive on a `tokio::sync::watch`, which does not depend on the
+//! runtime, so a GPUI task waiting on `changed()` is enough: no polling loop, no
+//! wake-up if the core does not publish. The core publishes only when a view really changes, and
+//! `CoreModel::apply` compares the domains' versions: a view is notified only for its own
+//! domain (the snapshot holds an `Arc` per domain; the track's position is not there, see
 //! `PlaybackView::position`).
 
 use std::collections::HashSet;
@@ -25,12 +25,12 @@ use psytify_core::{
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-/// Thread del runtime proprio del core (rete, copertine, download): il piano ne prevede due.
+/// The core's own runtime thread (network, covers, downloads): the plan foresees two.
 const CORE_WORKERS: usize = 2;
 
-/// Quali domini sono cambiati nell'ultima pubblicazione del core: uno per ogni versione di
-/// `DomainVersions`, così una vista si sveglia solo per il dominio che legge. `video` c'è solo con la
-/// feature `video` del desktop (il core la compila allora; senza, il dominio non esiste).
+/// Which domains changed in the core's last publication: one for each version of
+/// `DomainVersions`, so a view wakes only for the domain it reads. `video` exists only with the
+/// desktop's `video` feature (the core compiles it then; without it, the domain does not exist).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Changed {
     pub settings: bool,
@@ -46,7 +46,7 @@ pub struct Changed {
 }
 
 impl Changed {
-    /// Confronta le versioni di due istantanee: chi non è cambiato resta `false`.
+    /// Compares the versions of two snapshots: whoever has not changed stays `false`.
     pub fn between(old: &DomainVersions, new: &DomainVersions) -> Self {
         Self {
             settings: old.settings != new.settings,
@@ -62,7 +62,7 @@ impl Changed {
         }
     }
 
-    /// Almeno un dominio è cambiato.
+    /// At least one domain has changed.
     pub fn any(self) -> bool {
         let any = self.settings
             || self.library
@@ -79,40 +79,40 @@ impl Changed {
 }
 
 pub struct CoreModel {
-    /// `None` se il core non è partito o si sta fermando: i comandi si perdono.
+    /// `None` if the core has not started or is stopping: the commands are lost.
     core: Option<Core>,
     snapshot: Arc<Snapshot>,
-    /// Gli id dei brani piaciuti, rifatti solo quando la libreria cambia (la view non li conta).
+    /// The liked tracks' ids, rebuilt only when the library changes (the view does not count them).
     liked: Arc<HashSet<Uuid>>,
     start_error: Option<String>,
     /// Con la feature `fixtures` e `--fixture`: la vista sociale di prova mostrata al posto di quella del
-    /// core (account, amici, profili), per le schermate. I comandi sociali allora non partono.
+    /// core (account, friends, profiles), for the screens. The social commands do not start then.
     #[cfg(feature = "fixtures")]
     social_fixture: Option<Arc<SocialView>>,
-    /// Con la feature `fixtures`: la vista della jam di prova (in connessione, in stanza…). I comandi
-    /// della jam allora non partono: nessuna stanza vera si apre.
+    /// With the `fixtures` feature: the test jam view (connecting, in a room…). The jam
+    /// commands do not start then: no real room is opened.
     #[cfg(feature = "fixtures")]
     jam_fixture: Option<Arc<JamView>>,
-    /// Con la feature `fixtures`: l'aggiornamento di prova (offerto, in download, pronto, controllo non
-    /// riuscito). I comandi dell'aggiornamento allora non partono: nessun pacchetto si scarica davvero.
+    /// With the `fixtures` feature: the test update (offered, downloading, ready, check
+    /// failed). The update commands do not start then: no package is really downloaded.
     #[cfg(feature = "fixtures")]
     update_fixture: Option<UpdateView>,
-    /// La vista del videoclip come la legge il desktop, rifatta solo quando il dominio cambia.
+    /// The video view as the desktop reads it, rebuilt only when the domain changes.
     #[cfg(feature = "video")]
     clip: Arc<crate::video::ClipView>,
-    /// Con la feature `fixtures` e `--fixture video-*`: il videoclip di prova (in preparazione, pronto su un
-    /// file locale, non riuscito). I comandi del videoclip allora non partono: niente si chiede al server.
+    /// With the `fixtures` feature and `--fixture video-*`: the test video (preparing, ready on a
+    /// local file, failed). The video commands do not start then: nothing is asked of the server.
     #[cfg(all(feature = "video", feature = "fixtures"))]
     clip_fixture: Option<Arc<crate::video::ClipView>>,
-    /// Il task che aspetta le istantanee: finisce con il modello.
+    /// The task that waits for the snapshots: it ends with the model.
     _pump: Option<Task<()>>,
 }
 
 impl EventEmitter<Changed> for CoreModel {}
 
 impl CoreModel {
-    /// Avvia il core (stessa cartella dei dati e stessa configurazione del client Iced: l'unico che
-    /// scrive `config.json` è il core, vedi `core/src/state/settings.rs`) e ne ascolta le istantanee.
+    /// Starts the core (same data folder and same configuration as the earlier client: the only one that
+    /// writes `config.json` is the core, see `core/src/state/settings.rs`) and listens to its snapshots.
     pub fn start(cx: &mut App) -> Entity<Self> {
         let options = CoreOptions {
             runtime: RuntimeChoice::Own { workers: CORE_WORKERS },
@@ -173,8 +173,8 @@ impl CoreModel {
         })
     }
 
-    /// Prende l'istantanea nuova e dice quali domini sono cambiati. Una più vecchia non sostituisce
-    /// mai una più nuova.
+    /// Takes the new snapshot and says which domains have changed. An older one never replaces
+    /// a newer one.
     fn apply(&mut self, next: Arc<Snapshot>, cx: &mut Context<Self>) {
         if next.version <= self.snapshot.version {
             return;
@@ -193,7 +193,7 @@ impl CoreModel {
         }
     }
 
-    /// L'ultima istantanea (una copia di un `Arc`).
+    /// The last snapshot (a copy of an `Arc`).
     pub fn snapshot(&self) -> Arc<Snapshot> {
         Arc::clone(&self.snapshot)
     }
@@ -208,13 +208,13 @@ impl CoreModel {
         Arc::clone(&self.snapshot.social)
     }
 
-    /// Mostra una vista sociale di prova al posto di quella del core (solo per le schermate).
+    /// Shows a test social view in place of the core's (only for the screens).
     #[cfg(feature = "fixtures")]
     pub fn set_social_fixture(&mut self, view: Arc<SocialView>) {
         self.social_fixture = Some(view);
     }
 
-    /// La vista della jam: quella dell'istantanea; con i dati di prova di `--fixture`, quella di prova. Le
+    /// The jam view: the snapshot's; with the `--fixture` test data, the test one. The
     /// viste la leggono da qui, mai dall'istantanea.
     pub fn jam_view(&self) -> Arc<JamView> {
         #[cfg(feature = "fixtures")]
@@ -224,7 +224,7 @@ impl CoreModel {
         Arc::clone(&self.snapshot.jam)
     }
 
-    /// Mostra una vista della jam di prova al posto di quella del core (solo per le schermate).
+    /// Shows a test jam view in place of the core's (only for the screens).
     #[cfg(feature = "fixtures")]
     pub fn set_jam_fixture(&mut self, view: Arc<JamView>) {
         self.jam_fixture = Some(view);
@@ -240,13 +240,13 @@ impl CoreModel {
         &self.snapshot.downloads.update
     }
 
-    /// Mostra un aggiornamento di prova al posto di quello del core (solo per le schermate).
+    /// Shows a test update in place of the core's (only for the screens).
     #[cfg(feature = "fixtures")]
     pub fn set_update_fixture(&mut self, view: UpdateView) {
         self.update_fixture = Some(view);
     }
 
-    /// Il videoclip del brano in corso (che cosa aprire): quello del core; con i dati di prova di `--fixture
+    /// The video of the track playing (what to open): the core's; with the `--fixture` test data
     /// video-*`, quello di prova. Il palco del video lo legge da qui, mai dall'istantanea.
     #[cfg(feature = "video")]
     pub fn clip_view(&self) -> Arc<crate::video::ClipView> {
@@ -257,13 +257,13 @@ impl CoreModel {
         Arc::clone(&self.clip)
     }
 
-    /// Mostra un videoclip di prova al posto di quello del core (solo per le schermate).
+    /// Shows a test video in place of the core's (only for the screens).
     #[cfg(all(feature = "video", feature = "fixtures"))]
     pub fn set_clip_fixture(&mut self, view: crate::video::ClipView) {
         self.clip_fixture = Some(Arc::new(view));
     }
 
-    /// Un comando al dominio del videoclip. Con un videoclip di prova non parte niente.
+    /// A command to the video domain. With a test video nothing starts.
     #[cfg(feature = "video")]
     pub fn video(&self, command: psytify_core::command::VideoCmd) {
         #[cfg(feature = "fixtures")]
@@ -273,12 +273,12 @@ impl CoreModel {
         self.send(Command::Video(command));
     }
 
-    /// Gli id dei brani piaciuti.
+    /// The liked tracks' ids.
     pub fn liked(&self) -> Arc<HashSet<Uuid>> {
         Arc::clone(&self.liked)
     }
 
-    /// Perché il core non è partito, se non è partito.
+    /// Why the core has not started, if it has not.
     pub fn start_error(&self) -> Option<&str> {
         self.start_error.as_deref()
     }
@@ -303,7 +303,7 @@ impl CoreModel {
 
     pub fn downloads(&self, command: DownloadsCmd) {
         // Con un aggiornamento di prova niente dell'aggiornamento va al core: nessun controllo, nessun
-        // pacchetto scaricato. La chiusura della fascia la fa `dismiss_update`.
+        // package downloaded. The banner's closing is done by `dismiss_update`.
         #[cfg(feature = "fixtures")]
         if self.update_fixture.is_some()
             && matches!(
@@ -319,8 +319,8 @@ impl CoreModel {
         self.send(Command::Downloads(command));
     }
 
-    /// Con un aggiornamento di prova: la chiusura della fascia toglie l'offerta o il file pronto, come fa il
-    /// core, e lo dice alle viste come un cambio dei download. Senza dati di prova manda il comando.
+    /// With a test update: closing the banner removes the offer or the ready file, as the
+    /// core does, and says so to the views as a downloads change. Without test data it sends the command.
     pub fn dismiss_update(&mut self, cx: &mut Context<Self>) {
         #[cfg(feature = "fixtures")]
         if let Some(fixture) = &mut self.update_fixture {
@@ -358,8 +358,8 @@ impl CoreModel {
         self.send(Command::Jam(command));
     }
 
-    /// Chiede al core una copertina (scaricata e decodificata sul suo runtime). `None` se il core non
-    /// c'è più.
+    /// Asks the core for a cover (downloaded and decoded on its runtime). `None` if the core
+    /// is no longer there.
     pub fn artwork(&self, url: String) -> Option<oneshot::Receiver<Option<CoverPixels>>> {
         self.core.as_ref().map(|core| core.artwork(url))
     }
@@ -369,8 +369,8 @@ impl CoreModel {
         self.core.as_ref().map(|core| core.artwork_side(url, side))
     }
 
-    /// Ferma il core dopo che ha scritto `config.json`: il ricevitore si risolve a fine lavoro. Da qui
-    /// in poi i comandi si perdono. `None` se il core non c'era o è già stato fermato.
+    /// Stops the core after it has written `config.json`: the receiver resolves when the work is done. From here
+    /// on the commands are lost. `None` if there was no core or it has already been stopped.
     pub fn begin_shutdown(&mut self) -> Option<oneshot::Receiver<Result<(), CoreError>>> {
         self._pump = None;
         self.core.take().map(Core::shutdown)
@@ -381,9 +381,9 @@ impl CoreModel {
 mod tests {
     use super::*;
 
-    /// Una versione per dominio, ognuna con un numero diverso: un campo scambiato per un altro si vede.
-    /// Il campo `video` del core esiste anche quando un'altra crate del workspace accende la feature
-    /// del core senza che il desktop accenda la sua: `..default()` lo riempie in quel caso.
+    /// One version per domain, each with a different number: a field swapped for another shows.
+    /// The core's `video` field exists even when another crate of the workspace switches on the
+    /// core's feature without the desktop switching on its own: `..default()` fills it in that case.
     #[allow(clippy::needless_update)]
     fn versions() -> DomainVersions {
         DomainVersions {

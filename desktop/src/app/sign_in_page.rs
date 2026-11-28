@@ -1,19 +1,19 @@
-//! «Accedi a Psytify» (`Page::SignIn`), come da `PSYTIFY_ART_DIRECTION.md` («Sign-in / social») e dal
-//! client Iced (`client/src/ui/pages/sign_in.rs`): una colonna di `SIGN_IN_W` (360 dp) sulla tela, Nastro
-//! (`nastro_idle`) sopra il wordmark e una riga che cambia con il passo; le schede Accedi / Crea un account;
-//! i campi da 40 dp; i pulsanti di GitHub, Google e Discord (secondari, con il marchio monocromo del
-//! provider a 20 dp, l'unica eccezione vettoriale); gli errori in `TEXT_ERROR` sotto il pulsante, mai in un
-//! avviso. Il passo del codice via email (`AuthView::step`) e l'attesa del browser (`AuthView::waiting`, con
-//! «Annulla» → `CancelSignIn`) prendono il posto dei campi. Niente lime: la direzione artistica non ne vuole
-//! sull'accesso.
+//! «Accedi a Psytify» (`Page::SignIn`), as in `PSYTIFY_ART_DIRECTION.md` («Sign-in / social») and the
+//! The column of `SIGN_IN_W` (360 dp) on the canvas, Nastro
+//! (`nastro_idle`) above the wordmark and a line that changes with the step; the tabs Accedi / Crea un account;
+//! the 40 dp fields; the GitHub, Google and Discord buttons (secondary, with the monochrome mark of the
+//! provider at 20 dp, the only vector exception); the errors in `TEXT_ERROR` under the button, never in a
+//! notice. The email code step (`AuthView::step`) and the wait for the browser (`AuthView::waiting`, with
+//! «Annulla» → `CancelSignIn`) take the place of the fields. No lime: the art direction does not want it
+//! on sign-in.
 //!
-//! La password e il codice stanno solo nei loro campi (mascherati): all'invio il testo si prende e il campo
-//! si svuota nello stesso momento (`SearchField::take`), poi va al core avvolto in `Secret`. Niente di loro
-//! passa dall'istantanea, dai `Debug`, dai log o dagli avvisi. Invio manda il modulo, Tab passa al campo
-//! dopo. Scrivere di nuovo toglie l'errore mostrato (`DismissError`), come nel client Iced.
+//! The password and the code stay only in their fields (masked): on submit the text is taken and the field
+//! is emptied at the same moment (`SearchField::take`), then it goes to the core wrapped in `Secret`. None of it
+//! passes through the snapshot, the `Debug`s, the logs or the notices. Enter sends the form, Tab moves to the
+//! next field. Typing again removes the error shown (`DismissError`).
 //!
-//! La pagina copia dalla vista sociale solo ciò che mostra (`Mirror`), quando il core pubblica; `render`
-//! non legge l'istantanea.
+//! The page copies from the social view only what it shows (`Mirror`), when the core publishes; `render`
+//! does not read the snapshot.
 
 use std::sync::Arc;
 
@@ -45,7 +45,7 @@ use crate::core_model::{Changed, CoreModel};
 use crate::pixel::PixelSprite;
 use crate::theme::{TypeStyle, col, dp};
 
-/// La scheda del modulo.
+/// The form's tab.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
     #[default]
@@ -53,25 +53,25 @@ pub enum Mode {
     SignUp,
 }
 
-/// Il passo dell'accesso, dalla vista del core.
+/// The sign-in step, from the core's view.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Stage {
-    /// I campi della scheda.
+    /// The fields of the tab.
     #[default]
     Form,
-    /// Il codice mandato a questo indirizzo (già mascherato dal core).
+    /// The code sent to this address (already masked by the core).
     Code(SharedString),
-    /// Si aspetta il ritorno dal browser di questo provider.
+    /// Waiting for the return from this provider's browser.
     Waiting(Provider),
 }
 
-/// Ciò che la pagina mostra della vista sociale.
+/// What the page shows of the social view.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Mirror {
     stage: Stage,
     busy: bool,
     error: Option<SharedString>,
-    /// Il login è configurato.
+    /// Sign-in is configured.
     available: bool,
 }
 
@@ -92,7 +92,7 @@ impl Mirror {
     }
 }
 
-/// Quanto c'è nei campi: i testi in chiaro e, dei campi mascherati, solo quanti caratteri hanno.
+/// What is in the fields: the plain texts and, of the masked fields, only how many characters they have.
 #[derive(Clone, Copy, Debug, Default)]
 struct Typed<'a> {
     identifier: &'a str,
@@ -102,9 +102,9 @@ struct Typed<'a> {
     code_chars: usize,
 }
 
-/// Il modulo si può mandare (le regole del client Iced, `SignInForm::can_submit`): per l'accesso un nome e
-/// una password, per la registrazione un'email e una password di almeno 8 caratteri, per il codice 6 cifre;
-/// mai mentre un invio è in corso o si aspetta il browser.
+/// The form can be sent (the rules of `SignInForm::can_submit`): for sign-in a username and
+/// a password, for sign-up an email and a password of at least 8 characters, for the code 6 digits;
+/// never while a submit is in progress or the browser is awaited.
 fn can_submit(mode: Mode, stage: &Stage, busy: bool, typed: &Typed) -> bool {
     if busy {
         return false;
@@ -119,7 +119,7 @@ fn can_submit(mode: Mode, stage: &Stage, busy: bool, typed: &Typed) -> bool {
     }
 }
 
-/// Il campo mascherato che l'invio svuota.
+/// The masked field that submit empties.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MaskedField {
     Password,
@@ -136,7 +136,7 @@ fn secret_field(mode: Mode, stage: &Stage) -> Option<MaskedField> {
     }
 }
 
-/// Il comando dell'invio, con il testo del campo mascherato già preso (e subito avvolto in `Secret`).
+/// The submit command, with the masked field's text already taken (and at once wrapped in `Secret`).
 fn command(mode: Mode, stage: &Stage, typed: &Typed, secret: String) -> Option<SocialCmd> {
     let secret = Secret::new(secret);
     Some(match (stage, mode) {
@@ -153,7 +153,7 @@ fn command(mode: Mode, stage: &Stage, typed: &Typed, secret: String) -> Option<S
     })
 }
 
-/// La riga sotto il wordmark, che cambia con il passo.
+/// The line under the wordmark, which changes with the step.
 fn line(mode: Mode, stage: &Stage) -> &'static str {
     match (stage, mode) {
         (Stage::Code(_), _) => "Controlla la posta",
@@ -163,7 +163,7 @@ fn line(mode: Mode, stage: &Stage) -> &'static str {
     }
 }
 
-/// Il marchio di un provider.
+/// A provider's mark.
 fn mark(provider: Provider) -> &'static [u8] {
     match provider {
         Provider::GitHub => brand::GITHUB,
@@ -172,7 +172,7 @@ fn mark(provider: Provider) -> &'static [u8] {
     }
 }
 
-/// I campi del modulo.
+/// The form's fields.
 struct Fields {
     identifier: Entity<SearchField>,
     password: Entity<SearchField>,
@@ -187,10 +187,10 @@ pub struct SignInPage {
     mode: Mode,
     mirror: Mirror,
     fields: Fields,
-    /// Il pulsante principale è acceso (ricalcolato a ogni tasto, la pagina si ridisegna solo se cambia).
+    /// The main button is lit (recomputed on every key; the page redraws only if it changes).
     ready: bool,
-    /// Alla prossima occasione il focus va al primo campo del passo (la pagina si è aperta, il passo è
-    /// cambiato).
+    /// At the next chance focus goes to the step's first field (the page has opened, the step has
+    /// changed).
     focus_first: bool,
     focus: FocusHandle,
     /// Only the enter: the 360 dp column stays centred on any width.
@@ -200,8 +200,8 @@ pub struct SignInPage {
 
 impl EventEmitter<PageEvent> for SignInPage {}
 
-/// Un campo del modulo: 40 dp, senza icone; ogni tasto e Invio tornano alla pagina dopo che il campo ha
-/// finito il suo aggiornamento (`App::defer`: il campo è ancora in prestito mentre chiama).
+/// A form field: 40 dp, no icons; every key and Enter return to the page after the field has
+/// finished its update (`App::defer`: the field is still borrowed while it calls).
 fn field(
     page: &WeakEntity<SignInPage>,
     id: &'static str,
@@ -266,7 +266,7 @@ impl SignInPage {
         }
     }
 
-    /// La pagina si apre: il focus andrà al primo campo.
+    /// The page opens: focus will go to the first field.
     pub fn show(&mut self, cx: &mut Context<Self>) {
         self.focus_first = true;
         cx.notify();
@@ -284,7 +284,7 @@ impl SignInPage {
             return;
         }
         if mirror.stage != self.mirror.stage {
-            // Un passo nuovo comincia con il suo campo vuoto e con il focus.
+            // A new step starts with its empty field and with focus.
             self.fields.code.update(cx, |field, cx| field.reset(cx));
             self.focus_first = true;
         }
@@ -310,7 +310,7 @@ impl SignInPage {
         can_submit(self.mode, &self.mirror.stage, self.mirror.busy, &self.typed(cx))
     }
 
-    /// Un campo è cambiato: l'errore mostrato se ne va, il pulsante si accende o si spegne.
+    /// A field changed: the error shown goes away, the button lights up or goes off.
     fn edited(&mut self, cx: &mut Context<Self>) {
         if self.mirror.error.is_some() {
             self.core.read(cx).social(SocialCmd::DismissError);
@@ -322,7 +322,7 @@ impl SignInPage {
         }
     }
 
-    /// Invio o il pulsante principale: prende il testo mascherato (il campo si svuota subito) e lo manda.
+    /// Enter or the main button: takes the masked text (the field empties at once) and sends it.
     fn submit(&mut self, cx: &mut Context<Self>) {
         if !self.compute_ready(cx) {
             return;
@@ -342,7 +342,7 @@ impl SignInPage {
         cx.notify();
     }
 
-    /// Cambia scheda: le password se ne vanno, come un passo del codice lasciato a metà (`CancelSignIn`).
+    /// Changes the tab: the passwords go away, like an email code step left half done (`CancelSignIn`).
     fn select(&mut self, mode: Mode, cx: &mut Context<Self>) {
         if mode == self.mode {
             return;
@@ -525,8 +525,8 @@ impl Render for SignInPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.frame.begin(window, None);
         if self.focus_first {
-            // Il focus al primo campo del passo, quando la pagina si apre o il passo cambia (mentre si aspetta
-            // il browser non c'è un campo).
+            // Focus on the step's first field, when the page opens or the step changes (while waiting
+            // for the browser there is no field).
             self.focus_first = false;
             if self.mirror.available && !matches!(self.mirror.stage, Stage::Waiting(_)) {
                 let handle = self.first_field().read(cx).focus_handle(cx);
@@ -622,7 +622,7 @@ mod tests {
         let code = Stage::Code("p***@example.com".into());
         assert!(can_submit(Mode::SignIn, &code, false, &typed("", "", 0, 6)));
         assert!(!can_submit(Mode::SignIn, &code, false, &typed("", "", 0, 5)));
-        // Mai mentre un invio è in corso o si aspetta il browser.
+        // Never while a submit is in progress or the browser is awaited.
         assert!(!can_submit(Mode::SignIn, &form, true, &typed("luca", "", 3, 0)));
         assert!(!can_submit(
             Mode::SignIn,

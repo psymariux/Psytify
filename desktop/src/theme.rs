@@ -129,9 +129,9 @@ impl Ap {
     }
 }
 
-const INTER_REGULAR: &[u8] = include_bytes!("../../client/assets/fonts/Inter-Regular.ttf");
-const INTER_MEDIUM: &[u8] = include_bytes!("../../client/assets/fonts/Inter-Medium.ttf");
-const INTER_SEMIBOLD: &[u8] = include_bytes!("../../client/assets/fonts/Inter-SemiBold.ttf");
+const INTER_REGULAR: &[u8] = include_bytes!("../../design/assets/fonts/Inter-Regular.ttf");
+const INTER_MEDIUM: &[u8] = include_bytes!("../../design/assets/fonts/Inter-Medium.ttf");
+const INTER_SEMIBOLD: &[u8] = include_bytes!("../../design/assets/fonts/Inter-SemiBold.ttf");
 const DEPARTURE_MONO: &[u8] = include_bytes!("../../design/assets/fonts/DepartureMono-Regular.otf");
 
 /// Registers Inter (400, 500, 600) and Departure Mono. Call at start, before opening a window. A font that

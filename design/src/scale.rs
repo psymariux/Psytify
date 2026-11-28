@@ -1,14 +1,14 @@
-//! Scala e griglia dei pixel d'arte (sezione 2 del documento dei token).
+//! Art-pixel scale and grid (section 2 of the token document).
 //!
-//! Un pixel d'arte (AP) vale 2 dp nominali, ma sullo schermo deve occupare un numero intero di pixel
-//! fisici, altrimenti gli sprite sfocano o hanno «mixel». `art_px` quantizza; `snap_*` e
-//! `center_offset_device` allineano posizioni e offset alla stessa griglia.
+//! One art pixel (AP) is 2 nominal dp, but on screen it must cover a whole number of physical pixels,
+//! otherwise sprites blur or show "mixels". `art_px` quantises; `snap_*` and
+//! `center_offset_device` align positions and offsets to the same grid.
 
 use crate::tokens::space::{AP_DP, AP_EPSILON};
 
-/// Pixel fisici per pixel d'arte a un dato fattore di scala: `max(1, floor(AP_DP * scale + 0.001))`.
+/// Physical pixels per art pixel at a given scale factor: `max(1, floor(AP_DP * scale + 0.001))`.
 ///
-/// Un fattore non finito o non positivo vale 1 (mai 0: dividerebbe per zero chi lo usa).
+/// A non-finite or non-positive factor gives 1 (never 0: callers would divide by zero).
 pub fn art_px(scale_factor: f32) -> u32 {
     if !scale_factor.is_finite() || scale_factor <= 0.0 {
         return 1;
@@ -16,40 +16,40 @@ pub fn art_px(scale_factor: f32) -> u32 {
     ((AP_DP * scale_factor + AP_EPSILON).floor() as u32).max(1)
 }
 
-/// Dimensione in pixel fisici di uno sprite di `art_pixels` pixel d'arte.
+/// Pixel size of a sprite of `art_pixels` art pixels.
 pub const fn sprite_device_px(art_pixels: u32, ap_device: u32) -> u32 {
     art_pixels * ap_device
 }
 
-/// Dimensione pixel del font in pixel fisici (11 AP) e relativa interlinea (14 AP): una regola
-/// sola per il tipo Departure Mono, dove un pixel del font è un AP.
+/// Font pixel size in physical pixels (11 AP) and its line height (14 AP): one rule
+/// for the Departure Mono type, where one font pixel is one AP.
 pub const fn pixel_type_device(ap_device: u32) -> (u32, u32) {
     (crate::tokens::type_::PIXEL_SIZE_AP * ap_device, crate::tokens::type_::PIXEL_LINE_AP * ap_device)
 }
 
-/// Converte dp in pixel fisici (non arrotonda).
+/// Converts dp to physical pixels (does not round).
 pub fn dp_to_device(dp: f32, scale_factor: f32) -> f32 {
     dp * scale_factor
 }
 
-/// Arrotonda `x` al multiplo più vicino di `unit` (ex aequo verso l'alto). `unit <= 0` o non finito
-/// restituisce `x` invariato.
+/// Rounds `x` to the nearest multiple of `unit` (ties go up). `unit <= 0` or non-finite
+/// returns `x` unchanged.
 pub fn snap_round(x: f32, unit: f32) -> f32 {
     if unit.is_finite() && unit > 0.0 { (x / unit).round() * unit } else { x }
 }
 
-/// Porta `x` al multiplo di `unit` uguale o inferiore. `unit <= 0` o non finito restituisce `x`.
+/// Brings `x` down to the multiple of `unit` that is equal or lower. `unit <= 0` or non-finite returns `x`.
 pub fn snap_floor(x: f32, unit: f32) -> f32 {
     if unit.is_finite() && unit > 0.0 { (x / unit).floor() * unit } else { x }
 }
 
-/// Origine in pixel fisici interi di una posizione data in dp (arrotondata al pixel fisico più vicino).
+/// Origin in whole physical pixels of a position given in dp (rounded to the nearest physical pixel).
 pub fn snap_device(x_dp: f32, scale_factor: f32) -> i32 {
     (x_dp * scale_factor).round() as i32
 }
 
-/// Offset in pixel fisici (arrotondato per difetto) per centrare uno sprite di `art_pixels` AP
-/// nello slot nominale di `slot_dp` dp. Può essere negativo se lo sprite è più largo dello slot.
+/// Offset in physical pixels (rounded down) to centre a sprite of `art_pixels` AP
+/// in the nominal slot of `slot_dp` dp. It can be negative if the sprite is wider than the slot.
 pub fn center_offset_device(slot_dp: f32, art_pixels: u32, scale_factor: f32) -> i32 {
     let slot = slot_dp * scale_factor;
     let sprite = sprite_device_px(art_pixels, art_px(scale_factor)) as f32;
@@ -91,10 +91,10 @@ mod tests {
     fn art_px_is_monotonic_and_never_larger_than_nominal() {
         let mut previous = 0;
         for step in 8..=64 {
-            let scale = step as f32 * 0.0625; // da 0,5 a 4,0 (sotto, il minimo di 1 supera il nominale)
+            let scale = step as f32 * 0.0625; // from 0.5 to 4.0 (below that, the minimum of 1 exceeds the nominal)
             let ap = art_px(scale);
             assert!(ap >= previous, "scale {scale}");
-            // Mai più grande del nominale (2 dp x scala), al più un passo più piccolo.
+            // Never larger than nominal (2 dp x scale), at most one step smaller.
             let nominal = AP_DP * scale;
             assert!(ap as f32 <= nominal + AP_EPSILON, "scale {scale}");
             assert!(nominal - (ap as f32) < 1.0 + AP_EPSILON, "scale {scale}");
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn exact_integers_do_not_fall_through_float_error() {
-        // 3 x 2 = 6 esatto, ma qualunque errore binario non deve produrre 5.
+        // 3 x 2 = 6 exactly, but any binary error must not produce 5.
         for n in 1..=8u32 {
             assert_eq!(art_px(n as f32 / 2.0), n);
         }
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn sprite_sizes_follow_the_table() {
-        // 12 AP a scala 1,25: 24 px fisici = 19,2 dp; mascotte 32 AP a 1,75: 96 px = 54,86 dp.
+        // 12 AP at scale 1.25: 24 physical px = 19.2 dp; mascot 32 AP at 1.75: 96 px = 54.86 dp.
         assert_eq!(sprite_device_px(12, art_px(1.25)), 24);
         assert_eq!(sprite_device_px(32, art_px(1.75)), 96);
         assert_eq!(sprite_device_px(12, art_px(4.0)), 96);
@@ -138,13 +138,13 @@ mod tests {
 
     #[test]
     fn centered_sprite_offset_is_floored_to_whole_device_pixels() {
-        // Icona 12 AP in uno slot di 24 dp.
+        // Icon 12 AP in a 24 dp slot.
         assert_eq!(center_offset_device(24.0, 12, 1.0), 0);
         assert_eq!(center_offset_device(24.0, 12, 1.25), 3); // slot 30, sprite 24
         assert_eq!(center_offset_device(24.0, 12, 1.75), 3); // slot 42, sprite 36
         assert_eq!(center_offset_device(24.0, 12, 2.625), 1); // slot 63, sprite 60
         assert_eq!(center_offset_device(24.0, 12, 2.0), 0);
-        // Più largo dello slot: offset negativo, non panico.
+        // Wider than the slot: negative offset, not a panic.
         assert!(center_offset_device(8.0, 12, 1.0) < 0);
     }
 }

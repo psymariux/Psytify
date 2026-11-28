@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Samples a Psytify process from /proc: CPU per thread, RSS and GPU compute memory.
+"""Sample a Psytify process from /proc: CPU per thread, RSS and GPU compute memory.
 
 Usage: scripts/perf-sample.py PID [SECONDS]   (default 30)
 
-It needs no privileges: it only reads /proc and nvidia-smi. The result goes into
-docs/PERFORMANCE.md with the app state (idle, playing, video, lyrics, format).
-"""
+No privileges needed: it reads only /proc and nvidia-smi. Report the result in
+docs/PERFORMANCE.md with the app state (stopped, playing, video, lyrics, format)."""
 
 import os
 import subprocess
@@ -16,7 +15,7 @@ HZ = os.sysconf("SC_CLK_TCK")
 
 
 def thread_ticks(pid):
-    """CPU (user + system, in ticks) of every thread, by tid."""
+    """CPU (user + system, in ticks) of each thread, per tid."""
     ticks = {}
     for tid in os.listdir(f"/proc/{pid}/task"):
         try:
@@ -72,10 +71,10 @@ def main():
     per_thread.sort(reverse=True)
     total = sum(share for share, _ in per_thread)
 
-    print(f"Total CPU: {total:.1f}% of a core (sample of {elapsed:.0f} s)")
+    print(f"Total CPU: {total:.1f}% of one core (sample of {elapsed:.0f} s)")
     top = ", ".join(f"{name}={share:.1f}%" for share, name in per_thread[:8] if share >= 0.05)
-    print(f"Busiest threads: {top or 'none'}")
-    print(f"RSS: {rss_mb(pid):.0f} MB   GPU (calcolo): {compute_mib(pid)} MiB   thread: {len(after)}")
+    print(f"Most active threads: {top or 'none'}")
+    print(f"RSS: {rss_mb(pid):.0f} MB   GPU (compute): {compute_mib(pid)} MiB   threads: {len(after)}")
 
 
 if __name__ == "__main__":

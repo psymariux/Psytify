@@ -1,12 +1,12 @@
-//! Discord Rich Presence: «Sta ascoltando Psytify» con brano, artista, copertina e tempo, sul
-//! profilo Discord dell'utente. Parla con l'app di Discord aperta sullo stesso computer attraverso
-//! il suo canale locale (IPC), senza crate esterne: socket Unix `discord-ipc-N` su Linux e macOS,
-//! named pipe `\\.\pipe\discord-ipc-N` su Windows. Su Android non c'è.
+//! Discord Rich Presence: «Sta ascoltando Psytify» with track, artist, cover and time, on the
+//! user's Discord profile. It talks to the Discord app open on the same computer through
+//! its local channel (IPC), with no external crate: Unix socket `discord-ipc-N` on Linux and macOS,
+//! named pipe `\\.\pipe\discord-ipc-N` on Windows. There is none on Android.
 //!
-//! Il protocollo: ogni messaggio è un opcode e una lunghezza (u32 little-endian) seguiti da JSON.
-//! Prima l'handshake con l'Application ID dell'app Discord «Psytify», poi `SET_ACTIVITY` a ogni
-//! cambio. Tutto avviene in un thread dedicato: l'interfaccia manda solo l'attività voluta su un
-//! canale e non aspetta mai Discord. Se Discord non è aperto, si riprova ogni tanto in silenzio.
+//! The protocol: each message is an opcode and a length (u32 little-endian) followed by JSON.
+//! First the handshake with the Application ID of the Discord app «Psytify», then `SET_ACTIVITY` at each
+//! change. Everything happens on a dedicated thread: the interface only sends the wanted activity on a
+//! channel and never waits for Discord. If Discord is not open, it retries from time to time, silently.
 
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -14,28 +14,28 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-/// Ogni quanto si riprova a raggiungere Discord se l'attività non è arrivata.
+/// How often to retry reaching Discord if the activity did not arrive.
 const RETRY: Duration = Duration::from_secs(15);
-/// Un messaggio di Discord più grande di così non è una risposta valida.
+/// A Discord message bigger than this is not a valid reply.
 const MAX_FRAME: usize = 64 * 1024;
 const OP_HANDSHAKE: u32 = 0;
 const OP_FRAME: u32 = 1;
 const OP_CLOSE: u32 = 2;
 
-/// Cosa mostrare su Discord.
+/// What to show on Discord.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Activity {
     pub title: String,
     pub artist: String,
     pub album: Option<String>,
-    /// Copertina pubblica (Archive o Deezer): Discord la scarica da sé.
+    /// Public cover (Archive or Deezer): Discord downloads it itself.
     pub cover_url: Option<String>,
-    /// Inizio e fine del brano in millisecondi dall'epoca; `None` in pausa.
+    /// Start and end of the track in milliseconds from the epoch; `None` when paused.
     pub span: Option<(u64, u64)>,
 }
 
 impl Activity {
-    /// Brano in corso dalla posizione e dalla durata: Discord mostra il tempo che scorre.
+    /// Track playing from the position and the duration: Discord shows the time running.
     pub fn playing(
         title: &str,
         artist: &str,
@@ -56,7 +56,7 @@ impl Activity {
         }
     }
 
-    /// Il JSON di `SET_ACTIVITY`. Discord vuole testi da 2 a 128 caratteri.
+    /// The JSON of `SET_ACTIVITY`. Discord wants texts from 2 to 128 characters.
     fn to_json(&self) -> Value {
         let text = |value: &str| {
             let mut value: String = value.chars().take(128).collect();
@@ -88,7 +88,7 @@ impl Activity {
     }
 }
 
-/// Il collegamento a Discord. Chiuderlo (drop) ferma il thread e toglie l'attività.
+/// The link to Discord. Closing it (drop) stops the thread and removes the activity.
 pub struct Presence {
     sender: Sender<Option<Activity>>,
 }
@@ -100,8 +100,8 @@ impl std::fmt::Debug for Presence {
 }
 
 impl Presence {
-    /// Avvia il thread per l'app Discord `app_id`. `None` se l'id non è un numero o il thread non
-    /// parte.
+    /// Starts the thread for the Discord app `app_id`. `None` if the id is not a number or the thread
+    /// does not start.
     pub fn start(app_id: &str) -> Option<Self> {
         let app_id = app_id.trim();
         if app_id.is_empty() || !app_id.bytes().all(|b| b.is_ascii_digit()) {
@@ -113,7 +113,7 @@ impl Presence {
         Some(Self { sender })
     }
 
-    /// L'attività da mostrare, o nessuna. Non blocca.
+    /// The activity to show, or none. Does not block.
     pub fn set(&self, activity: Option<Activity>) {
         let _ = self.sender.send(activity);
     }
@@ -122,12 +122,12 @@ impl Presence {
 fn run(app_id: &str, receiver: &Receiver<Option<Activity>>) {
     let mut connection: Option<Connection> = None;
     let mut wanted: Option<Activity> = None;
-    // `true` finché l'ultima attività voluta non è arrivata a Discord.
+    // `true` until the last wanted activity has reached Discord.
     let mut dirty = false;
     loop {
         match receiver.recv_timeout(RETRY) {
             Ok(activity) => {
-                // Arrivano a raffiche (salti, cambi di brano): conta l'ultima.
+                // They arrive in bursts (skips, track changes): the last one counts.
                 wanted = receiver.try_iter().last().unwrap_or(activity);
                 dirty = true;
             }
@@ -149,7 +149,7 @@ fn run(app_id: &str, receiver: &Receiver<Option<Activity>>) {
         let Some(open) = connection.as_mut() else { continue };
         match open.set_activity(wanted.as_ref()) {
             Ok(()) => dirty = false,
-            // Discord chiuso o riavviato: al prossimo giro si riapre.
+            // Discord closed or restarted: it reopens on the next round.
             Err(_) => connection = None,
         }
     }
@@ -166,7 +166,7 @@ struct Connection {
 }
 
 impl Connection {
-    /// I posti dove Discord apre il canale: la cartella runtime, e quelle di Flatpak e Snap.
+    /// The places where Discord opens its channel: the runtime folder, and those of Flatpak and Snap.
     #[cfg(unix)]
     fn candidates() -> Vec<std::path::PathBuf> {
         let base = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"]
@@ -197,7 +197,7 @@ impl Connection {
     fn open(app_id: &str) -> Option<Self> {
         let mut connection = Self { stream: Self::connect()?, nonce: 0 };
         connection.write_frame(OP_HANDSHAKE, &json!({"v": 1, "client_id": app_id})).ok()?;
-        // La prima risposta è `READY`; un errore (id sconosciuto) chiude il canale.
+        // The first reply is `READY`; an error (unknown id) closes the channel.
         let (op, _) = connection.read_frame().ok()?;
         (op == OP_FRAME).then_some(connection)
     }
@@ -210,7 +210,7 @@ impl Connection {
             "nonce": self.nonce.to_string(),
         });
         self.write_frame(OP_FRAME, &payload)?;
-        // Discord risponde a ogni comando: la risposta si legge, così il canale non si riempie.
+        // Discord answers every command: the reply is read, so the channel does not fill up.
         let (op, _) = self.read_frame()?;
         if op == OP_CLOSE { Err(std::io::ErrorKind::ConnectionAborted.into()) } else { Ok(()) }
     }

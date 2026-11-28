@@ -4,17 +4,17 @@
 #
 # Usage: [QUICK=1] [RELEASE=1] [FIXTURES=1] [INSTALL=1] scripts/android-kotlin.sh [BACKEND_URL]
 #   QUICK=1      x86_64 only and without LTO (profile `android-quick`), for the emulator
-#   RELEASE=1    the release APK (`dev.psytify.app`, R8, signed with the release key as
-#                scripts/android-apk.sh signs the Iced one: it installs over it). Without it, the
-#                debug APK (`dev.psytify.app.kotlin`, next to the installed app).
+#   RELEASE=1    the release APK (`dev.psytify.app`, R8, signed with the release key: it installs
+#                over the earlier releases). Without it, the debug APK (`dev.psytify.app.kotlin`,
+#                next to the installed app).
 #   FIXTURES=1   fake social and jam views for screenshots (`psytify-mobile`'s `fixtures` feature,
 #                started with `adb shell am start ... --es fixture NAME`). Debug APKs only: a release
 #                build must never pass it.
 #   INSTALL=1    install the APK on the device or emulator that adb sees
-#   BACKEND_URL  backend of a new configuration, as for scripts/android-apk.sh. Without it: the
+#   BACKEND_URL  backend of a new configuration. Without it: the
 #                PSYTIFY_DEFAULT_API_URL of `.env.build`, or http://10.0.2.2:8080 with QUICK=1.
 #
-# Requires: what scripts/android-apk.sh needs (SDK, NDK 27, Rust Android targets), cargo-ndk
+# Requires: the Android SDK, NDK 27 (scripts/android-env.sh) and the Rust Android targets, cargo-ndk
 # (`cargo install cargo-ndk --locked`) and a JDK 21 for Gradle (JAVA_HOME, or one that Gradle has
 # provisioned in ~/.gradle/jdks). Every build runs inside a memory-capped scope, one at a time.
 set -euo pipefail
@@ -61,8 +61,8 @@ if [ "${FIXTURES:-}" = 1 ]; then
   FEATURES=(--features fixtures)
 fi
 
-# The release key, outside the repository (as in scripts/android-apk.sh, which creates it on its
-# first run; so does this). The password stays in its file: never on a command line or in a log.
+# The release key, outside the repository, created on the first release build. The password stays
+# in its file: never on a command line or in a log.
 KEYSTORE=$HOME/.android/psytify-release.keystore
 PASSFILE=$HOME/.android/psytify-release.pass
 if [ "${RELEASE:-}" = 1 ] && [ ! -f "$KEYSTORE" ]; then

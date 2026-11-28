@@ -1,5 +1,5 @@
-//! The page of an artist (`PSYTIFY_ART_DIRECTION.md`, Artist), with the Iced client's sections in its
-//! order (`client/src/ui/pages/artist.rs`): the head with the 200 dp photo in the pixel circle, the name,
+//! The page of an artist (`PSYTIFY_ART_DIRECTION.md`, Artist), with its sections in the
+//! same order: the head with the 200 dp photo in the pixel circle, the name,
 //! albums, singles and fans; the 56 dp play button, Segui / Segui già and Radio. Then, from the official
 //! catalogue («Altro di …», `ArtistExtras`): *Popolari* (5, or two columns of five above 1500 dp; «Mostra
 //! altri» shows them all) and *Discografia* (tabs Tutto, Album, Singoli when both kinds exist; a cover opens
@@ -68,7 +68,7 @@ fn popular_columns(inner: f32) -> usize {
     if inner >= BP_FLOW_3 { 2 } else { 1 }
 }
 
-/// How the discography is filtered (as in the Iced client, `client/src/app/artists.rs`).
+/// How the discography is filtered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Discography {
     #[default]
@@ -97,7 +97,7 @@ impl Discography {
     }
 }
 
-/// The page's sections, in the Iced client's order.
+/// The page's sections, in display order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Section {
     Popular,
@@ -263,7 +263,7 @@ pub struct ArtistPage {
     following: bool,
     radio: Option<Track>,
     /// «Scarica tutto» of the server's tracks, only when the official catalogue gives no *Popolari* (as in
-    /// the Iced client, which then plays the server's tracks); and the running batch's count.
+    /// the page, which then plays the server's tracks); and the running batch's count.
     download_label: Option<&'static str>,
     batch: Option<SharedString>,
     liked: Arc<HashSet<Uuid>>,
@@ -350,7 +350,7 @@ impl ArtistPage {
     }
 
     /// Shows artist `id`: the core serves it from its cache or loads it. Another artist resets the filter
-    /// and «Mostra altri», as in the Iced client.
+    /// and «Mostra altri».
     pub fn show(&mut self, id: Uuid, cx: &mut Context<Self>) {
         self.core.read(cx).catalog(CatalogCmd::Ensure(Resource::Artist(id)));
         if self.id == Some(id) {

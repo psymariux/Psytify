@@ -1,7 +1,7 @@
 # Psytify design tokens
 
 Status: v1, 2026-11-22. Owner: art direction. Replaces the tokens in `docs/STYLE.md` and
-`client/src/ui/theme.rs` once `psytify-design` lands (migration step 3b).
+the Iced theme once `psytify-design` landed (migration step 3b; the Iced app is gone).
 
 These are framework-neutral data. `psytify-design` stores them as plain constants (colors as `[u8; 4]`
 RGBA, lengths as `f32` dp, durations as `u32` ms). GPUI and Iced each convert them to their own types.
@@ -163,7 +163,7 @@ strings can be any script and any length.
 
 | Token | Family | File | Licence (verified 2026-11-22) |
 |---|---|---|---|
-| `FAMILY_UI` | Inter 4.1 (400, 500, 600) | `client/assets/fonts/Inter-*.ttf` (bundled) | SIL OFL 1.1, `OFL.txt` bundled |
+| `FAMILY_UI` | Inter 4.1 (400, 500, 600) | `design/assets/fonts/Inter-*.ttf` (bundled) | SIL OFL 1.1, `OFL.txt` bundled |
 | `FAMILY_PIXEL` | Departure Mono 1.500 (Regular) | to bundle: `DepartureMono-Regular.otf` from `github.com/rektdeckard/departure-mono` `public/assets/` | SIL OFL 1.1: `public/assets/LICENSE` in that repo ("Copyright 2022–2024 Helena Zhang"); the repo-root `LICENSE` is MIT and covers only the website. Name table ID 13 also states OFL 1.1. Bundle the OFL text as `DepartureMono-OFL.txt` and add a CREDITS line. sha256 of the checked file: `4d53f663155cf8bf7ffc8e688776e719625f7bbb80a8d90073438b249261a2e0` |
 
 Departure Mono metrics: 550 units/em, one font pixel = 50 units, so at 11 px it is one device px per font pixel;

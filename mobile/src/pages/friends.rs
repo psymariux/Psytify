@@ -1,4 +1,4 @@
-//! «Amici», as the GPUI page (`desktop/src/app/friends_page.rs`) and the Iced phone: the people found
+//! «Amici», as the GPUI page (`desktop/src/app/friends_page.rs`) and the phone: the people found
 //! by username (the field is the app's, `PsytifyCore::search_users`), the requests that arrived
 //! (Accetta, Rifiuta), the ones sent (Ritira), then the friends with what they listen to («Sta
 //! ascoltando …» with the live dot). A tap on a person opens the profile. While a request for someone

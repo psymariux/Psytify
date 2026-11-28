@@ -1,6 +1,6 @@
 //! «Scaricati»: the running downloads and the tracks on the device, which play without network. Everything
 //! comes from `DownloadsView` and every gesture is a `DownloadsCmd` (or a `PlaybackCmd` to play): the page
-//! touches no disk and computes nothing while drawing, like the Iced page (`client/src/ui/pages/downloads.rs`).
+//! touches no disk and computes nothing while drawing, like the rest of the page.
 //!
 //! At the top the title with the count and the space used, the folder and the quality, and the buttons
 //! Riproduci, Casuale, «Apri cartella» and «Controlla i file» (the deep check, `DownloadsCmd::Verify`). Below,
@@ -45,7 +45,7 @@ use crate::core_model::{Changed, CoreModel};
 use crate::format;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Le due sezioni.
+/// The two sections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Section {
     InProgress,
@@ -61,20 +61,20 @@ impl Section {
     }
 }
 
-/// Una riga della lista, nell'ordine in cui si disegna. Gli indici sono nelle liste del core.
+/// A row of the list, in the order it is drawn. The indices are into the core's lists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Heading(Section),
-    /// Un download della coda (`DownloadsView::items`).
+    /// A download of the queue (`DownloadsView::items`).
     Item(usize),
-    /// Niente sul dispositivo, ma qualcosa in corso: una frase al posto della sezione.
+    /// Nothing on the device, but something in progress: a sentence in place of the section.
     NothingSaved,
-    /// Un brano sul dispositivo (`DownloadsView::saved`).
+    /// A track on the device (`DownloadsView::saved`).
     Saved(usize),
 }
 
-/// Quali righe mostrare: prima i download in corso, poi i brani sul dispositivo. Vuoto se non c'è né
-/// l'una né l'altra cosa (la pagina mostra allora il suo stato vuoto). Pura.
+/// Which rows to show: first the downloads in progress, then the tracks on the device. Empty if there is neither
+/// of the two (the page then shows its empty state). Pure.
 fn plan(items: usize, saved: usize) -> Vec<Row> {
     let mut rows = Vec::with_capacity(items + saved + 2);
     if items > 0 {
@@ -90,14 +90,14 @@ fn plan(items: usize, saved: usize) -> Vec<Row> {
     rows
 }
 
-/// I testi di un download della coda.
+/// The texts of a queued download.
 #[derive(Clone, Debug, PartialEq)]
 struct ItemText {
     id: Uuid,
     title: SharedString,
     status: SharedString,
     failed: bool,
-    /// La barra a dieci passi, finché il download è vivo.
+    /// The ten-step bar, as long as the download is alive.
     steps: Option<f32>,
     cover_url: Option<SharedString>,
 }
@@ -123,7 +123,7 @@ impl ItemText {
     }
 }
 
-/// I testi di un brano sul dispositivo: «Artista · FLAC · 12,3 MB», o il problema del suo file.
+/// The texts of a track on the device: «Artista · FLAC · 12,3 MB», or the problem with its file.
 #[derive(Clone, Debug, PartialEq)]
 struct SavedText {
     id: Uuid,
@@ -158,7 +158,7 @@ impl SavedText {
     }
 }
 
-/// La riga sotto il titolo: quanti brani e quanto pesano, o che il controllo è in corso.
+/// The line under the title: how many tracks and how much they weigh, or that the check is in progress.
 fn summary(view: &DownloadsView) -> String {
     if view.verifying {
         "Controllo dei file…".to_owned()
@@ -175,15 +175,15 @@ pub struct DownloadsPage {
     rows: Vec<Row>,
     items: Vec<ItemText>,
     saved: Vec<SavedText>,
-    /// I brani sul dispositivo come coda da suonare: si rifà solo quando l'indice cambia.
+    /// The device tracks as a queue to play: rebuilt only when the index changes.
     tracks: Arc<[Track]>,
     summary: SharedString,
     folder: SharedString,
-    /// Il brano in corso e come mostrarlo.
+    /// The playing track and how to show it.
     now: Option<(Uuid, PlayState)>,
     scroll: UniformListScrollHandle,
     frame: PageFrame,
-    /// Il posto dell'equalizzatore del brano in corso: lo dipinge `Shell` (BACKLOG 23).
+    /// The equaliser spot of the playing track: `Shell` paints it (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
@@ -191,7 +191,7 @@ pub struct DownloadsPage {
 impl EventEmitter<PageEvent> for DownloadsPage {}
 
 impl DownloadsPage {
-    /// Il posto dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// The equaliser spot of this view, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -238,8 +238,8 @@ impl DownloadsPage {
         }
     }
 
-    /// Prende la vista nuova e rifà i testi: quelli dei brani sul dispositivo solo se l'indice o i file
-    /// persi sono cambiati (o la prima volta).
+    /// Takes the new view and rebuilds the texts: those of the device tracks only if the index or the lost
+    /// files changed (or the first time).
     fn take(&mut self, view: &Arc<DownloadsView>, first: bool) {
         let saved_changed = first || !view.saved.same(&self.view.saved) || !view.lost.same(&self.view.lost);
         if saved_changed {
@@ -268,7 +268,7 @@ impl DownloadsPage {
         self.core.read(cx).downloads(command);
     }
 
-    /// Doppio clic o Invio su un brano sul dispositivo: suona (o mette in pausa se è già lui).
+    /// Double click or Enter on a device track: plays it (or pauses if it is already the one).
     fn play(&self, position: usize, cx: &gpui::App) {
         let Some(text) = self.saved.get(position) else { return };
         let core = self.core.read(cx);
@@ -394,7 +394,7 @@ impl DownloadsPage {
                             })),
                     );
                 }
-                // The track's «Altro» menu, like a right click on the Iced row.
+                // The track's «Altro» menu, like a right click on a row.
                 let menu_track = self.tracks.get(position).cloned();
                 row.hover_action(
                     IconButton::new(("dl-more", position), sprite::ICON_MORE)
@@ -483,7 +483,7 @@ impl Render for DownloadsPage {
                         "Niente sul dispositivo",
                         "I brani che scarichi stanno qui e suonano anche senza rete. Il tasto Scarica sta accanto ai brani che la licenza lascia tenere.",
                     )
-                    // As in the Iced client; the desktop's A to Z catalogue is on the Home.
+                    // The desktop's A to Z catalogue is on the Home.
                     .action(Button::new("dl-discover", "Scopri il catalogo").on_click(cx.listener(
                         |_, _: &ClickEvent, _, cx| cx.emit(PageEvent::Open(Page::Home)),
                     ))),

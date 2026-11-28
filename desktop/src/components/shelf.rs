@@ -1,11 +1,11 @@
-//! Shelf: una sezione di copertine in una riga sola (Home, «Novità»), come da `PSYTIFY_ART_DIRECTION.md`
-//! (Home): l'intestazione con il titolo, le frecce e «Mostra tutto», poi tante copertine quante ne stanno
-//! intere nella larghezza. Niente carosello che scorre di lato: le frecce (e la rotella in orizzontale,
-//! o con Maiuscolo) spostano la riga di copertine intere, e «Mostra tutto» la apre in una griglia (lo
-//! decide chi usa lo scaffale). Si costruiscono solo le copertine visibili: chi usa lo scaffale chiede a
-//! [`ShelfPage::range`] quali e passa solo quelle.
+//! Shelf: a section of covers in a single row (Home, «Novità»), as in `PSYTIFY_ART_DIRECTION.md`
+//! (Home): the header with the title, the arrows and «Mostra tutto», then as many whole covers as fit
+//! in the width. No carousel that scrolls sideways: the arrows (and the horizontal wheel,
+//! or with Shift) move the row of whole covers, and «Mostra tutto» opens it in a grid (what
+//! decides whoever uses the shelf). Only the visible covers are built: whoever uses the shelf asks
+//! [`ShelfPage::range`] which ones and passes only those.
 //!
-//! La parte di conti è pura ([`ShelfPage`], [`Wheel`], [`fit`]), perché si possa provare senza finestra.
+//! The counting part is pure ([`ShelfPage`], [`Wheel`], [`fit`]), so it can be tested without a window.
 
 use std::ops::Range;
 use std::rc::Rc;
@@ -28,13 +28,13 @@ use crate::theme::dp;
 /// and `gap` between them. At least one. (Fluid grids use `components::frame::TileGrid` instead.)
 pub fn fit(width: f32, side: f32, gap: f32) -> usize {
     let inner = (width - 2.0 * SPACE_6).max(side);
-    // Il conto è su numeri piccoli e positivi: il troncamento è voluto.
+    // The count is on small, positive numbers: the truncation is intended.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let columns = ((inner + gap) / (side + gap)).floor() as usize;
     columns.max(1)
 }
 
-/// La finestra dello scaffale: da quale copertina parte, quante ne stanno, quante sono.
+/// The shelf's window: where it starts from, how many fit, how many there are.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ShelfPage {
     pub start: usize,
@@ -43,8 +43,8 @@ pub struct ShelfPage {
 }
 
 impl ShelfPage {
-    /// La finestra con `start` riportato dentro: l'ultima pagina è sempre piena (se ci sono abbastanza
-    /// copertine), così allargando la finestra non resta un buco a destra.
+    /// The window with `start` brought back inside: the last page is always full (if there are enough
+    /// covers), so widening the window leaves no gap on the right.
     pub fn new(start: usize, columns: usize, count: usize) -> Self {
         let columns = columns.max(1);
         Self { start: start.min(count.saturating_sub(columns)), columns, count }
@@ -55,7 +55,7 @@ impl ShelfPage {
         self.start..(self.start + self.columns).min(self.count)
     }
 
-    /// Ci sono più copertine di quante ne stanno: servono le frecce e «Mostra tutto».
+    /// There are more covers than fit: the arrows and «Mostra tutto» are needed.
     pub fn overflows(&self) -> bool {
         self.count > self.columns
     }
@@ -68,7 +68,7 @@ impl ShelfPage {
         self.start + self.columns < self.count
     }
 
-    /// Dove parte la riga dopo `steps` copertine (negativo: indietro), dentro i bordi.
+    /// Where the row starts after `steps` covers (negative: back), within the edges.
     pub fn moved(&self, steps: isize) -> usize {
         let last = self.count.saturating_sub(self.columns);
         self.start.saturating_add_signed(steps).min(last)
@@ -86,32 +86,32 @@ impl ShelfPage {
 }
 
 /// La rotella in orizzontale: somma i pixel e dice quante copertine intere spostare. Un touchpad manda
-/// tanti spostamenti piccoli, una rotella pochi e grandi: una copertina ogni `unit` pixel.
+/// many small moves, a few large ones for the wheel: one cover every `unit` pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Wheel(f32);
 
 impl Wheel {
-    /// `dx` come lo dà GPUI (positivo: verso sinistra, cioè indietro); torna i passi da fare (positivo:
-    /// avanti) e tiene il resto per il prossimo evento.
+    /// `dx` as GPUI gives it (positive: to the left, that is back); returns the steps to take (positive:
+    /// forward) and keeps the rest for the next event.
     pub fn step(&mut self, dx: f32, unit: f32) -> isize {
         self.0 -= dx;
         let unit = unit.max(1.0);
         let steps = (self.0 / unit).trunc();
         self.0 -= steps * unit;
-        // `steps` è un numero intero piccolo (pochi passi per evento): la conversione è esatta.
+        // `steps` is a small whole number (few steps per event): the conversion is exact.
         #[allow(clippy::cast_possible_truncation)]
         let steps = steps as isize;
         steps
     }
 
-    /// Lo scaffale è cambiato (o la direzione): il resto non vale più.
+    /// The shelf has changed (or the direction): the rest no longer counts.
     pub fn reset(&mut self) {
         self.0 = 0.0;
     }
 }
 
-/// Uno spostamento della rotella come lo vede lo scaffale: solo la parte orizzontale (o quella verticale
-/// con Maiuscolo, come nei browser). `None` se l'evento è verticale: la pagina scorre come sempre.
+/// A wheel movement as the shelf sees it: only the horizontal part (or the vertical one
+/// with Shift, as in browsers). `None` if the event is vertical: the page scrolls as usual.
 fn horizontal(event: &ScrollEvent) -> Option<f32> {
     let delta = event.delta.pixel_delta(px(TRACK_ROW_H));
     let (dx, dy) = (f32::from(delta.x), f32::from(delta.y));
@@ -124,7 +124,7 @@ fn horizontal(event: &ScrollEvent) -> Option<f32> {
 type OnPage = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 type OnWheel = Rc<dyn Fn(f32, &mut Window, &mut App)>;
 
-/// Uno scaffale: intestazione e una riga di copertine (già costruite, solo quelle di [`ShelfPage::range`]).
+/// A shelf: header and a row of covers (already built, only those of [`ShelfPage::range`]).
 #[derive(IntoElement)]
 pub struct Shelf {
     id: ElementId,
@@ -164,7 +164,7 @@ impl Shelf {
         self
     }
 
-    /// Il conteggio accanto al titolo, già pronto.
+    /// The count next to the title, already ready.
     pub fn meta(mut self, meta: impl Into<SharedString>) -> Self {
         self.meta = meta.into();
         self
@@ -176,13 +176,13 @@ impl Shelf {
         self
     }
 
-    /// Un pulsante in più nell'intestazione, prima delle frecce («Apri Novità»).
+    /// One more button in the header, before the arrows («Apri Novità»).
     pub fn action(mut self, action: impl IntoElement) -> Self {
         self.actions.push(action.into_any_element());
         self
     }
 
-    /// «Mostra tutto»: compare solo se le copertine non stanno tutte in una riga.
+    /// «Mostra tutto»: appears only if the covers do not all fit in one row.
     pub fn on_show_all(
         mut self,
         label: impl Into<SharedString>,
@@ -192,7 +192,7 @@ impl Shelf {
         self
     }
 
-    /// Le frecce: il nuovo punto di partenza della riga.
+    /// The arrows: the row's new starting point.
     pub fn on_page(mut self, handler: impl Fn(usize, &mut Window, &mut App) + 'static) -> Self {
         self.on_page = Some(Rc::new(handler));
         self
@@ -253,7 +253,7 @@ impl RenderOnce for Shelf {
         if let Some(on_wheel) = self.on_wheel.filter(|_| page.overflows()) {
             row = row.on_scroll(move |event, window, cx| {
                 if let Some(dx) = horizontal(event) {
-                    // Lo spostamento è dello scaffale: la pagina non scorre in verticale per questo.
+                    // The movement belongs to the shelf: the page does not scroll vertically for this.
                     cx.stop_propagation();
                     on_wheel(dx, window, cx);
                 }
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn the_wheel_moves_one_tile_per_unit_and_keeps_the_rest() {
         let mut wheel = Wheel::default();
-        // Verso destra (avanti): GPUI dà dx negativo.
+        // Towards the right (forward): GPUI gives a negative dx.
         assert_eq!(wheel.step(-60.0, 176.0), 0);
         assert_eq!(wheel.step(-60.0, 176.0), 0);
         assert_eq!(wheel.step(-60.0, 176.0), 1, "180 px make one tile, 4 px stay");

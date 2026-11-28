@@ -1,21 +1,22 @@
-//! Impostazioni, come la pagina del client Iced (`client/src/ui/pages/settings.rs`) con le schede della
-//! direzione artistica: Riproduzione, Suono, Download, Account, Informazioni. Gruppi di righe con il nome e
-//! la spiegazione a sinistra e il controllo a destra (`SettingRow`), un separatore fra un gruppo e l'altro.
+//! Settings, with the tabs of the
+//! art direction: Riproduzione, Suono, Download, Account, Informazioni. Groups of rows with the name and
+//! the explanation on the left and the control on the right (`SettingRow`), a separator between one group and the next.
 //!
-//! Ogni scelta è un comando al core che esisteva già per Iced: qualità e riproduzione automatica, timer di
-//! spegnimento ed equalizzatore sono `PlaybackCmd`; qualità e cartella dei download e aggiornamenti
-//! `DownloadsCmd`; l'uscita dall'account `SocialCmd::SignOut`; Discord e il server stanno fra i campi del core
-//! che il frontend scrive con `SettingsCmd::Store` (come fa Iced); il movimento è una preferenza di questa
-//! interfaccia (`SettingsCmd::SaveUiPrefs`, chiave [`MOTION_KEY`]: segui il sistema, ridotto o completo) e si
-//! applica subito al deposito degli sprite; seguendo il sistema, il core ascolta che cosa chiede
-//! (`SettingsCmd::WatchSystemMotion`, `SettingsView::system_motion`) e [`follow_motion`] lo applica dal vivo. Ciò che il desktop non sa ancora fare non c'è (né spento né grigio): il
-//! videoclip sulla scheda video, l'elenco Iced delle scorciatoie. Nella scheda Account, con l'accesso fatto, c'è
-//! il profilo come nel client Iced: nome utente e nome (`SocialCmd::SaveProfile`; un nome già preso o troppo
-//! corto lo dice l'avviso del core), «Condividi cosa ascolti» e «Il tuo profilo»; senza accesso, «Accedi».
+//! Each choice is a command to the core that already existed: quality and autoplay, sleep
+//! timer and equaliser are `PlaybackCmd`; download quality and folder and updates are
+//! `DownloadsCmd`; signing out is `SocialCmd::SignOut`; Discord and the server are among the core's fields
+//! that the frontend writes with `SettingsCmd::Store`; motion is a preference of this
+//! interface (`SettingsCmd::SaveUiPrefs`, key [`MOTION_KEY`]: follow the system, reduced or full) and
+//! applies at once to the sprite store; when following the system, the core listens to what it asks
+//! (`SettingsCmd::WatchSystemMotion`, `SettingsView::system_motion`) and [`follow_motion`] applies it live. What the
+//! desktop cannot do yet is not there (neither off nor grey): the video on the video tab, the shortcut list.
+//! On the Account tab, once signed in, there is the profile: username and name
+//! (`SocialCmd::SaveProfile`; the core's notice says if a name is taken or too short),
+//! «Condividi cosa ascolti» and «Il tuo profilo»; without sign-in, «Accedi».
 //!
-//! La pagina tiene lo specchio dei valori che mostra ([`Mirror`]) e i testi già pronti: li rifà solo quando
-//! un valore cambia davvero, e solo allora si ridisegna. La lista è la `list` di GPUI (`page_list`): la
-//! testa con titolo e schede è la voce 0, le righe del piano ([`plan`]) vengono dopo.
+//! The page keeps a mirror of the values it shows ([`Mirror`]) and the texts ready: it rebuilds them only when
+//! a value really changes, and only then does it redraw. The list is GPUI's `list` (`page_list`): the
+//! header with title and tabs is item 0, the plan's rows ([`plan`]) come after.
 
 use std::sync::Arc;
 
@@ -57,15 +58,15 @@ use crate::pixel::{PixelSprite, SpriteStore};
 use crate::theme::{TypeStyle, col, dp};
 use crate::zoom::ZoomPref;
 
-/// La chiave della preferenza «Riduci il movimento» in `config.json` (fra quelle dei frontend):
-/// `"system"`, `"reduce"` o `"full"`.
+/// The key of the «Riduci il movimento» preference in `config.json` (among the frontends' keys):
+/// `"system"`, `"reduce"` or `"full"`.
 pub const MOTION_KEY: &str = "motion";
 
-/// La chiave del passo 6.5 (un interruttore): `true` vale «Ridotto». Si legge ancora e la prima scelta
-/// nuova la toglie.
+/// The key of step 6.5 (a switch): `true` means «Ridotto». It is still read, and the first
+/// new choice removes it.
 pub const LEGACY_REDUCE_MOTION_KEY: &str = "reduce_motion";
 
-/// «Riduci il movimento»: segue il sistema (il predefinito), sempre ridotto o sempre completo.
+/// «Riduci il movimento»: follows the system (the default), always reduced or always full.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MotionPref {
     #[default]
@@ -75,7 +76,7 @@ pub enum MotionPref {
 }
 
 impl MotionPref {
-    /// Nell'ordine del menu.
+    /// In the menu order.
     const ALL: [Self; 3] = [Self::System, Self::Reduce, Self::Full];
 
     fn key(self) -> &'static str {
@@ -94,8 +95,8 @@ impl MotionPref {
         }
     }
 
-    /// La preferenza salvata, letta dalle chiavi dei frontend: la chiave nuova se ha un valore noto,
-    /// altrimenti la vecchia (`reduce_motion: true` è «Ridotto»), altrimenti «Segui il sistema».
+    /// The saved preference, read from the frontends' keys: the new key if it has a known value,
+    /// else the old one (`reduce_motion: true` is «Ridotto»), else «Segui il sistema».
     pub fn read(ui: &Map<String, Value>) -> Self {
         let chosen = ui
             .get(MOTION_KEY)
@@ -108,7 +109,7 @@ impl MotionPref {
         })
     }
 
-    /// Le chiavi da salvare per questa scelta: la nuova, e la vecchia tolta.
+    /// The keys to save for this choice: the new one, and the old one removed.
     fn prefs(self) -> Map<String, Value> {
         let mut prefs = Map::new();
         prefs.insert(MOTION_KEY.to_owned(), Value::String(self.key().to_owned()));
@@ -117,8 +118,8 @@ impl MotionPref {
     }
 }
 
-/// Il movimento ridotto voluto dalla preferenza e dal sistema (senza l'ambiente, che `SpriteStore` aggiunge
-/// da sé): «Ridotto» sempre, «Completo» mai, «Segui il sistema» quando il sistema lo chiede.
+/// The reduced motion asked by the preference and the system (without the environment, which `SpriteStore` adds
+/// by itself): «Ridotto» always, «Completo» never, «Segui il sistema» when the system asks for it.
 pub fn motion_reduced(pref: MotionPref, system: SystemMotion) -> bool {
     match pref {
         MotionPref::System => system.reduce(),
@@ -127,7 +128,7 @@ pub fn motion_reduced(pref: MotionPref, system: SystemMotion) -> bool {
     }
 }
 
-/// La spiegazione della riga: seguendo il sistema dice che cosa il sistema chiede adesso.
+/// The row's explanation: when following the system it says what the system asks right now.
 fn motion_detail(pref: MotionPref, system: SystemMotion) -> &'static str {
     if pref != MotionPref::System {
         return "Gli sprite restano fermi, il testo salta alla riga senza scorrere e il cursore non lampeggia.";
@@ -142,10 +143,10 @@ fn motion_detail(pref: MotionPref, system: SystemMotion) -> &'static str {
     }
 }
 
-/// Frequenze delle bande, come le legge chi regola un equalizzatore (le stesse del client Iced).
+/// Band frequencies, as read by whoever adjusts an equaliser (the same as in the phone layout).
 const BAND_LABELS: [&str; eq::BANDS] = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
 
-/// Le scorciatoie del desktop, nell'ordine in cui si imparano (`actions.rs`).
+/// The desktop shortcuts, in the order they are learned (`actions.rs`).
 const SHORTCUTS: [(&str, &[&str]); 13] = [
     ("Riproduci o metti in pausa", &["Spazio"]),
     ("Brano successivo e precedente", &["Ctrl →", "Ctrl ←"]),
@@ -162,7 +163,7 @@ const SHORTCUTS: [(&str, &[&str]); 13] = [
     ("Esci da Psytify", &["Ctrl Q"]),
 ];
 
-/// Crediti e diritti: titolo e testo.
+/// Credits and rights: title and text.
 const CREDITS: [(&str, &str); 3] = [
     ("Caratteri", "Inter e Departure Mono, con licenza SIL Open Font License 1.1."),
     ("Icone e Nastro", "Disegnati per Psytify sulla griglia dei pixel d'arte."),
@@ -172,7 +173,7 @@ const CREDITS: [(&str, &str); 3] = [
     ),
 ];
 
-/// Le schede, nell'ordine della direzione artistica.
+/// The tabs, in the order of the art direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tab {
     #[default]
@@ -200,11 +201,11 @@ impl Tab {
     }
 }
 
-/// Una riga della lista dopo la testa.
+/// A list row after the header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Heading(&'static str),
-    /// Il separatore fra due gruppi.
+    /// The separator between two groups.
     Gap,
     Quality,
     Autoplay,
@@ -218,7 +219,7 @@ enum Row {
     Folder,
     Space,
     Account,
-    /// «Il tuo profilo», con «Apri».
+    /// «Il tuo profilo», with «Apri».
     OwnProfile,
     Handle,
     Name,
@@ -232,7 +233,7 @@ enum Row {
     Credit(usize),
 }
 
-/// Le righe di una scheda, nell'ordine del client Iced. Pura.
+/// The rows of a tab, in display order. Pure.
 fn plan(tab: Tab, discord: bool, profile: ProfileForm) -> Vec<Row> {
     match tab {
         Tab::Playback => vec![
@@ -284,19 +285,19 @@ fn plan(tab: Tab, discord: bool, profile: ProfileForm) -> Vec<Row> {
     }
 }
 
-/// Il modulo del profilo nella scheda Account.
+/// The profile form on the Account tab.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ProfileForm {
-    /// Senza accesso: niente modulo.
+    /// Without sign-in: no form.
     #[default]
     None,
-    /// Accesso fatto, nome utente ancora da scegliere: solo i campi e «Salva».
+    /// Signed in, username still to choose: only the fields and «Salva».
     New,
-    /// Con il profilo: anche «Il tuo profilo» e «Condividi cosa ascolti».
+    /// With the profile: also «Il tuo profilo» and «Condividi cosa ascolti».
     Saved,
 }
 
-/// Il profilo salvato, come lo riempie il modulo.
+/// The saved profile, as the form fills it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct SavedProfile {
     handle: String,
@@ -304,7 +305,7 @@ struct SavedProfile {
     share: bool,
 }
 
-/// Lo stato dell'account come lo mostra la riga.
+/// The account state as the row shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum AccountShown {
     Unavailable,
@@ -331,7 +332,7 @@ impl AccountShown {
     }
 }
 
-/// I valori che la pagina mostra, presi dall'istantanea: se non cambiano, la pagina non si ridisegna.
+/// The values the page shows, taken from the snapshot: if they do not change, the page does not redraw.
 #[derive(Clone, Debug, PartialEq)]
 struct Mirror {
     quality: Quality,
@@ -392,13 +393,13 @@ impl Mirror {
     }
 }
 
-/// Come nel client Iced: l'interruttore c'è solo se la build o la configurazione hanno un'app Discord.
+/// The switch is there only if the build or the configuration has a Discord app.
 fn discord_available(config: &CoreConfig) -> bool {
     let chosen = config.discord_app_id.trim();
     !(if chosen.is_empty() { DEFAULT_DISCORD_APP_ID } else { chosen }).is_empty()
 }
 
-/// Le scelte del timer di spegnimento: «Spento» e poi quelle del core.
+/// The sleep timer choices: «Spento» and then the core's.
 fn sleep_options() -> Vec<SharedString> {
     std::iter::once(SharedString::from("Spento"))
         .chain(SleepChoice::ALL.iter().map(|choice| SharedString::from(choice.label())))
@@ -411,7 +412,7 @@ fn sleep_index(choice: Option<SleepChoice>) -> usize {
         .map_or(0, |ix| ix + 1)
 }
 
-/// L'avviso del timer, come nel client Iced.
+/// The timer's notice.
 fn sleep_notice(choice: Option<SleepChoice>) -> String {
     match choice {
         Some(choice) => format!("Timer di spegnimento: {}", choice.label().to_lowercase()),
@@ -419,7 +420,7 @@ fn sleep_notice(choice: Option<SleepChoice>) -> String {
     }
 }
 
-/// La spiegazione della qualità d'ascolto (i testi del client Iced).
+/// The explanation of the listening quality.
 fn quality_detail(quality: Quality) -> &'static str {
     match quality {
         Quality::Lossless => {
@@ -431,29 +432,29 @@ fn quality_detail(quality: Quality) -> &'static str {
     }
 }
 
-/// «+3», «−6» o «0»: il guadagno di una banda in dB (come il client Iced).
+/// «+3», «−6» or «0»: a band's gain in dB.
 fn gain_label(gain: f32) -> String {
     if gain.abs() < 0.5 { "0".into() } else { format!("{gain:+.0}").replace('-', "−") }
 }
 
-/// Il guadagno sotto il puntatore: la frazione dello slider (1 in alto), a passi di 0,5 dB.
+/// The gain under the pointer: the slider's fraction (1 at the top), in steps of 0.5 dB.
 fn band_gain(fraction: f32) -> f32 {
     let gain = -eq::MAX_GAIN_DB + fraction * 2.0 * eq::MAX_GAIN_DB;
     (gain * 2.0).round() / 2.0
 }
 
-/// La posizione dello slider per un guadagno.
+/// The slider position for a gain.
 fn band_fraction(gain: f32) -> f32 {
     ((gain + eq::MAX_GAIN_DB) / (2.0 * eq::MAX_GAIN_DB)).clamp(0.0, 1.0)
 }
 
-/// Il preset che corrisponde alle bande, se c'è.
+/// The preset that matches the bands, if there is one.
 fn preset_index(gains: &[f32; eq::BANDS]) -> Option<usize> {
     PRESETS.iter().position(|(_, preset)| preset == gains)
 }
 
-/// Dove arriva il catalogo (`host`, quello in uso), e se è il server predefinito o uno scelto qui (i
-/// testi del client Iced).
+/// Where the catalogue comes from (`host`, in use), and whether it is the default server or one chosen here (the
+/// the texts of the listening quality).
 fn server_detail(host: &str, chosen: bool) -> String {
     if chosen {
         format!("In uso: {host}, scelto da te. Vuoto torna al predefinito.")
@@ -462,13 +463,13 @@ fn server_detail(host: &str, chosen: bool) -> String {
     }
 }
 
-/// L'host in uso: quello dell'ambiente (`PSYTIFY_API_URL`), della scelta o del predefinito.
+/// The host in use: the environment's (`PSYTIFY_API_URL`), the chosen one or the default.
 fn host_in_use(server: Option<&str>) -> String {
     let url = config::api_url(server);
     base_host(&url).unwrap_or(url)
 }
 
-/// I testi già pronti per il disegno.
+/// The texts already ready for drawing.
 #[derive(Clone, Debug, Default)]
 struct Texts {
     download_detail: SharedString,
@@ -515,9 +516,9 @@ pub struct SettingsPage {
     rows: Vec<Row>,
     list: ListState,
     frame: PageFrame,
-    /// Il campo dell'indirizzo del server.
+    /// The server address field.
     server: Entity<SearchField>,
-    /// I campi del profilo: nome utente e nome.
+    /// The profile fields: username and name.
     handle: Entity<SearchField>,
     name: Entity<SearchField>,
     quality_options: Vec<SharedString>,
@@ -624,7 +625,7 @@ impl SettingsPage {
         self.take(mirror, cx);
     }
 
-    /// Prende i valori nuovi; se qualcosa è cambiato rifà i testi e le righe e si ridisegna.
+    /// Takes the new values; if something changed it rebuilds the texts and rows and redraws.
     fn take(&mut self, mirror: Mirror, cx: &mut Context<Self>) {
         if mirror == self.mirror {
             return;
@@ -634,7 +635,7 @@ impl SettingsPage {
             self.server.update(cx, |field, cx| field.set_text(text, cx));
         }
         if mirror.profile != self.mirror.profile {
-            // Il profilo salvato (o arrivato con l'accesso) riempie di nuovo i campi, come nel client Iced.
+            // The saved profile (or the one that arrived with sign-in) fills the fields again.
             let saved = mirror.profile.clone().unwrap_or_default();
             self.handle.update(cx, |field, cx| field.set_text(saved.handle, cx));
             self.name.update(cx, |field, cx| field.set_text(saved.name, cx));
@@ -642,18 +643,18 @@ impl SettingsPage {
         self.texts = Texts::of(&mirror);
         self.mirror = mirror;
         self.rows = plan(self.tab, self.mirror.discord_available, self.mirror.profile_form);
-        // Le righe si rimisurano tutte (sono poche): una spiegazione cambiata può cambiare altezza.
+        // The rows are all measured again (there are few): a changed explanation can change the height.
         set_rows(&self.list, self.rows.len());
         cx.notify();
     }
 
-    /// Apre la scheda Account (da «Modifica profilo» o dagli Amici senza nome utente).
+    /// Opens the Account tab (from «Modifica profilo» or from Amici without a username).
     pub fn show_account(&mut self, cx: &mut Context<Self>) {
         self.select_tab(Tab::Account, cx);
     }
 
-    /// «Salva il profilo» o Invio in un campo; con `share` cambia anche la condivisione dell'attività (che usa
-    /// il profilo salvato, non i campi a metà).
+    /// «Salva il profilo» or Enter in a field; with `share` it also changes the sharing of the activity (which uses
+    /// the saved profile, not the half-filled fields).
     fn save_profile(&mut self, share: Option<bool>, cx: &mut Context<Self>) {
         let (handle, display_name) = match (share, &self.mirror.profile) {
             (Some(_), Some(saved)) => (saved.handle.clone(), saved.name.clone()),
@@ -683,8 +684,8 @@ impl SettingsPage {
         self.core.read(cx).playback(command);
     }
 
-    /// Un campo del core che il frontend scrive (Discord, il server): la configurazione di adesso con quel
-    /// campo cambiato. Il core ignora i campi che possiedono i suoi domini.
+    /// A core field that the frontend writes (Discord, the server): the current configuration with that
+    /// field changed. The core ignores the fields that its domains own.
     fn store(&self, change: impl FnOnce(&mut CoreConfig), cx: &App) {
         let core = self.core.read(cx);
         let mut config = (*core.snapshot().settings.config).clone();
@@ -704,8 +705,8 @@ impl SettingsPage {
         self.playback(PlaybackCmd::Sleep(choice), cx);
     }
 
-    /// «Riduci il movimento»: si salva fra le preferenze di questa interfaccia e vale subito. Il core ascolta
-    /// il sistema solo mentre la scelta lo segue.
+    /// «Riduci il movimento»: it is saved among this interface's preferences and applies at once. The core listens
+    /// to the system only while the choice follows it.
     fn set_motion(&mut self, pref: MotionPref, cx: &mut Context<Self>) {
         if pref == self.mirror.motion {
             return;
@@ -726,8 +727,8 @@ impl SettingsPage {
         }
     }
 
-    /// «Usa» o Invio nel campo del server: come il client Iced, un indirizzo vuoto o uguale al predefinito
-    /// torna al predefinito; uno non valido dà un avviso e non cambia niente.
+    /// «Usa» or Enter in the server field: an empty address or one equal to the default
+    /// goes back to the default; an invalid one gives a notice and changes nothing.
     fn apply_server(&mut self, text: &str, cx: &mut Context<Self>) {
         let server = config::normalize_server(text);
         match base_host(server.as_deref().unwrap_or(config::default_api_url())) {
@@ -996,7 +997,7 @@ impl SettingsPage {
         }
     }
 
-    /// Adatta una scelta di un `Select` (l'indice) a un metodo della pagina.
+    /// Adapts a choice of a `Select` (the index) to a method of the page.
     fn select(
         &self,
         f: impl Fn(&mut Self, usize, &mut Context<Self>) + 'static,
@@ -1006,7 +1007,7 @@ impl SettingsPage {
         move |ix, window, cx| pick(&ix, window, cx)
     }
 
-    /// Le dieci bande: ogni movimento si sente subito (`EqualizerBand`), il rilascio salva (`Save`).
+    /// The ten bands: every movement is heard at once (`EqualizerBand`), the release saves (`Save`).
     fn bands(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let change = cx.listener(|this, (band, fraction): &(usize, f32), _, cx| {
             this.playback(PlaybackCmd::EqualizerBand { band: *band, gain: band_gain(*fraction) }, cx);
@@ -1063,7 +1064,7 @@ impl SettingsPage {
         }
     }
 
-    /// Nastro, il nome in tipo pixel e la versione.
+    /// Nastro, the name in pixel type and the version.
     fn about(&self, _window: &mut Window) -> AnyElement {
         div()
             .w_full()
@@ -1125,7 +1126,7 @@ impl SettingsPage {
                     this.core.read(cx).downloads(DownloadsCmd::DownloadUpdate)
                 }))
                 .into_any_element(),
-            // La barra a dieci passi della fascia; senza la lunghezza (il loader nella fascia) basta il testo.
+            // The ten-step bar of the banner; without the length (the loader in the banner) the text is enough.
             UpdateControl::Steps(Some(percent)) => {
                 DownloadSteps::new(f32::from(percent) / 100.0).into_any_element()
             }
@@ -1153,10 +1154,10 @@ impl SettingsPage {
     }
 }
 
-/// «Riduci il movimento» per tutta l'app, prima del primo disegno: legge la preferenza, accende l'ascolto
-/// del sistema se la preferenza lo segue e applica la scelta; poi la rifà a ogni pubblicazione delle
-/// impostazioni (la preferenza salvata, o il sistema che cambia: risparmio energetico, animazioni). Il
-/// ridisegno avviene solo quando il movimento in vigore cambia davvero.
+/// «Riduci il movimento» for the whole app, before the first draw: it reads the preference, turns on listening
+/// to the system if the preference follows it, and applies the choice; then it redoes it at every publication of
+/// the settings (the saved preference, or the system changing: power saving, animations). The
+/// redraw happens only when the motion in force really changes.
 pub fn follow_motion(core: &Entity<CoreModel>, cx: &mut App) {
     let model = core.read(cx);
     let settings = Arc::clone(&model.snapshot().settings);
@@ -1172,9 +1173,9 @@ pub fn follow_motion(core: &Entity<CoreModel>, cx: &mut App) {
     .detach();
 }
 
-/// Applica la preferenza al deposito degli sprite e ridisegna le finestre, così ogni animazione segue la
-/// scelta subito (anche le viste in cache).
-/// Anche il segnale di GPUI (`App::set_reduce_motion`, letto dai suoi elementi animati) segue la scelta.
+/// Applies the preference to the sprite store and redraws the windows, so every animation follows the
+/// choice at once (including the cached views).
+/// GPUI's signal too (`App::set_reduce_motion`, read by its animated elements) follows the choice.
 pub fn apply_reduce_motion(on: bool, cx: &mut App) {
     if cx.try_global::<SpriteStore>().is_none() {
         return;
@@ -1312,7 +1313,7 @@ mod tests {
                 Row::Discord,
             ]
         );
-        // Senza nome utente: solo i campi per sceglierlo.
+        // Without a username: only the fields to choose one.
         let new = plan(Tab::Account, false, ProfileForm::New);
         assert!(
             new.contains(&Row::Handle)

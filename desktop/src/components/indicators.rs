@@ -17,7 +17,7 @@ use crate::pixel::PixelSprite;
 use crate::pixel::SpriteStore;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Stato dell'equalizzatore di una riga o di un tile.
+/// State of the equaliser of a row or a tile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlayState {
     Playing,
@@ -26,7 +26,7 @@ pub enum PlayState {
 }
 
 /// `eq` lime animato in riproduzione, `eq_rest` `STONE` in pausa, `loader` in caricamento.
-/// Al massimo uno animato per lista: lo decide il chiamante.
+/// At most one animated per list: the caller decides.
 #[derive(IntoElement)]
 pub struct Equalizer {
     state: PlayState,
@@ -48,7 +48,7 @@ impl RenderOnce for Equalizer {
     }
 }
 
-/// Attesa: `loader` di 12 AP (mostrarlo solo dopo 300 ms è compito del chiamante) oppure scheletro.
+/// Waiting: a 12 AP `loader` (showing it only after 300 ms is the caller's job) or a skeleton.
 #[derive(IntoElement)]
 pub struct LoadingIndicator {
     caption: Option<SharedString>,
@@ -85,7 +85,7 @@ impl RenderOnce for LoadingIndicator {
     }
 }
 
-/// Blocco scheletro alla misura del contenuto: passa da `SURFACE_RAISED` a `SURFACE_SELECTED` ogni
+/// Skeleton block at the content's size: it goes from `SURFACE_RAISED` to `SURFACE_SELECTED` every
 /// 600 ms a scatti (nessuna dissolvenza). Si ferma con `reduce_motion`.
 #[derive(IntoElement)]
 pub struct Skeleton {
@@ -118,14 +118,14 @@ impl RenderOnce for Skeleton {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DownloadState {
     Available,
-    /// Il brano non si può scaricare: niente disegnato, spazio mantenuto.
+    /// The track cannot be downloaded: nothing drawn, space kept.
     NotDownloadable,
     Queued,
     /// Avanzamento 0..=1.
     Downloading(f32),
     Done,
     Error,
-    /// Nell'indice, ma il file manca o è cambiato: si scarica di nuovo (tinta d'errore, come Iced).
+    /// In the index, but the file is missing or changed: it is downloaded again (error tint).
     Lost,
 }
 
@@ -168,7 +168,7 @@ impl RenderOnce for DownloadIndicator {
     }
 }
 
-/// Barra di avanzamento a 10 passi del download (ogni passo 1 AP, `WARM_WHITE` su `IRON`).
+/// Download progress bar in 10 steps (each step 1 AP, `WARM_WHITE` on `IRON`).
 #[derive(IntoElement)]
 pub struct DownloadSteps {
     progress: f32,

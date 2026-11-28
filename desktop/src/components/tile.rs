@@ -54,8 +54,8 @@ impl Cover {
         self
     }
 
-    /// L'indirizzo della copertina vera: il deposito la chiede al core la prima volta e la disegna
-    /// quando arriva.
+    /// The address of the real cover: the store asks the core for it the first time and draws it
+    /// when it arrives.
     pub fn url(mut self, url: Option<SharedString>) -> Self {
         self.url = url;
         self
@@ -66,8 +66,8 @@ impl Cover {
         self
     }
 
-    /// Maschera a cerchio pixel (`MASK_PIXEL_CIRCLE`, foto d'artista e avatar): il campo e la foto si
-    /// dipingono solo dentro il cerchio rasterizzato a risoluzione AP, bordi a gradini di 1 AP. Fuori dal
+    /// Pixel circle mask (`MASK_PIXEL_CIRCLE`, artist photo and avatar): the field and the photo are
+    /// painted only inside the circle rasterised at AP resolution, stepped edges of 1 AP. Outside the
     /// cerchio resta la superficie sotto (la riga in hover, la tela).
     pub fn circle(mut self) -> Self {
         self.round = true;
@@ -81,8 +81,8 @@ enum Art {
     Whole(Arc<RenderImage>),
 }
 
-/// Disegna la copertina nel suo riquadro, con l'origine e il lato arrotondati ai pixel fisici (il
-/// campionatore resta vicino al 1:1) e la versione più piccola che copre quei pixel.
+/// Draws the cover in its box, with the origin and the side rounded to physical pixels (the
+/// sampler stays near 1:1) and the smallest version that covers those pixels.
 fn paint_cover(window: &mut Window, cx: &mut App, art: &Art, slot: Bounds<gpui::Pixels>) {
     Covers::drain_retired(window, cx);
     let scale = window.scale_factor();
@@ -93,12 +93,12 @@ fn paint_cover(window: &mut Window, cx: &mut App, art: &Art, slot: Bounds<gpui::
         Art::Whole(image) => Arc::clone(image),
     };
     let bounds = Bounds::new(point(px(x / scale), px(y / scale)), size(px(side / scale), px(side / scale)));
-    // Se l'immagine non entra nell'atlante resta il campo `GRAPHITE` dietro.
+    // If the image does not fit in the atlas, the `GRAPHITE` field stays behind it.
     let _ = window.paint_image(bounds, bounds, Corners::default(), image, 0, false);
 }
 
-/// La foto nel cerchio pixel: il campo `GRAPHITE` e la foto, fascia per fascia (ogni fascia è una
-/// maschera rettangolare della stessa foto, così i gradini cadono sui pixel fisici e non c'è sfumatura).
+/// The photo in the pixel circle: the `GRAPHITE` field and the photo, band by band (each band is a
+/// rectangular mask of the same photo, so the steps fall on physical pixels and there is no gradient).
 fn paint_round(window: &mut Window, cx: &mut App, art: Option<&Art>, slot: Bounds<gpui::Pixels>) {
     let ap = Ap::of(window);
     paint_circle_fill(window, slot, ap, col(GRAPHITE));
@@ -153,7 +153,7 @@ impl RenderOnce for Cover {
 }
 
 impl Cover {
-    /// Il cerchio: il campo e la foto li dipinge un canvas (la maschera), il segnaposto sta sopra al centro.
+    /// The circle: a canvas paints the field and the photo (the mask); the placeholder sits on top, centred.
     fn render_round(self, art: Option<Art>, _cx: &mut App) -> AnyElement {
         let placeholder = art.is_none().then(|| {
             if self.side >= PLACEHOLDER_ART_MIN {
@@ -202,8 +202,8 @@ fn mosaic(side: f32, urls: &[SharedString], disabled: bool) -> AnyElement {
 /// Album or artist tile: cover, title, subtitle. Hover: the cover rises 1 AP over a 2 AP hard ledge, the
 /// 40 dp play button steps in at the bottom right (only with [`AlbumTile::on_play`]) and the title brightens;
 /// pressed: down 1 AP without the ledge; selected: `WARM_WHITE` frame;
-/// in riproduzione: `eq` prima del sottotitolo. ArtistTile ([`AlbumTile::round`]): foto nel cerchio pixel
-/// e testo centrato.
+/// in playback: `eq` before the subtitle. ArtistTile ([`AlbumTile::round`]): photo in the pixel circle
+/// and centred text.
 #[derive(IntoElement)]
 pub struct AlbumTile {
     id: ElementId,
@@ -218,9 +218,9 @@ pub struct AlbumTile {
     playing: Option<PlayState>,
     /// Dove `Shell` dipinge l'equalizzatore al posto del tile (vedi `playing_spot`).
     spot: Option<PlayingSpot>,
-    /// Un'etichetta sull'angolo della copertina («Nuovo»).
+    /// A label on the corner of the cover («Nuovo»).
     badge: Option<SharedString>,
-    /// Il mosaico 2 x 2 di un mix: fino a quattro copertine diverse al posto di una.
+    /// A mix's 2 x 2 mosaic: up to four different covers in place of one.
     mosaic: Vec<SharedString>,
     preview: Preview,
     on_click: Option<OnClick>,
@@ -256,19 +256,19 @@ impl AlbumTile {
         self
     }
 
-    /// La copertina vera (o la foto, per un artista).
+    /// The real cover (or the photo, for an artist).
     pub fn cover_url(mut self, url: Option<SharedString>) -> Self {
         self.cover_url = url;
         self
     }
 
-    /// ArtistTile: foto nel cerchio pixel, testo centrato.
+    /// ArtistTile: photo in the pixel circle, centred text.
     pub fn round(mut self) -> Self {
         self.round = true;
         self
     }
 
-    /// Il Play sulla copertina (in hover): senza, il tile si apre soltanto.
+    /// The Play on the cover (on hover): without it, the tile only opens.
     pub fn on_play(mut self, handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_play = Some(std::rc::Rc::new(handler));
         self
@@ -296,13 +296,13 @@ impl AlbumTile {
         self
     }
 
-    /// Un'etichetta sull'angolo in alto a sinistra della copertina (`Badge` di conteggio: «Nuovo»).
+    /// A label on the top-left corner of the cover (count `Badge`: «Nuovo»).
     pub fn badge(mut self, text: impl Into<SharedString>) -> Self {
         self.badge = Some(text.into());
         self
     }
 
-    /// Il mosaico di un mix: con quattro copertine diverse un 2 x 2, altrimenti la prima.
+    /// A mix's mosaic: with four different covers a 2 x 2, otherwise the first.
     pub fn mosaic(mut self, urls: Vec<SharedString>) -> Self {
         self.mosaic = urls;
         self
@@ -348,7 +348,7 @@ impl RenderOnce for AlbumTile {
                 div().absolute().left(dp(SPACE_3)).top(dp(SPACE_3)).child(Badge::new(text, BadgeKind::Count)),
             );
         }
-        // Cornice di 1 AP dentro il bordo della copertina (sul cerchio, il suo contorno).
+        // A 1 AP frame inside the cover's edge (on the circle, its outline).
         let frame = if self.selected { Some(WARM_WHITE) } else { None };
         if let Some(color) = frame {
             cover = cover.child(if self.round {
@@ -375,7 +375,7 @@ impl RenderOnce for AlbumTile {
                         .primary()
                         .size(PLAY_SIDE)
                         .on_click(move |event, window, cx| {
-                            // Il Play suona e basta: non apre anche il tile.
+                            // The Play just plays: it does not also open the tile.
                             cx.stop_propagation();
                             play(event, window, cx);
                         }),

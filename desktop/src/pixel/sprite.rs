@@ -18,7 +18,7 @@ use super::anim::{ms_until_next_frame, request_refresh};
 use super::store::SpriteStore;
 use crate::theme::{Ap, dp};
 
-/// Un elemento che mostra uno sprite per nome (le costanti stanno in `psytify_design::sprite`).
+/// An element that shows a sprite by name (the constants are in `psytify_design::sprite`).
 #[derive(IntoElement)]
 pub struct PixelSprite {
     name: &'static str,
@@ -32,27 +32,27 @@ impl PixelSprite {
         Self { name, tint: None, animate: true, frame: 0 }
     }
 
-    /// Colore della maschera (un token: `ICON_IDLE`, `STATE_ON`...). Gli sprite a colori lo ignorano.
+    /// Mask colour (a token: `ICON_IDLE`, `STATE_ON`...). Coloured sprites ignore it.
     pub fn tint(mut self, tint: Rgba) -> Self {
         self.tint = Some(tint);
         self
     }
 
-    /// Con `false` lo sprite resta fermo sul frame indicato da [`frame`](Self::frame) e non programma
+    /// With `false` the sprite stays still on the frame given by [`frame`](Self::frame) and schedules nothing
     /// ridisegni (equalizzatore in pausa, mascotte fuori vista).
     pub fn animated(mut self, animate: bool) -> Self {
         self.animate = animate;
         self
     }
 
-    /// Frame mostrato quando lo sprite non è animato.
+    /// Frame shown when the sprite is not animated.
     pub fn frame(mut self, frame: usize) -> Self {
         self.frame = frame;
         self
     }
 }
 
-/// Dimensione nominale in dp di uno sprite (frame in AP x 2), `None` se il nome non esiste.
+/// Nominal size in dp of a sprite (frame in AP x 2), `None` if the name does not exist.
 pub fn nominal_size(cx: &App, name: &str) -> Option<(f32, f32)> {
     let sheet = cx.try_global::<SpriteStore>()?.sheet()?;
     let (w, h) = sheet.get(name)?.frame_size();
@@ -73,8 +73,8 @@ impl RenderOnce for PixelSprite {
     }
 }
 
-/// Dipinge lo sprite nello slot `slot`, centrato e allineato ai pixel fisici. Si usa anche da
-/// elementi che disegnano da soli (canvas) e non vogliono un figlio `PixelSprite`.
+/// Paints the sprite in the slot `slot`, centred and aligned to physical pixels. It is also used by
+/// elements that draw by themselves (canvas) and do not want a `PixelSprite` child.
 pub fn paint_sprite(
     window: &mut Window,
     cx: &mut App,
@@ -108,7 +108,7 @@ pub fn paint_sprite(
     let y = (f32::from(slot.origin.y) * scale).round()
         + ((f32::from(slot.size.height) * scale - h_dev) / 2.0).floor();
     let bounds = Bounds::new(point(px(x / scale), px(y / scale)), size(px(w_dev / scale), px(h_dev / scale)));
-    // Se l'immagine non entra nell'atlante non c'è altro da fare che saltare il disegno.
+    // If the image does not fit in the atlas there is nothing to do but skip the drawing.
     let _ = window.paint_image(bounds, bounds, Corners::default(), texture.image, 0, false);
     if let Some(ms) = next_ms {
         request_refresh(window, cx, ms);

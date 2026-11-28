@@ -1,6 +1,6 @@
-//! Token del design come costanti semplici. Valori e nomi seguono `docs/design/PSYTIFY_DESIGN_TOKENS.md`:
-//! cambiano insieme a quel documento. Lunghezze in dp (`f32`), durate in ms (`u32`), colori `Rgba`.
-//! I frontend usano gli alias semantici (`color::TEXT_PRIMARY`), mai i grigi grezzi.
+//! Design tokens as plain constants. Values and names follow `docs/design/PSYTIFY_DESIGN_TOKENS.md`:
+//! they change together with that document. Lengths in dp (`f32`), durations in ms (`u32`), colours `Rgba`.
+//! Frontends use the semantic aliases (`color::TEXT_PRIMARY`), never the raw greys.
 
 pub mod color;
 pub mod interaction;

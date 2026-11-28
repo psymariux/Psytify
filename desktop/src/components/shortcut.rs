@@ -51,7 +51,7 @@ impl Shortcut {
         self
     }
 
-    /// È ciò che suona: l'equalizzatore in fondo, dipinto da `Shell` sopra la vista in cache.
+    /// It is what plays: the equaliser at the bottom, painted by `Shell` over the cached view.
     pub fn playing_at(mut self, state: PlayState, spot: &PlayingSpot) -> Self {
         self.playing = Some((state, Some(spot.clone())));
         self

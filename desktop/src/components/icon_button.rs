@@ -1,5 +1,5 @@
-//! IconButton: 32 x 32 dp, icona di 12 AP centrata, con tooltip (nome e scorciatoia). Ha anche
-//! l'aspetto «primario» (fill chiaro con ledge) del play di trasporto e del play dei tile.
+//! IconButton: 32 x 32 dp, 12 AP icon centred, with a tooltip (name and shortcut). It also has
+//! the "primary" look (light fill with ledge) of the transport play and of the tile plays.
 
 use gpui::{App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div, px};
 use psytify_design::sprite;
@@ -16,12 +16,12 @@ use super::tooltip::with_tooltip;
 use crate::pixel::PixelSprite;
 use crate::theme::{Ap, col, dp};
 
-/// Come si segna uno stato acceso.
+/// How a lit state is marked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnStyle {
-    /// Icona `STATE_ON` (lime) più un punto lime sotto: shuffle, repeat.
+    /// `STATE_ON` icon (lime) plus a lime dot below: shuffle, repeat.
     Lime,
-    /// Icona `ICON_ACTIVE`, senza lime: il cuore del «mi piace» (non è uno stato di riproduzione).
+    /// `ICON_ACTIVE` icon, without lime: the "like" heart (it is not a playback state).
     Active,
 }
 
@@ -29,7 +29,7 @@ pub enum OnStyle {
 pub struct IconButton {
     id: ElementId,
     icon: &'static str,
-    /// Icona piena usata quando il bottone è acceso (`icon_heart_fill`).
+    /// Filled icon used when the button is lit (`icon_heart_fill`).
     icon_on: Option<&'static str>,
     selected: bool,
     on_style: OnStyle,
@@ -71,7 +71,7 @@ impl IconButton {
         self
     }
 
-    /// Icona da mostrare quando è acceso.
+    /// Icon to show when lit.
     pub fn icon_on(mut self, icon: &'static str) -> Self {
         self.icon_on = Some(icon);
         self
@@ -82,7 +82,7 @@ impl IconButton {
         self
     }
 
-    /// Attesa: fill `SURFACE_SELECTED` con il `loader` al posto dell'icona.
+    /// Waiting: `SURFACE_SELECTED` fill with the `loader` in place of the icon.
     pub fn loading(mut self, loading: bool) -> Self {
         self.loading = loading;
         self
@@ -94,7 +94,7 @@ impl IconButton {
         self
     }
 
-    /// Lato in dp (32 di base, 40 per il play di trasporto).
+    /// Side in dp (32 by default, 40 for the transport play).
     pub fn size(mut self, dp: f32) -> Self {
         self.size = dp;
         self
@@ -185,7 +185,7 @@ impl RenderOnce for IconButton {
             content.child(PixelSprite::new(icon_name).tint(tint))
         };
         if self.selected && self.on_style == OnStyle::Lime && !self.disabled && !self.primary {
-            // Punto lime di 2 x 1 AP, 1 AP sotto l'icona: lo stato non dipende solo dal colore.
+            // 2 x 1 AP lime dot, 1 AP below the icon: the state does not depend on colour alone.
             content = content.child(
                 div()
                     .absolute()

@@ -1,5 +1,5 @@
-//! An album of the official catalogue, a Bandcamp album or a YouTube playlist, as in the Iced client
-//! (`client/src/ui/pages/source_playlist.rs`): the head with the cover, the kind («ALBUM», «EP», «ALBUM ·
+//! An album of the official catalogue, a Bandcamp album or a YouTube playlist
+//! The head with the cover, the kind («ALBUM», «EP», «ALBUM ·
 //! BANDCAMP»), the title, the author, tracks and duration; the 56 dp play button, «Salva nella libreria» and
 //! «Torna alla ricerca», how many tracks are on their way to the queue, a note on how the audio arrives
 //! (within the running-text measure); then the tracks (`SourceRow`). A track enters the server catalogue
@@ -48,7 +48,7 @@ fn kicker(playlist: &SourcePlaylist) -> &'static str {
     }
 }
 
-/// How the audio arrives (the Iced client's texts).
+/// How the audio arrives.
 fn explanation(source: SourceKind) -> &'static str {
     if source == SourceKind::Deezer {
         "Il server trova l'audio quando premi play. Salvando, i brani entrano nella libreria uno alla volta, \

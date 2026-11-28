@@ -1,4 +1,4 @@
-//! Cerca: the results of `CatalogView::search` in one list, in the order of the Iced client and the
+//! Cerca: the results of `CatalogView::search` in one list, in the order of the phone layout and the
 //! GPUI page (`desktop/src/app/search_page.rs`): the official catalogue (artists, which the core
 //! brings to the server and then opens; tracks, which the server imports when played; albums and
 //! playlists, which open the source page), what the server already has (tracks, artists, albums)

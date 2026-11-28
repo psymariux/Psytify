@@ -75,7 +75,7 @@ impl PlayerControl {
         self
     }
 
-    /// Coda vuota: tutto disabilitato.
+    /// Empty queue: everything disabled.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -124,7 +124,7 @@ impl PlayerControl {
     }
 }
 
-/// Collega la callback, se c'è, a un pulsante.
+/// Connects the callback, if any, to a button.
 fn wired(button: IconButton, handler: Option<OnClick>) -> IconButton {
     match handler {
         Some(handler) => button.on_click(move |event, window, cx| handler(event, window, cx)),

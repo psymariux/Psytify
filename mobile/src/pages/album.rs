@@ -133,7 +133,7 @@ fn header(album: &Album, tracks: &[Track], saved: bool) -> Header {
     }
 }
 
-/// «Scarica tutto» for `tracks`, as the Iced phone layout: there whenever the list has tracks (if
+/// «Scarica tutto» for `tracks`, as the phone layout: there whenever the list has tracks (if
 /// none can be kept, the core says why); «Scarica i brani disponibili» when only some can; the count
 /// of the batch while this list's tracks download.
 pub(super) fn download_all(

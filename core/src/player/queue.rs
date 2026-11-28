@@ -1,7 +1,7 @@
-//! Coda di riproduzione: brani, ordine di ascolto, shuffle e repeat.
+//! Playback queue: tracks, listening order, shuffle and repeat.
 //!
-//! Lo shuffle cambia solo `order`, una permutazione degli indici di `tracks`: disattivarlo
-//! ripristina l'ordine originale senza perdere il brano corrente.
+//! Shuffle only changes `order`, a permutation of the indices of `tracks`: turning it off
+//! restores the original order without losing the current track.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,12 +25,12 @@ impl Repeat {
     }
 }
 
-/// Perché si passa al brano successivo.
+/// Why we move to the next track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Advance {
-    /// Il brano è finito da solo: `Repeat::One` lo ripete.
+    /// The track ended by itself: `Repeat::One` repeats it.
     Finished,
-    /// L'utente ha premuto "successivo": si va avanti anche con `Repeat::One`.
+    /// The user pressed "successivo": we go forward even with `Repeat::One`.
     Skip,
 }
 
@@ -45,7 +45,7 @@ pub struct Queue {
 }
 
 impl Queue {
-    /// Sostituisce la coda e parte dal brano `start` (indice in `tracks`).
+    /// Replaces the queue and starts from the track `start` (index in `tracks`).
     pub fn replace(&mut self, tracks: Vec<Track>, start: usize, seed: u64) {
         self.tracks = tracks;
         if self.tracks.is_empty() {
@@ -87,7 +87,7 @@ impl Queue {
         self.repeat
     }
 
-    /// Passa al brano successivo. `None` vuol dire fine della coda.
+    /// Moves to the next track. `None` means the end of the queue.
     pub fn advance(&mut self, reason: Advance) -> Option<&Track> {
         let position = self.position?;
         if reason == Advance::Finished && self.repeat == Repeat::One {
@@ -103,7 +103,7 @@ impl Queue {
         self.current()
     }
 
-    /// Il brano che partirà alla fine di quello corrente, senza spostarsi: lo stesso di
+    /// The track that will play at the end of the current one, without moving: the same as
     /// `advance(Advance::Finished)`.
     pub fn peek_next(&self) -> Option<&Track> {
         let position = self.position?;
@@ -119,7 +119,7 @@ impl Queue {
         self.tracks.get(*self.order.get(next)?)
     }
 
-    /// Torna al brano precedente; sul primo brano lo riparte (o va all'ultimo con repeat).
+    /// Goes back to the previous track; on the first track it restarts it (or goes to the last with repeat).
     pub fn previous(&mut self) -> Option<&Track> {
         let position = self.position?;
         self.position = Some(match position {
@@ -130,7 +130,7 @@ impl Queue {
         self.current()
     }
 
-    /// Salta a una posizione dell'ordine di ascolto.
+    /// Jumps to a position in the listening order.
     pub fn jump(&mut self, order_position: usize) -> Option<&Track> {
         if order_position < self.order.len() {
             self.position = Some(order_position);
@@ -146,7 +146,7 @@ impl Queue {
         }
     }
 
-    /// Mette il brano subito dopo quello corrente ("Riproduci dopo"). Con la coda vuota diventa il corrente.
+    /// Puts the track right after the current one ("Riproduci dopo"). With an empty queue it becomes the current.
     pub fn enqueue_next(&mut self, track: Track) {
         let Some(position) = self.position else {
             self.enqueue(track);
@@ -156,7 +156,7 @@ impl Queue {
         self.tracks.push(track);
     }
 
-    /// Toglie il brano in quella posizione dell'ordine. Restituisce `true` se era il corrente.
+    /// Removes the track at that position of the order. Returns `true` if it was the current one.
     pub fn remove(&mut self, order_position: usize) -> bool {
         let Some(&index) = self.order.get(order_position) else {
             return false;
@@ -188,9 +188,9 @@ impl Queue {
         }
     }
 
-    /// Sposta la voce in `from` a `to` nell'ordine di ascolto (riordino a trascinamento). Il brano
-    /// corrente resta lo stesso, ovunque finisca. `false` se una posizione non esiste o non c'è
-    /// niente da spostare.
+    /// Moves the entry at `from` to `to` in the listening order (drag reorder). The current track
+    /// stays the same, wherever it ends up. `false` if a position does not exist or there is
+    /// nothing to move.
     pub fn move_entry(&mut self, from: usize, to: usize) -> bool {
         let len = self.order.len();
         if from >= len || to >= len || from == to {
@@ -237,18 +237,18 @@ impl Queue {
         self.repeat = self.repeat.cycle();
     }
 
-    /// Brani nell'ordine di ascolto, con la loro posizione.
+    /// Tracks in listening order, with their position.
     pub fn entries(&self) -> impl Iterator<Item = (usize, &Track)> {
         self.order.iter().enumerate().filter_map(|(pos, &i)| self.tracks.get(i).map(|t| (pos, t)))
     }
 
-    /// Brani dopo quello corrente, nell'ordine di ascolto.
+    /// Tracks after the current one, in listening order.
     pub fn upcoming(&self) -> impl Iterator<Item = (usize, &Track)> {
         let from = self.position.map_or(0, |p| p + 1);
         self.entries().skip(from)
     }
 
-    /// Applica `change` a ogni brano; `true` se almeno una chiamata ha cambiato qualcosa.
+    /// Applies `change` to each track; `true` if at least one call changed something.
     pub fn update_tracks(&mut self, mut change: impl FnMut(&mut Track) -> bool) -> bool {
         let mut changed = false;
         for track in &mut self.tracks {
@@ -265,7 +265,7 @@ impl Queue {
         self.tracks.iter().map(|t| t.duration_ms).sum()
     }
 
-    /// Ripara una coda letta da disco: ordine non valido o posizione fuori intervallo.
+    /// Repairs a queue read from disk: invalid order or position out of range.
     pub fn sanitize(&mut self) {
         let mut sorted = self.order.clone();
         sorted.sort_unstable();
@@ -281,7 +281,7 @@ impl Queue {
         }
     }
 
-    /// Mette `first` in testa e mescola il resto.
+    /// Puts `first` at the top and shuffles the rest.
     fn shuffle_around(&mut self, first: usize, seed: u64) {
         self.order.retain(|&i| i != first);
         shuffle_slice(&mut self.order, seed);
@@ -290,7 +290,7 @@ impl Queue {
     }
 }
 
-/// Fisher-Yates con SplitMix64: deterministico dato il seme, nessuna dipendenza esterna.
+/// Fisher-Yates with SplitMix64: deterministic given the seed, no external dependency.
 fn shuffle_slice<T>(items: &mut [T], seed: u64) {
     let mut state = seed;
     let mut next = move || {
@@ -523,12 +523,12 @@ mod tests {
     #[test]
     fn moving_across_the_current_track_keeps_it_current() {
         let mut queue = queue_of(5, 2);
-        // Un brano che viene dopo passa prima del corrente: la posizione del corrente scende.
+        // A track that comes after moves ahead of the current one: the current's position goes down.
         assert!(queue.move_entry(4, 0));
         assert_eq!(order_ids(&queue), vec![5, 1, 2, 3, 4]);
         assert_eq!(current_id(&queue), Some(3));
         assert_eq!(queue.position(), Some(3));
-        // E viceversa.
+        // And the other way round.
         assert!(queue.move_entry(0, 4));
         assert_eq!(current_id(&queue), Some(3));
         assert_eq!(queue.position(), Some(2));

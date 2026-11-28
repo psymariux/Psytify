@@ -4,7 +4,7 @@ name: Android
 #   pull requests: the quick debug APK (x86_64, no LTO), to see that it builds
 #   main:          the debug APK for both ABIs (arm64-v8a, x86_64)
 #   release, hand: the release APK (`dev.psytify.app`, R8, full LTO, both ABIs), signed with the
-#                  release key: it installs over the earlier releases, the Iced ones included
+#                  release key: it installs over the earlier releases
 on:
   workflow_call:
     inputs:

@@ -1,6 +1,6 @@
-//! Elenco degli sprite incorporati: una costante per nome (`sprite::ICON_HEART_FILL`) e la tabella dei
-//! PNG 1x compilati nel binario con `include_bytes!`. Un solo elenco alimenta entrambe le cose; un test
-//! lo confronta con `sprites.json` (aggiungere uno sprite = una riga qui, dopo `sprites.py`).
+//! List of the embedded sprites: one constant per name (`sprite::ICON_HEART_FILL`) and the table of the
+//! 1x PNGs compiled into the binary with `include_bytes!`. One list feeds both; a test
+//! compares it with `sprites.json` (adding a sprite = one line here, after `sprites.py`).
 
 macro_rules! embedded_sprites {
     ($($konst:ident => $name:literal,)*) => {
@@ -9,7 +9,7 @@ macro_rules! embedded_sprites {
             pub const $konst: &str = $name;
         )*
 
-        /// Nome e byte del PNG indicizzato 1x di ogni sprite.
+        /// Name and bytes of the indexed 1x PNG of each sprite.
         pub(super) const EMBEDDED_PNGS: &[(&str, &[u8])] = &[
             $((
                 $name,
@@ -22,7 +22,7 @@ macro_rules! embedded_sprites {
             ),)*
         ];
 
-        /// Tutti i nomi, nell'ordine di `sprites.json`.
+        /// All the names, in the order of `sprites.json`.
         pub const ALL_NAMES: &[&str] = &[$($name,)*];
     };
 }

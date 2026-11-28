@@ -1,4 +1,4 @@
-//! Wrapper di rodio: un'uscita audio aperta per tutta la vita dell'app e un `Player` per brano.
+//! Wrapper for rodio: one audio output open for the whole life of the app and a `Player` per track.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -16,7 +16,7 @@ use super::eq::{EqControl, Equalized, Settings};
 use super::stream::StreamBuffer;
 use crate::error::AppError;
 
-/// Formato di un'uscita staccata: stereo a 44,1 kHz, come una scheda audio comune.
+/// Format of a detached output: stereo at 44.1 kHz, like a common sound card.
 #[cfg(any(test, feature = "test-support"))]
 const DETACHED_CHANNELS: ChannelCount = match ChannelCount::new(2) {
     Some(channels) => channels,
@@ -29,16 +29,16 @@ const DETACHED_RATE: SampleRate = match SampleRate::new(44_100) {
 };
 
 pub struct AudioOutput {
-    // L'uscita va tenuta in vita: se viene distrutta l'audio si ferma. `None` per un'uscita
-    // staccata (`detached`), senza scheda audio.
+    // The output must be kept alive: if it is destroyed the audio stops. `None` for a detached output
+    // (`detached`), with no sound card.
     _device: Option<MixerDeviceSink>,
-    /// Il mixer in cui entra ogni brano: quello della scheda audio, o quello di un'uscita staccata.
+    /// The mixer each track goes into: the sound card's, or that of a detached output.
     mixer: Mixer,
     sink: Option<Arc<Player>>,
-    /// Seek in corso, fuori dal thread dell'interfaccia: `Player::try_seek` aspetta che il thread
-    /// audio lo esegua, e in un FLAC ancora in arrivo vuol dire aspettare la rete.
+    /// Seek in progress, off the interface's thread: `Player::try_seek` waits for the audio thread to run it,
+    /// and in a FLAC still arriving that means waiting for the network.
     seeking: Arc<Seeking>,
-    /// Equalizzatore condiviso con ogni brano: le modifiche valgono anche mentre suona.
+    /// Equalizer shared with every track: the changes apply even while it plays.
     eq: Arc<EqControl>,
 }
 
@@ -49,9 +49,9 @@ impl AudioOutput {
         Ok(Self::with_mixer(Some(device), mixer))
     }
 
-    /// Un'uscita senza scheda audio, per i test: i campioni non vanno a un dispositivo ma escono
-    /// dal [`MixerSource`] restituito, a chi li legge. Leggerli fa avanzare la posizione e, letto
-    /// tutto il brano, [`Self::finished`] diventa vero.
+    /// An output without a sound card, for the tests: the samples do not go to a device but come out of the
+    /// [`MixerSource`] returned, to whoever reads them. Reading them advances the position and, once
+    /// the whole track is read, [`Self::finished`] becomes true.
     #[cfg(any(test, feature = "test-support"))]
     pub fn detached() -> (Self, MixerSource) {
         let (mixer, source) = rodio::mixer::mixer(DETACHED_CHANNELS, DETACHED_RATE);
@@ -72,8 +72,8 @@ impl AudioOutput {
         self.eq.set(settings);
     }
 
-    /// Avvia un brano mentre arriva, fermando quello precedente. Il decoder legge dal buffer e
-    /// aspetta i byte non ancora scaricati.
+    /// Starts a track as it arrives, stopping the previous one. The decoder reads from the buffer and
+    /// waits for the bytes not yet downloaded.
     pub fn play(&mut self, stream: &StreamBuffer, volume: f32) -> Result<(), AppError> {
         self.stop();
         let sink = Player::connect_new(&self.mixer);
@@ -101,11 +101,11 @@ impl AudioOutput {
         if let Some(sink) = self.sink.take() {
             sink.stop();
         }
-        // Un seek ancora in corso riguarda il brano fermato: la posizione torna quella del nuovo.
+        // A seek still in progress concerns the stopped track: the position goes back to the new one's.
         self.seeking.reset();
     }
 
-    /// Posizione del brano; durante un seek, il punto chiesto.
+    /// Position of the track; during a seek, the requested point.
     pub fn position(&self) -> Duration {
         if let Some(target) = self.seeking.target() {
             return target;
@@ -113,7 +113,7 @@ impl AudioOutput {
         self.sink.as_deref().map_or(Duration::ZERO, Player::get_pos)
     }
 
-    /// Avvia il seek e torna subito. Un fallimento si legge dopo con [`Self::take_seek_failure`].
+    /// Starts the seek and returns at once. A failure is read afterwards with [`Self::take_seek_failure`].
     pub fn seek(&self, to: Duration) {
         let Some(sink) = &self.sink else { return };
         let sink = Arc::clone(sink);
@@ -125,7 +125,7 @@ impl AudioOutput {
         });
     }
 
-    /// `true` una sola volta dopo un seek fallito.
+    /// `true` only once after a failed seek.
     pub fn take_seek_failure(&self) -> bool {
         self.seeking.failed.swap(false, Ordering::AcqRel)
     }
@@ -136,13 +136,13 @@ impl AudioOutput {
         }
     }
 
-    /// Il brano caricato è finito.
+    /// The loaded track has ended.
     pub fn finished(&self) -> bool {
         self.sink.as_deref().is_some_and(Player::empty)
     }
 }
 
-/// Stato del seek più recente: i precedenti, ancora in corso, non lo cambiano più.
+/// State of the most recent seek: the previous ones, still in progress, no longer change it.
 #[derive(Default)]
 struct Seeking {
     generation: AtomicU64,
@@ -182,7 +182,7 @@ impl Seeking {
     }
 }
 
-/// Lo slider va da 0 a 1; l'orecchio percepisce il volume in modo circa quadratico.
+/// The slider goes from 0 to 1; the ear perceives the volume roughly quadratically.
 fn amplitude(volume: f32) -> f32 {
     let v = volume.clamp(0.0, 1.0);
     v * v
@@ -194,10 +194,10 @@ mod tests {
 
     use super::*;
 
-    /// Quattro secondi di FLAC mono a 22 050 Hz.
+    /// Four seconds of mono FLAC at 22,050 Hz.
     const TONE_FLAC: &[u8] = include_bytes!("../../tests/fixtures/tone-4s.flac");
 
-    /// Legge dal mixer staccato i campioni di `duration`, come farebbe la scheda audio.
+    /// Reads from the detached mixer the samples of `duration`, as the sound card would.
     fn pull(source: &mut MixerSource, duration: Duration) {
         let per_second = f64::from(source.sample_rate().get()) * f64::from(source.channels().get());
         let samples = (duration.as_secs_f64() * per_second) as usize;

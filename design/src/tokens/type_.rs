@@ -83,7 +83,7 @@ const fn pixel(size: f32, line_height: f32, tabular: bool, slashed_zero: bool, c
     }
 }
 
-/// Size of the pixel face in the Iced app (11 AP, 22 dp) and its line height (14 AP, 28 dp).
+/// Size of the pixel face (11 AP, 22 dp) and its line height (14 AP, 28 dp).
 pub const PIXEL_SIZE: f32 = 22.0;
 pub const PIXEL_LINE: f32 = 28.0;
 /// The same in AP (font pixels): see `scale::pixel_type_device`.
@@ -177,7 +177,7 @@ pub fn pixel_face_device(role: TypeRole, device_per_dp: f32) -> (f32, f32) {
     (size, line)
 }
 
-/// The sizes the Iced app (Android) keeps: the v1 scale, from before the desktop ramp.
+/// The sizes the Android app keeps: the v1 scale, from before the desktop ramp.
 pub mod v1 {
     pub const DISPLAY: f32 = 32.0;
     pub const HEADING: f32 = 16.0;

@@ -1,5 +1,5 @@
 //! The liked songs and a local playlist: one view that switches collection when `Shell` opens the other
-//! (`CollectionPage::show`). As in the Iced client (`client/src/ui/pages/liked.rs`, `playlist.rs`): the head
+//! (`CollectionPage::show`). The head
 //! with the count and duration, the 56 dp play button, shuffle and «Scarica tutto» (a playlist also has
 //! rename and delete, through `Shell`'s dialog); then the tracks, 48 dp `TrackRow`s in one column (title :
 //! album 3 : 2). The head is the object pages' `PageHeader` (the heart on `GRAPHITE` for the liked songs, the
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn only_the_shown_collection_moving_rebuilds_the_rows() {
         let old = library(vec![fixtures::track(1)], vec![Playlist::new("Sera", Vec::new())]);
-        // Un ascolto: liked e playlist sono le stesse `Arc`.
+        // One listen: liked and playlist are the same `Arc`s.
         let listened = LibraryView { recent: vec![fixtures::track(9)].into(), ..old.clone() };
         assert!(!moved(&old, &listened, Collection::Liked));
         assert!(!moved(&old, &listened, Collection::Playlist(Uuid::nil())));

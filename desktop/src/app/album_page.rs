@@ -1,5 +1,4 @@
-//! The page of an album of the server catalogue (`PSYTIFY_ART_DIRECTION.md`, Album; the Iced client's
-//! `client/src/ui/pages/album.rs`): the head with the cover, «ALBUM · 2024», the title, the artist (opens),
+//! The page of an album of the server catalogue (`PSYTIFY_ART_DIRECTION.md`, Album): the head with the cover, «ALBUM · 2024», the title, the artist (opens),
 //! tracks, duration and `LOSSLESS` when every track is; the 56 dp play button, shuffle, save to the library
 //! (the heart) and «Scarica tutto»; then the tracks (`TrackRow`, one column, title : album 3 : 2) and the
 //! credits of the licences that ask for attribution. The page fills the frame (desktop v2 §2) and enters
@@ -99,7 +98,7 @@ pub fn credits(tracks: &[Track]) -> Vec<SharedString> {
         .collect()
 }
 
-/// A credit line, dense as in the Iced client, at the frame margin and within the running-text measure;
+/// A credit line, dense, at the frame margin and within the running-text measure;
 /// the last leaves room at the bottom of the page.
 pub fn credit_line(text: SharedString, last: bool, margin: f32) -> gpui::Div {
     div().px(dp(margin)).pt(dp(SPACE_1)).pb(dp(if last { SPACE_8 } else { SPACE_1 })).child(

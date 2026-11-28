@@ -1,13 +1,13 @@
-//! Select (scelta da un elenco): un pulsante secondario con il valore scelto e la freccia in giù, che apre
-//! sotto di sé un menu del kit (`MenuPanel`) con le opzioni; quella scelta ha la spunta. Serve dove il
-//! client Iced ha una scelta a segmenti o un menu di durate (qualità, timer di spegnimento, preset
-//! dell'equalizzatore): la direzione artistica non ha segmenti né pillole.
+//! Select (choice from a list): a secondary button with the chosen value and a down arrow, which opens
+//! below it a kit menu (`MenuPanel`) with the options; the chosen one has a tick. It is for where the
+//! The former client had a segmented choice or a menu of durations (quality, sleep timer, equaliser
+//! presets): the art direction has no segments or pills.
 //!
-//! Il menu è del componente: lo stato aperto/chiuso sta in uno stato per id (`use_keyed_state`), così un
-//! Select funziona anche dentro una pagina in `.cached()` (il cambio di stato ridisegna solo la vista che
-//! lo contiene). Aperto, un velo trasparente su tutta la finestra chiude il menu al clic fuori; Esc lo
-//! chiude e riporta il focus sul pulsante. Il velo e il menu stanno sopra il resto (`deferred`, priorità
-//! `Z_MENU`), dentro la finestra.
+//! The menu belongs to the component: the open/closed state sits in a state per id (`use_keyed_state`), so a
+//! Select also works inside a page in `.cached()` (the state change redraws only the view that
+//! contains it). Open, a transparent scrim over the whole window closes the menu on an outside click; Esc
+//! closes it and returns the focus to the button. The scrim and the menu sit above the rest (`deferred`, priority
+//! `Z_MENU`), inside the window.
 
 use std::rc::Rc;
 
@@ -35,7 +35,7 @@ pub type OnSelect = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 struct SelectState {
     open: bool,
-    /// Dove sta il pulsante (dall'ultimo disegno): il menu si apre sotto.
+    /// Where the button is (from the last draw): the menu opens below it.
     bounds: Bounds<Pixels>,
     menu: FocusHandle,
 }
@@ -45,12 +45,12 @@ pub struct Select {
     id: ElementId,
     options: Vec<SharedString>,
     selected: Option<usize>,
-    /// Il testo del pulsante quando nessuna opzione è scelta («Personalizzato»).
+    /// The button's text when no option is chosen («Personalizzato»).
     placeholder: SharedString,
     min_width: Option<f32>,
     disabled: bool,
     preview: Preview,
-    /// Solo per la galleria: il menu disegnato aperto.
+    /// Gallery only: the drawn menu open.
     force_open: bool,
     on_select: Option<OnSelect>,
 }
@@ -90,7 +90,7 @@ impl Select {
         self
     }
 
-    /// La galleria lo mostra aperto senza clic.
+    /// The gallery shows it open without a click.
     pub fn open(mut self, open: bool) -> Self {
         self.force_open = open;
         self
@@ -141,7 +141,7 @@ impl RenderOnce for Select {
         if let Some(width) = self.min_width {
             content = content.min_w(dp(width));
         }
-        // Il pulsante registra dove sta, per aprire il menu proprio sotto.
+        // The button records where it is, to open the menu right below it.
         let measure = {
             let state = state.clone();
             canvas(move |bounds, _, cx| state.update(cx, |s, _| s.bounds = bounds), |_, (), _, _| {})
@@ -170,7 +170,7 @@ impl RenderOnce for Select {
         if open && !self.disabled {
             let close_veil = state.clone();
             let size = window.viewport_size();
-            // Un clic fuori dal menu lo chiude e non arriva a ciò che c'è sotto.
+            // An outside click closes the menu and does not reach what is underneath.
             let veil = deferred(
                 anchored().position(point(px(0.0), px(0.0))).child(
                     div()

@@ -1,4 +1,4 @@
-//! Modelli del catalogo, come descritti in docs/BACKEND.md.
+//! Catalog models, as described in docs/BACKEND.md.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -22,7 +22,7 @@ pub struct Licence {
 }
 
 impl Licence {
-    /// Le licenze CC con attribuzione (anche NC e ND) richiedono di mostrare il titolare.
+    /// CC licences with attribution (also NC and ND) require showing the rights holder.
     pub fn requires_attribution(&self) -> bool {
         matches!(
             self.kind.as_str(),
@@ -57,16 +57,16 @@ pub struct Track {
     pub duration_ms: u64,
     pub audio_format: String,
     pub downloadable: bool,
-    /// Il brano ha un videoclip. Assente nelle playlist salvate prima del campo: `false`.
+    /// The track has a music video. Absent in playlists saved before the field: `false`.
     #[serde(default)]
     pub has_video: bool,
-    /// Il videoclip è già nello storage del server; se `false` il primo `video-url` lo scarica.
+    /// The music video is already in the server's storage; if `false` the first `video-url` downloads it.
     #[serde(default)]
     pub video_ready: bool,
     pub artist: ArtistRef,
     pub album: Option<AlbumRef>,
     pub licence: Licence,
-    /// Copertina pubblica (Internet Archive). Assente nelle playlist salvate prima del campo.
+    /// Public cover (Internet Archive). Absent in saved playlists from before the field.
     #[serde(default)]
     pub cover_url: Option<String>,
     pub created_at: String,
@@ -77,7 +77,7 @@ impl Track {
         std::time::Duration::from_millis(self.duration_ms)
     }
 
-    /// Estensione del file per il download: solo i formati noti, altrimenti `audio`.
+    /// File extension for the download: only the known formats, otherwise `audio`.
     pub fn extension(&self) -> &str {
         match self.audio_format.as_str() {
             ext @ ("flac" | "mp3" | "ogg" | "wav" | "m4a") => ext,
@@ -97,7 +97,7 @@ pub struct Album {
     pub tracks: Vec<Track>,
 }
 
-/// Album nelle liste: catalogo (`GET /v1/catalog/albums`) e ricerca.
+/// Albums in lists: catalog (`GET /v1/catalog/albums`) and search.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct AlbumSummary {
     pub id: Uuid,
@@ -109,7 +109,7 @@ pub struct AlbumSummary {
     pub cover_url: Option<String>,
 }
 
-/// Artista nei risultati della ricerca.
+/// Artist in the search results.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ArtistSummary {
     pub id: Uuid,
@@ -128,14 +128,14 @@ pub enum TopKind {
     Track,
 }
 
-/// Risultato principale: il primo elemento della lista del suo tipo.
+/// Main result: the first item of the list of its type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct TopHit {
     pub kind: TopKind,
     pub id: Uuid,
 }
 
-/// `GET /v1/catalog/search`: risultato principale, brani, artisti e album.
+/// `GET /v1/catalog/search`: main result, tracks, artists and albums.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 pub struct SearchResults {
     pub top: Option<TopHit>,
@@ -150,19 +150,19 @@ impl SearchResults {
     }
 }
 
-/// Le fonti esterne da cui il server cerca brani.
+/// The external sources the server searches tracks from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceKind {
     YouTube,
     SoundCloud,
     Bandcamp,
-    /// Il catalogo ufficiale (Deezer): l'audio lo trova il server quando si preme play.
+    /// The official catalog (Deezer): the server finds the audio when play is pressed.
     Deezer,
 }
 
 impl SourceKind {
-    /// Nome usato dal backend nel percorso `/v1/sources/{source}/...`.
+    /// Name used by the backend in the path `/v1/sources/{source}/...`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::YouTube => "youtube",
@@ -182,9 +182,9 @@ impl SourceKind {
     }
 }
 
-/// Un risultato della ricerca esterna. `duration_ms` manca quando la fonte non dichiara la durata
-/// (Bandcamp): il server la conosce solo dopo aver aperto il brano. Si salva nella configurazione
-/// per i brani di una playlist ancora da importare.
+/// An external search result. `duration_ms` is missing when the source does not declare the duration
+/// (Bandcamp): the server knows it only after opening the track. It is saved in the configuration
+/// for the tracks of a playlist still to be imported.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceItem {
     pub source: SourceKind,
@@ -192,31 +192,31 @@ pub struct SourceItem {
     pub title: String,
     pub artist: String,
     pub duration_ms: Option<u64>,
-    /// Copertina ufficiale (solo il catalogo Deezer). Assente nelle playlist salvate prima del campo.
+    /// Official cover (only the Deezer catalog). Absent in playlists saved before the field.
     #[serde(default)]
     pub cover_url: Option<String>,
 }
 
-/// Una playlist di YouTube o un album di Bandcamp trovato dalla ricerca esterna.
+/// A YouTube playlist or a Bandcamp album found by the external search.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct SourcePlaylist {
     pub source: SourceKind,
-    /// Per il catalogo Deezer `album/123` o `playlist/456`.
+    /// For the Deezer catalog `album/123` or `playlist/456`.
     pub id: String,
     pub title: String,
     pub owner: String,
     #[serde(default)]
     pub cover_url: Option<String>,
-    /// Solo il catalogo: `album`, `single`, `ep` o `playlist`.
+    /// Only the catalog: `album`, `single`, `ep` or `playlist`.
     #[serde(default)]
     pub kind: String,
-    /// Data di uscita (`2003-03-25`), se nota.
+    /// Release date (`2003-03-25`), if known.
     #[serde(default)]
     pub released_on: Option<String>,
 }
 
 impl SourcePlaylist {
-    /// «Album», «Singolo», «EP» o «Playlist»: come si presenta nelle schede.
+    /// "Album", "Singolo", "EP" or "Playlist": how it appears in the sheets.
     pub fn kind_label(&self) -> &'static str {
         match (self.source, self.kind.as_str()) {
             (SourceKind::Bandcamp, _) | (SourceKind::Deezer, "album") => "Album",
@@ -226,13 +226,13 @@ impl SourcePlaylist {
         }
     }
 
-    /// L'anno di uscita, se noto.
+    /// The release year, if known.
     pub fn year(&self) -> Option<&str> {
         self.released_on.as_deref().and_then(|date| date.get(..4))
     }
 }
 
-/// I brani di una playlist esterna, nell'ordine della fonte: ognuno si suona importandolo.
+/// The tracks of an external playlist, in the source's order: each one plays by importing it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct SourcePlaylistPage {
     pub source: SourceKind,
@@ -242,7 +242,7 @@ pub struct SourcePlaylistPage {
     pub items: Vec<SourceItem>,
 }
 
-/// Un artista del catalogo Deezer.
+/// An artist of the Deezer catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct MetaArtist {
     pub id: u64,
@@ -330,12 +330,12 @@ impl From<MetaPlaylistDto> for SourcePlaylist {
     }
 }
 
-/// `GET /v1/meta/search`: brani, artisti, album e playlist del catalogo.
+/// `GET /v1/meta/search`: tracks, artists, albums and playlists of the catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MetaSearch {
     pub tracks: Vec<SourceItem>,
     pub artists: Vec<MetaArtist>,
-    /// Album e playlist, nell'ordine: prima gli album.
+    /// Albums and playlists, in order: albums first.
     pub lists: Vec<SourcePlaylist>,
 }
 
@@ -359,7 +359,7 @@ impl From<MetaSearchDto> for MetaSearch {
     }
 }
 
-/// La pagina di un artista del catalogo: i brani popolari e tutta la discografia.
+/// The page of a catalog artist: the popular tracks and the whole discography.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetaArtistPage {
     pub artist: MetaArtist,
@@ -419,7 +419,7 @@ pub(super) struct OpenedArtist {
     pub id: Uuid,
 }
 
-/// Testi di un brano da LRCLIB, citati dal backend. `synced` è in formato LRC.
+/// Track lyrics from LRCLIB, quoted by the backend. `synced` is in LRC format.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Lyrics {
     pub track_id: Uuid,
@@ -436,9 +436,9 @@ pub struct Page<T> {
     pub next_offset: Option<i64>,
 }
 
-/// Qualità d'ascolto scelta nelle impostazioni (`?quality=` di `stream-url`): lossless prende il
-/// FLAC o il WAV (Internet Archive; niente fascia hi-res a parte), standard la versione da YouTube.
-/// Se manca, il server dà l'altra.
+/// Listening quality chosen in the settings (`?quality=` of `stream-url`): lossless takes the
+/// FLAC or the WAV (Internet Archive; no separate hi-res tier), standard the YouTube version.
+/// If it is missing, the server gives the other one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Quality {
@@ -463,9 +463,9 @@ impl Quality {
     }
 }
 
-/// Qualità di un download (`?quality=` di `download-url`). `Lossless` è la migliore che il brano ha
-/// (FLAC o WAV, senza una fascia hi-res a parte); le altre sono versioni con perdita, più piccole.
-/// Il server non migliora mai un file con perdita: quello che arriva davvero lo dice `SignedUrl::quality`.
+/// Quality of a download (`?quality=` of `download-url`). `Lossless` is the best the track has
+/// (FLAC or WAV, with no separate hi-res tier); the others are lossy versions, smaller.
+/// The server never improves a lossy file: what actually arrives says so in `SignedUrl::quality`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DownloadQuality {
@@ -477,7 +477,7 @@ pub enum DownloadQuality {
 }
 
 impl DownloadQuality {
-    /// Dalla più alta alla più bassa, come le mostra la scelta.
+    /// From the highest to the lowest, as the choice shows them.
     pub const ALL: [Self; 4] = [Self::Lossless, Self::High, Self::Medium, Self::Low];
 
     pub fn as_str(self) -> &'static str {
@@ -502,7 +502,7 @@ impl DownloadQuality {
         }
     }
 
-    /// Che file è, in poche parole: sta in una riga del menu.
+    /// What kind of file it is, in a few words: it sits in a line of the menu.
     pub fn detail(self) -> &'static str {
         match self {
             Self::Lossless => "FLAC o WAV",
@@ -512,7 +512,7 @@ impl DownloadQuality {
         }
     }
 
-    /// La scelta spiegata per le impostazioni, con lo spazio che occupa un brano di quattro minuti.
+    /// The choice explained for the settings, with the space a four-minute track takes.
     pub fn description(self) -> &'static str {
         match self {
             Self::Lossless => "FLAC o WAV senza perdita: il file originale, circa 25 MB a brano",
@@ -523,7 +523,7 @@ impl DownloadQuality {
     }
 }
 
-/// Un risultato della ricerca su Internet Archive.
+/// A search result on Internet Archive.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DiscoverItem {
     pub identifier: String,
@@ -533,18 +533,18 @@ pub struct DiscoverItem {
     pub year: Option<String>,
     #[serde(default)]
     pub cover_url: Option<String>,
-    /// L'item ha almeno un FLAC o un WAV.
+    /// The item has at least one FLAC or a WAV.
     #[serde(default)]
     pub lossless: bool,
 }
 
-/// Una libreria di Internet Archive: la raccolta di una netlabel.
+/// An Internet Archive library: the collection of a netlabel.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DiscoverLibrary {
     pub identifier: String,
     pub title: String,
     pub creator: Option<String>,
-    /// Album della ricerca che stanno nella libreria.
+    /// Albums from the search that are in the library.
     pub found: u32,
     #[serde(default)]
     pub cover_url: Option<String>,
@@ -557,14 +557,14 @@ pub struct DiscoverPage {
     pub libraries: Vec<DiscoverLibrary>,
 }
 
-/// Una pagina degli album di una libreria.
+/// A page of a library's albums.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct LibraryPage {
     pub items: Vec<DiscoverItem>,
     pub next_page: Option<u32>,
 }
 
-/// Brani di un item appena portato nel catalogo.
+/// Tracks of an item just brought into the catalog.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DiscoverImport {
     pub album: Option<AlbumRef>,
@@ -581,41 +581,41 @@ pub struct ArtistAlbum {
     pub cover_url: Option<String>,
 }
 
-/// Pagina di un artista: album e brani pubblicati.
+/// Page of an artist: published albums and tracks.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ArtistPage {
     pub id: Uuid,
     pub name: String,
-    /// Foto ufficiale dell'artista; senza, si usa la copertina di un suo album o brano.
+    /// Official photo of the artist; without it, the cover of one of their albums or tracks is used.
     #[serde(default)]
     pub image_url: Option<String>,
     pub albums: Vec<ArtistAlbum>,
     pub tracks: Vec<Track>,
 }
 
-/// L'utente collegato, da `GET /v1/me`.
+/// The user signed in, from `GET /v1/me`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Me {
     pub user_id: String,
     pub admin: bool,
-    /// `None` finché l'utente non ha un nome utente: le funzioni social lo chiedono.
+    /// `None` until the user has a username: the social functions ask for it.
     #[serde(default)]
     pub profile: Option<super::social::MyProfile>,
 }
 
-/// URL firmato. `Debug` non stampa l'URL: è un segreto temporaneo.
+/// Signed URL. `Debug` does not print the URL: it is a temporary secret.
 #[derive(Clone, PartialEq, Eq, Deserialize)]
 pub struct SignedUrl {
     pub kind: String,
     pub url: String,
     pub expires_at: String,
-    /// Solo per i videoclip: l'altezza della versione servita (360 la prima, 720 quella completa).
+    /// Music videos only: the height of the version served (360 the first, 720 the full one).
     #[serde(default)]
     pub height: Option<u32>,
-    /// Solo per i download: formato del file che si riceve (`flac`, `wav`, `mp3`, `ogg`, `m4a`).
+    /// Downloads only: the file format received (`flac`, `wav`, `mp3`, `ogg`, `m4a`).
     #[serde(default)]
     pub format: Option<String>,
-    /// Solo per i download: la qualità che si riceve davvero (vedi `DownloadQuality::parse`).
+    /// Downloads only: the quality actually received (see `DownloadQuality::parse`).
     #[serde(default)]
     pub quality: Option<String>,
 }
@@ -633,8 +633,8 @@ impl std::fmt::Debug for SignedUrl {
     }
 }
 
-/// Corpo d'errore uniforme del backend: al client serve solo il codice stabile, il messaggio
-/// mostrato è tradotto in italiano a partire dal codice.
+/// The backend's uniform error body: the client needs only the stable code, the message
+/// shown is translated into Italian starting from the code.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApiErrorBody {
     pub error: String,

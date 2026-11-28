@@ -1,10 +1,10 @@
-//! Le parti di pagina comuni alle liste: l'intestazione di sezione e la riga di stato, alte come una riga
-//! di brano (`TRACK_ROW_H`) così stanno in una `uniform_list` insieme alle righe, e il titolo della
-//! pagina che sta sopra la lista.
+//! Page parts shared by the lists: the section header and the status row, as tall as a track row
+//! (`TRACK_ROW_H`) so they sit in a `uniform_list` together with the rows, and the page title that
+//! sits above the list.
 //!
-//! Il titolo di una schermata dell'app (Libreria, Scaricati) è in tipo pixel (`TYPE_PAGE_TITLE`), con
-//! sotto una riga di metadati e i pulsanti della pagina. Il nome di un oggetto (album, artista, playlist,
-//! «Brani che ti piacciono») non è un titolo di schermata: sta in `PageHeader` (`page_header.rs`).
+//! A screen's title (Libreria, Scaricati) is in pixel type (`TYPE_PAGE_TITLE`), with
+//! under it a metadata line and the page's buttons. The name of an object (album, artist, playlist,
+//! «Brani che ti piacciono») is not a screen title: it sits in `PageHeader` (`page_header.rs`).
 
 use gpui::{AnyElement, App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 use psytify_design::tokens::color::{TEXT_PRIMARY, TEXT_TERTIARY};
@@ -14,8 +14,8 @@ use psytify_design::tokens::type_::{TYPE_HEADING, TYPE_META, TYPE_PAGE_TITLE};
 
 use crate::theme::{TypeStyle, col, dp};
 
-/// Intestazione di sezione: alta come una riga, così la lista resta uniforme. `meta` è il conteggio
-/// («3 brani»), vuoto se non serve.
+/// Section header: as tall as a row, so the list stays uniform. `meta` is the count
+/// («3 brani»), empty if not needed.
 pub fn section_heading(title: SharedString, meta: SharedString) -> gpui::Div {
     section_heading_at(title, meta, SPACE_6)
 }
@@ -35,7 +35,7 @@ pub fn section_heading_at(title: SharedString, meta: SharedString, margin: f32) 
         .child(div().type_role(TYPE_META).text_color(col(TEXT_TERTIARY)).child(meta))
 }
 
-/// Una riga di stato (caricamento, errore, una frase che spiega), alta come le altre.
+/// A status row (loading, error, a phrase that explains), as tall as the others.
 pub fn note(content: impl IntoElement) -> gpui::Div {
     note_at(content, SPACE_6)
 }
@@ -45,19 +45,19 @@ pub fn note_at(content: impl IntoElement, margin: f32) -> gpui::Div {
     div().h(dp(TRACK_ROW_H)).w_full().flex_none().flex().items_center().px(dp(margin)).child(content)
 }
 
-/// Il titolo in cima a una schermata: titolo in tipo pixel, una riga di metadati e i pulsanti.
+/// The title at the top of a screen: pixel-type title, a metadata line and the buttons.
 #[derive(IntoElement)]
 pub struct PageTitle {
     title: SharedString,
     meta: SharedString,
-    /// Una seconda riga di metadati, più tenue (la cartella dei download).
+    /// A second, fainter metadata line (the downloads folder).
     detail: SharedString,
     actions: Vec<AnyElement>,
     margin: f32,
 }
 
 impl PageTitle {
-    /// Il titolo di una schermata (Libreria, Scaricati).
+    /// A screen's title (Libreria, Scaricati).
     pub fn screen(title: impl Into<SharedString>) -> Self {
         Self {
             title: title.into(),
@@ -74,19 +74,19 @@ impl PageTitle {
         self
     }
 
-    /// La riga sotto il titolo (conteggi, durata, spazio occupato): già pronta.
+    /// The line under the title (counts, duration, space used): already ready.
     pub fn meta(mut self, meta: impl Into<SharedString>) -> Self {
         self.meta = meta.into();
         self
     }
 
-    /// Una seconda riga sotto i metadati, già pronta.
+    /// A second line under the metadata, already ready.
     pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
         self.detail = detail.into();
         self
     }
 
-    /// Un pulsante della pagina, nell'ordine di lettura.
+    /// A page button, in reading order.
     pub fn action(mut self, action: impl IntoElement) -> Self {
         self.actions.push(action.into_any_element());
         self

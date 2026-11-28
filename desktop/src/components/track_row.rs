@@ -26,7 +26,7 @@ use crate::pixel::PixelSprite;
 use crate::pixel::shape::inset_ring;
 use crate::theme::{Ap, TypeStyle, col, dp, fade};
 
-/// Dati di una riga: stringhe già pronte (la view non formatta, vedi AGENTS.md).
+/// Data of a row: strings already ready (the view does not format, see AGENTS.md).
 #[derive(Clone)]
 pub struct TrackData {
     pub index: u32,
@@ -37,7 +37,7 @@ pub struct TrackData {
     pub liked: bool,
     pub download: DownloadState,
     pub available: bool,
-    /// Indirizzo della copertina: il deposito la chiede al core e la disegna quando arriva.
+    /// Cover address: the store asks the core for it and draws it when it arrives.
     pub cover_url: Option<SharedString>,
 }
 
@@ -48,7 +48,7 @@ pub struct TrackRow {
     show_album: bool,
     selected: bool,
     playing: Option<PlayState>,
-    /// Dove `Shell` dipinge l'equalizzatore al posto della riga (vedi `playing_spot`).
+    /// Where `Shell` paints the equaliser in place of the row (see `playing_spot`).
     spot: Option<PlayingSpot>,
     preview: Preview,
     show_more: bool,
@@ -60,8 +60,8 @@ pub struct TrackRow {
     on_album: Option<OnClick>,
 }
 
-/// Un testo che si apre (l'artista, l'album): largo quanto il testo, sottolineato al passaggio del mouse,
-/// e il clic non arriva alla riga.
+/// A text that opens (the artist, the album): as wide as the text, underlined on mouse hover,
+/// and the click does not reach the row.
 fn link(id: SharedString, text: gpui::Div, handler: Option<OnClick>) -> gpui::AnyElement {
     match handler {
         Some(handler) => div()
@@ -108,19 +108,19 @@ impl TrackRow {
         self
     }
 
-    /// Il titolo dell'album (nella sua colonna) apre la sua pagina.
+    /// The album title (in its column) opens its page.
     pub fn on_album(mut self, handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_album = Some(std::rc::Rc::new(handler));
         self
     }
 
-    /// «Altro»: apre il menu del brano (chi lo mostra lo ancora a `ClickEvent::position`).
+    /// «Altro»: opens the track's menu (whoever shows it anchors it to `ClickEvent::position`).
     pub fn on_more(mut self, handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_more = Some(std::rc::Rc::new(handler));
         self
     }
 
-    /// Il pulsante «Altro» (menu del brano): si toglie dove il menu non c'è ancora.
+    /// The «Altro» button (track menu): it is removed where the menu is not there yet.
     pub fn show_more(mut self, show: bool) -> Self {
         self.show_more = show;
         self
@@ -132,7 +132,7 @@ impl TrackRow {
         self
     }
 
-    /// Download: scarica il brano (solo se il suo stato lo permette: disponibile o fallito).
+    /// Download: downloads the track (only if its state allows it: available or failed).
     pub fn on_download(
         mut self,
         handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
@@ -147,20 +147,20 @@ impl TrackRow {
         self
     }
 
-    /// Selezione multipla: l'indice diventa una spunta.
+    /// Multiple selection: the index becomes a tick.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
     }
 
-    /// La traccia della riga è quella in riproduzione/pausa/caricamento.
+    /// The row's track is the one playing/paused/loading.
     pub fn playing(mut self, state: PlayState) -> Self {
         self.playing = Some(state);
         self
     }
 
     /// Come [`TrackRow::playing`], ma l'equalizzatore lo dipinge `Shell` sopra la vista: la riga segna
-    /// solo il posto. Per le righe dentro una vista `.cached()`, che così non si rifà a ogni scatto.
+    /// only the place. For rows inside a `.cached()` view, so that it does not redo at every frame.
     pub fn playing_at(mut self, state: PlayState, spot: &PlayingSpot) -> Self {
         self.playing = Some(state);
         self.spot = Some(spot.clone());
@@ -236,7 +236,7 @@ impl RenderOnce for TrackRow {
                     None,
                 );
             if let Some(handler) = self.on_like.clone() {
-                // Il cuore non deve far partire anche il click della riga.
+                // The heart must not also start the row's click.
                 heart = heart.on_click(move |event, window, cx| {
                     cx.stop_propagation();
                     handler(event, window, cx);
@@ -259,8 +259,8 @@ impl RenderOnce for TrackRow {
         } else {
             div().size(dp(32.0)).into_any_element()
         };
-        // Il download compare in hover; uno stato (in coda, in corso, fatto, fallito, file perso) si vede
-        // sempre, come nel client Iced. Se non scaricabile lo spazio resta.
+        // The download shows on hover; a state (queued, running, done, failed, lost file) is seen
+        // always. If it cannot be downloaded, the space stays.
         let download_visible = hot || !matches!(self.data.download, DownloadState::Available);
         let download = if download_visible {
             let clickable = matches!(
@@ -358,7 +358,7 @@ impl RenderOnce for TrackRow {
     }
 }
 
-/// Riga di esempio deterministica per la galleria e per i test di carico (nessun dato reale).
+/// Deterministic sample row for the gallery and the load tests (no real data).
 pub fn sample(ix: usize) -> TrackData {
     const TITLES: [&str; 8] = [
         "Neon Harbour",

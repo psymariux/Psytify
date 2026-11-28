@@ -1,4 +1,4 @@
-//! «Jam», listening together, as the GPUI page (`desktop/src/app/jam_page.rs`) and the Iced phone.
+//! «Jam», listening together, as the GPUI page (`desktop/src/app/jam_page.rs`) and the phone.
 //!
 //! No jam: the friends' invites (Entra, Ignora), then the card «Ascolta insieme», whose name and code
 //! fields the app draws (`PsytifyCore::jam_create`, `jam_join`); if the last jam closed by itself the

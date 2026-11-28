@@ -1,8 +1,8 @@
-//! Calcolo della posizione di destinazione di un seek.
+//! Calculation of a seek's target position.
 
 use std::time::Duration;
 
-/// Sposta la posizione di `delta_secs` secondi, senza uscire da `[0, durata]`.
+/// Moves the position by `delta_secs` seconds, without leaving `[0, duration]`.
 pub fn seek_by(position: Duration, delta_secs: i64, duration: Option<Duration>) -> Duration {
     let delta = Duration::from_secs(delta_secs.unsigned_abs());
     let target =
@@ -10,7 +10,7 @@ pub fn seek_by(position: Duration, delta_secs: i64, duration: Option<Duration>) 
     clamp(target, duration)
 }
 
-/// Posizione corrispondente a una frazione della durata (barra di avanzamento).
+/// Position corresponding to a fraction of the duration (progress bar).
 pub fn seek_fraction(fraction: f32, duration: Duration) -> Duration {
     if !fraction.is_finite() {
         return Duration::ZERO;
@@ -18,7 +18,7 @@ pub fn seek_fraction(fraction: f32, duration: Duration) -> Duration {
     duration.mul_f32(fraction.clamp(0.0, 1.0))
 }
 
-/// Frazione già ascoltata, per disegnare la barra.
+/// Fraction already played, to draw the bar.
 pub fn progress(position: Duration, duration: Duration) -> f32 {
     if duration.is_zero() {
         return 0.0;
@@ -33,7 +33,7 @@ fn clamp(target: Duration, duration: Option<Duration>) -> Duration {
     }
 }
 
-/// `m:ss`, oppure `h:mm:ss` oltre l'ora.
+/// `m:ss`, or `h:mm:ss` past the hour.
 pub fn format_time(time: Duration) -> String {
     let total = time.as_secs();
     let (hours, minutes, seconds) = (total / 3600, (total % 3600) / 60, total % 60);

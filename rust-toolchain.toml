@@ -1,4 +1,4 @@
-# The toolchain the project is verified with. The minimum supported version is `rust-version`
+# Toolchain the project is verified with. The minimum supported version is `rust-version`
 # in Cargo.toml (1.94.1, set by the AWS SDK).
 [toolchain]
 channel = "1.99.0"

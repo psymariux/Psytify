@@ -49,7 +49,7 @@ pub struct DialogView {
     pub destructive: bool,
 }
 
-/// The name proposed for a new playlist, as in the Iced client.
+/// The name proposed for a new playlist.
 fn suggested_name(playlists: usize) -> String {
     format!("La mia playlist n. {}", playlists + 1)
 }

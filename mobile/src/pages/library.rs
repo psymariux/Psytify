@@ -1,4 +1,4 @@
-//! Libreria, as in the Iced phone layout (`client/src/ui/phone/library.rs`): the filters, then
+//! Libreria, as in the phone layout: the filters, then
 //! «Brani che ti piacciono», «Scaricati», the playlists, the saved
 //! albums and the followed artists. Everything is local: nothing to load.
 
@@ -8,7 +8,7 @@ use super::{Art, Built, Chip, Mark, PageAction, PageStatus, Route, Row, RowState
 use crate::dialog::Request;
 use crate::format;
 
-/// The filters, in the order of the Iced client.
+/// The filters, in display order.
 const CHIPS: [&str; 4] = ["Tutto", "Playlist", "Album", "Artisti"];
 const ALL: usize = 0;
 const PLAYLISTS: usize = 1;

@@ -16,11 +16,11 @@ use psytify_design::tokens::motion::MOTION_HOVER;
 
 use crate::motion::{Tween, duration, keep_running};
 
-/// Callback di un click (mouse o tastiera: Invio/Spazio sul controllo con il focus).
+/// Callback of a click (mouse or keyboard: Enter/Space on the control with focus).
 pub type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
-/// Stato mostrato da un controllo. `Live` segue il mouse e la tastiera; gli altri lo bloccano (la
-/// galleria li usa per mostrare ogni stato affiancato senza dover tenere premuto il mouse).
+/// State shown by a control. `Live` follows the mouse and the keyboard; the others lock it (the
+/// gallery uses them to show each state side by side without having to hold the mouse).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Preview {
     #[default]
@@ -31,12 +31,12 @@ pub enum Preview {
     Focused,
 }
 
-/// Cosa disegnare in questo frame.
+/// What to draw in this frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Visual {
     pub hovered: bool,
     pub pressed: bool,
-    /// Solo per `Preview::Focused`: l'anello va mostrato anche senza tastiera.
+    /// Only for `Preview::Focused`: the ring must be shown even without the keyboard.
     pub force_ring: bool,
     /// The hover move, eased from 0 (rest) to 1 (hovered) in `MOTION_HOVER`.
     pub hover_t: f32,
@@ -49,17 +49,17 @@ struct ControlState {
     focus: FocusHandle,
 }
 
-/// Un elemento interattivo pronto: `element` ha id, focus, cursore e ascoltatori già collegati.
+/// A ready interactive element: `element` has its id, focus, cursor and listeners already connected.
 pub struct Wired {
     pub element: Stateful<Div>,
     pub visual: Visual,
     pub focus: FocusHandle,
 }
 
-/// Crea l'elemento interattivo di un controllo e legge il suo stato corrente.
+/// Creates the interactive element of a control and reads its current state.
 ///
-/// Se `disabled` non registra né hover né focus e lascia il cursore normale: un controllo
-/// disabilitato non reagisce a nulla (e mantiene la sua misura).
+/// If `disabled`, it records neither hover nor focus and leaves the cursor normal: a control
+/// that is disabled reacts to nothing (and keeps its size).
 pub fn wire(id: &ElementId, disabled: bool, preview: Preview, window: &mut Window, cx: &mut App) -> Wired {
     let state = window.use_keyed_state(id.clone(), cx, |_, cx: &mut Context<ControlState>| ControlState {
         hovered: false,
@@ -132,7 +132,7 @@ pub fn wire(id: &ElementId, disabled: bool, preview: Preview, window: &mut Windo
     Wired { element, visual, focus }
 }
 
-/// Registra un click sull'elemento, se c'è una callback.
+/// Records a click on the element, if there is a callback.
 pub fn with_click(element: Stateful<Div>, on_click: Option<OnClick>) -> Stateful<Div> {
     match on_click {
         Some(handler) => element.on_click(move |event, window, cx| handler(event, window, cx)),
@@ -140,7 +140,7 @@ pub fn with_click(element: Stateful<Div>, on_click: Option<OnClick>) -> Stateful
     }
 }
 
-/// Centra i figli su entrambi gli assi.
+/// Centres the children on both axes.
 pub fn centered<E: Styled + ParentElement + IntoElement>(element: E) -> E {
     element.flex().items_center().justify_center()
 }

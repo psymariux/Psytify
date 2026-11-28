@@ -1,15 +1,15 @@
-//! Il menu «Altro» di un brano, come quello del client Iced (`client/src/ui/context_menu.rs`), con le voci
-//! che la riga non ha già (play, cuore e download stanno sulla riga): «Riproduci subito dopo», «Aggiungi
-//! alla coda», «Avvia radio»; «Aggiungi a una playlist» (l'elenco delle playlist, con «Nuova playlist…» in
-//! cima) e, in una playlist, «Togli da questa playlist»; «Vai all'artista», «Vai all'album» (se il brano
-//! ne ha uno), «Segui l'artista» / «Smetti di seguire» e «Copia titolo e artista»; poi, come nel client
-//! Iced, i download ([`DownloadItems`]): «Scarica · qualità» e «Scarica in…» (le quattro qualità, con la
-//! spunta su quella delle impostazioni) per un brano scaricabile che non è già sul dispositivo né in
-//! corso, «Rimuovi dai download» per un brano nell'indice. Gli avvisi dei download li dà il core.
+//! A track's «Altro» menu, with the entries
+//! the row does not already have (play, heart and download are on the row): «Riproduci subito dopo», «Aggiungi
+//! alla coda», «Avvia radio»; «Aggiungi a una playlist» (the list of playlists, with «Nuova playlist…» at the
+//! top) and, in a playlist, «Togli da questa playlist»; «Vai all'artista», «Vai all'album» (if the track
+//! has one), «Segui l'artista» / «Smetti di seguire» and «Copia titolo e artista»; then, as in the
+//! client, the downloads ([`DownloadItems`]): «Scarica · qualità» and «Scarica in…» (the four qualities, with the
+//! tick on the one from the settings) for a downloadable track that is neither already on the device nor
+//! in progress, «Rimuovi dai download» for a track in the index. The download notices are given by the core.
 //!
-//! Il menu sta sopra tutto e lo tiene `Shell`; la pagina dice solo quale brano e dove ([`TrackMenu`]).
-//! Ogni voce diventa un [`MenuChoice`], che `Shell` traduce in un comando al core e, dove il client Iced lo
-//! fa, in un avviso locale ([`choice_notice`]).
+//! The menu sits above everything and `Shell` holds it; the page says only which track and where ([`TrackMenu`]).
+//! Each entry becomes a [`MenuChoice`], which `Shell` turns into a command to the core and, where the earlier client gave one,
+//! into a local notice ([`choice_notice`]).
 
 use gpui::{Pixels, Point, SharedString};
 use psytify_core::api::{DownloadQuality, Track};
@@ -19,8 +19,8 @@ use uuid::Uuid;
 
 use crate::notices::Notice;
 
-/// Il menu aperto: il brano, dove (l'angolo in alto a sinistra) e, se viene da una playlist, quale e a
-/// che posizione.
+/// The open menu: the track, where (the top-left corner) and, if it comes from a playlist, which one and at
+/// which position.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrackMenu {
     pub track: Track,
@@ -28,18 +28,18 @@ pub struct TrackMenu {
     pub from_playlist: Option<(Uuid, usize)>,
 }
 
-/// Quale pannello del menu si vede.
+/// Which panel of the menu is shown.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MenuLevel {
     #[default]
     Main,
-    /// L'elenco delle playlist (al posto delle voci, nello stesso punto).
+    /// The list of playlists (in place of the entries, in the same spot).
     Playlists,
-    /// Le qualità di «Scarica in…».
+    /// The qualities of «Scarica in…».
     Qualities,
 }
 
-/// Una voce scelta.
+/// A chosen entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuChoice {
     PlayNext,
@@ -54,28 +54,28 @@ pub enum MenuChoice {
     GoToAlbum,
     ToggleFollow,
     Copy,
-    /// «Scarica · qualità»: alla qualità delle impostazioni.
+    /// «Scarica · qualità»: at the quality of the settings.
     Download,
-    /// «Scarica in…»: apre l'elenco delle qualità.
+    /// «Scarica in…»: opens the list of qualities.
     ShowQualities,
     DownloadAs(DownloadQuality),
     RemoveDownload,
 }
 
-/// Le voci di download del menu, decise all'apertura dallo stato dei download.
+/// The menu's download entries, decided on opening from the state of the downloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DownloadItems {
-    /// «Scarica · qualità» e «Scarica in…».
+    /// «Scarica · qualità» and «Scarica in…».
     pub offer: bool,
     /// «Rimuovi dai download».
     pub remove: bool,
-    /// La qualità delle impostazioni (nell'etichetta e con la spunta nell'elenco).
+    /// The quality of the settings (in the label and with the tick in the list).
     pub quality: DownloadQuality,
 }
 
 impl DownloadItems {
-    /// Come il client Iced: un brano già sul dispositivo con il file a posto non si scarica di nuovo, uno in
-    /// corso nemmeno; uno nell'indice (anche con il file perso) si può togliere.
+    /// A track already on the device with its file in place is not downloaded again, nor one
+    /// in progress; one in the index (even with a lost file) can be removed.
     pub fn of(track: &Track, downloads: &DownloadsView) -> Self {
         Self {
             offer: track.downloadable
@@ -87,12 +87,12 @@ impl DownloadItems {
     }
 }
 
-/// «Scarica · Alta»: la voce che scarica alla qualità delle impostazioni.
+/// «Scarica · Alta»: the entry that downloads at the quality of the settings.
 pub fn download_label(quality: DownloadQuality) -> String {
     format!("Scarica · {}", quality.label())
 }
 
-/// Le voci di «Scarica in…»: «Alta · AAC 256 kbps», una per qualità, nell'ordine del core.
+/// The «Scarica in…» entries: «Alta · AAC 256 kbps», one per quality, in the core's order.
 pub fn quality_items() -> Vec<(DownloadQuality, SharedString)> {
     DownloadQuality::ALL
         .iter()
@@ -100,12 +100,12 @@ pub fn quality_items() -> Vec<(DownloadQuality, SharedString)> {
         .collect()
 }
 
-/// Il testo di «Copia titolo e artista», come nel client Iced.
+/// The text of «Copia titolo e artista».
 pub fn copy_text(track: &Track) -> String {
     format!("{} — {}", track.title, track.artist.name)
 }
 
-/// La voce per seguire l'artista: etichetta e icona secondo se lo segui già.
+/// The entry to follow the artist: label and icon according to whether you already follow them.
 pub fn follow_item(following: bool) -> (&'static str, &'static str) {
     if following {
         ("Smetti di seguire", psytify_design::sprite::ICON_CHECK)
@@ -114,7 +114,7 @@ pub fn follow_item(following: bool) -> (&'static str, &'static str) {
     }
 }
 
-/// L'avviso di una voce, come nel client Iced; `None` dove il client non ne dà o lo dà il core.
+/// The notice of an entry; `None` where none is given or the core gives it.
 pub fn choice_notice(choice: MenuChoice, track: &Track, playlists: &[Playlist]) -> Option<Notice> {
     match choice {
         MenuChoice::PlayNext => Some(Notice::info(format!("«{}» suonerà subito dopo", track.title))),
@@ -128,7 +128,7 @@ pub fn choice_notice(choice: MenuChoice, track: &Track, playlists: &[Playlist]) 
             }))
         }
         MenuChoice::Copy => Some(Notice::info("Copiato negli appunti")),
-        // La radio la annuncia il core (`PlaybackEvent::RadioStarted`), così i download; seguire `Shell`.
+        // The radio is announced by the core (`PlaybackEvent::RadioStarted`), like the downloads; follow `Shell`.
         MenuChoice::ShowPlaylists
         | MenuChoice::Download
         | MenuChoice::ShowQualities
@@ -144,7 +144,7 @@ pub fn choice_notice(choice: MenuChoice, track: &Track, playlists: &[Playlist]) 
     }
 }
 
-/// Le voci dell'elenco delle playlist: id e nome, già pronti.
+/// The entries of the playlist list: id and name, already ready.
 pub fn playlist_items(playlists: &[Playlist]) -> Vec<(Uuid, SharedString)> {
     playlists.iter().map(|playlist| (playlist.id, SharedString::from(playlist.name.clone()))).collect()
 }

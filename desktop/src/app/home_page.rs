@@ -1,19 +1,19 @@
-//! La Home: le sezioni del client Iced (`client/src/ui/pages/home.rs`), nello stesso ordine, disegnate come
-//! da `PSYTIFY_ART_DIRECTION.md` (Home). In cima il titolo in tipo pixel e una riga di saluto; poi *Riprendi*
-//! (brani che ti piacciono, le prime playlist e gli ultimi ascolti in una griglia di due colonne), *Aggiunti
-//! di recente* come registro datato delle uscite (righe raggruppate per giorno, al posto dello scaffale),
-//! *Novità dai tuoi artisti* (le uscite non ancora viste portano «Nuovo»), gli artisti, *Mix per te*, *Più
-//! ascoltati da te*, *Ascoltati di recente*, gli *Album* del catalogo, *Il tuo ascolto* e *Dalla A alla Z*.
+//! The Home: its sections, in the same order, drawn as
+//! in `PSYTIFY_ART_DIRECTION.md` (Home). At the top the title in pixel type and a greeting line; then *Riprendi*
+//! (liked tracks, the first playlists and the last listens in a two-column grid), *Aggiunti
+//! di recente* as a dated log of releases (rows grouped by day, in place of the shelf),
+//! *Novità dai tuoi artisti* (releases not yet seen carry «Nuovo»), the artists, *Mix per te*, *Più
+//! ascoltati da te*, *Ascoltati di recente*, the *Album* of the catalogue, *Il tuo ascolto* and *Dalla A alla Z*.
 //! Each shelf is one full row of a fluid tile grid (`components::frame::TileGrid`, tiles stretch to the
 //! width): the arrows move it, «Mostra tutto» opens it as a grid where it is. *Riprendi* is a 2 to 4 column
 //! grid of 56 dp shortcuts and *Aggiunti di recente* flows into one to three columns (`frame::Flow`) under
 //! date headers that span the row. The page fills the canvas with the frame margins and every section
 //! enters with the page-enter move (`motion::Enter`).
 //!
-//! I dati: le tre sezioni della Home del catalogo (`CatalogView::home`, caricate da `CatalogCmd::Ensure`,
-//! che sulla Home già pronta fa rifare il feed se gli ascolti sono cambiati) e il feed che il dominio della
-//! libreria ne ricava (`LibraryView::feed`: uscite, novità, artisti, mix, classifica). La pagina li copia nei
-//! suoi campi quando il core pubblica e prepara una volta i testi; `render` non li legge.
+//! The data: the three sections of the catalogue's Home (`CatalogView::home`, loaded by `CatalogCmd::Ensure`,
+//! which on a Home already ready makes the feed be rebuilt if the listens changed) and the feed that the library
+//! domain derives from it (`LibraryView::feed`: releases, news, artists, mixes, chart). The page copies them into its
+//! fields when the core publishes, and prepares the texts once; `render` does not read them.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -62,20 +62,20 @@ use crate::format;
 use crate::motion::{self, Enter};
 use crate::theme::{Ap, TypeStyle, cased, col, dp, to_dp};
 
-/// Le voci di *Riprendi* al massimo (due colonne).
+/// The *Riprendi* entries at most (two columns).
 const SHORTCUTS: usize = 8;
-/// Le playlist in *Riprendi*, dopo i brani che ti piacciono.
+/// The playlists in *Riprendi*, after the liked tracks.
 const SHORTCUT_PLAYLISTS: usize = 3;
-/// Le uscite del registro prima di «Mostra tutte».
+/// The releases of the log before «Mostra tutte».
 const LOG: usize = 8;
-/// Le novità dei tuoi artisti nello scaffale (come il client Iced; le altre sono in «Novità»).
+/// The news of your artists on the shelf.
 const NEWS: usize = 12;
-/// I brani della classifica (come il client Iced).
+/// The chart tracks.
 const TOP: usize = 10;
-/// Righe dello scheletro del registro mentre la Home arriva.
+/// Skeleton rows of the log while the Home arrives.
 const LOG_SKELETON: usize = 6;
 
-/// Gli scaffali della pagina.
+/// The page's shelves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     News,
@@ -94,7 +94,7 @@ impl Kind {
     }
 }
 
-/// Lo stato di un caricamento, per il piano delle righe.
+/// The state of a load, for the row plan.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Status {
     #[default]
@@ -113,16 +113,16 @@ impl Status {
     }
 }
 
-/// Le intestazioni che non sono uno scaffale intero.
+/// The headers that are not a whole shelf.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Head {
     Recent,
     Top,
-    /// Lo scaffale aperto in griglia, o in caricamento, fallito, vuoto.
+    /// The shelf open as a grid, or loading, failed, empty.
     Kind(Kind),
 }
 
-/// Una riga di stato sotto un'intestazione.
+/// A status row under a header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Note {
     RecentFailed,
@@ -133,31 +133,31 @@ enum Note {
     AlphabeticalEmpty,
 }
 
-/// Una riga dopo il titolo.
+/// A row after the title.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     /// A row of *Riprendi*, from this item.
     Shortcuts(usize),
     Heading(Head),
-    /// Una voce del registro (una data o un'uscita).
+    /// An entry of the log (a date or a release).
     Log(usize),
     LogSkeleton,
     Note(Note),
     Shelf(Kind),
     SkeletonShelf(Kind),
-    /// Una riga della griglia di uno scaffale aperto: le copertine da questa.
+    /// A row of the grid of an open shelf: the covers from this one.
     Grid(Kind, usize),
     Top(usize),
     Listening,
 }
 
-/// Che cosa c'è da mostrare, già contato. Puro, perché `plan` si possa provare.
+/// What there is to show, already counted. Pure, so that `plan` can be tested.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Shape {
     shortcuts: usize,
     shortcut_columns: usize,
     recent: Status,
-    /// Le voci del registro (date e uscite), già tagliate.
+    /// The entries of the log (dates and releases), already cut.
     log: usize,
     news: usize,
     artists: usize,
@@ -186,7 +186,7 @@ impl Shape {
     }
 }
 
-/// Le righe della Home, nell'ordine del client Iced. Pura.
+/// The rows of the Home, in display order. Pure.
 fn plan(shape: Shape) -> Vec<Row> {
     let mut rows: Vec<Row> =
         (0..shape.shortcuts).step_by(shape.shortcut_columns.max(1)).map(Row::Shortcuts).collect();
@@ -275,8 +275,8 @@ fn release_log(releases: &[Release], limit: usize, flow: Flow) -> Vec<LogItem> {
     log
 }
 
-/// La riga di saluto sotto il titolo. Finché le uscite non sono arrivate (`ready` falso) non si sa se ce ne
-/// sono di nuove: si resta sulla frase neutra.
+/// The greeting line under the title. Until the releases have arrived (`ready` false) it is not known whether there are
+/// new ones: the neutral phrase stays.
 fn greeting(ready: bool, unread: usize, following: usize) -> &'static str {
     match (ready, unread, following) {
         (false, ..) | (_, 0, 0) => "Le ultime uscite del catalogo e ciò che ascolti",
@@ -285,22 +285,22 @@ fn greeting(ready: bool, unread: usize, following: usize) -> &'static str {
     }
 }
 
-/// «12.4 h» o «35 min»: il tempo ascoltato, con lo stesso formato del client Iced.
+/// «12.4 h» or «35 min»: the listening time, with the same format as the other pages.
 fn listened_label(ms: u64) -> String {
-    // Millisecondi in ore: la precisione di un `f64` basta e avanza.
+    // Milliseconds to hours: the precision of an `f64` is enough and it moves on.
     #[allow(clippy::cast_precision_loss)]
     let hours = ms as f64 / 3_600_000.0;
     if hours >= 1.0 {
         format!("{hours:.1} h")
     } else {
-        // Meno di un'ora: un numero di minuti piccolo e positivo.
+        // Less than an hour: a small positive number of minutes.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let minutes = (hours * 60.0).round() as u64;
         format!("{minutes} min")
     }
 }
 
-/// Che cosa fa una voce di *Riprendi*.
+/// What an entry of *Riprendi* does.
 #[derive(Clone, Debug)]
 enum ShortcutTarget {
     Liked,
@@ -314,12 +314,12 @@ struct ShortcutItem {
     target: ShortcutTarget,
 }
 
-/// I testi di un'uscita, pronti.
+/// The texts of a release, ready.
 struct ReleaseText {
     title: SharedString,
-    /// «Album · Artista» sotto la copertina.
+    /// «Album · Artista» under the cover.
     subtitle: SharedString,
-    /// «Artista · 12 brani» nel registro.
+    /// «Artista · 12 brani» in the log.
     detail: SharedString,
     kind: SharedString,
     cover: Option<SharedString>,
@@ -344,14 +344,14 @@ impl ReleaseText {
     }
 }
 
-/// Un mix, pronto: il mosaico, il nome e chi c'è dentro.
+/// A mix, ready: the mosaic, the name and who is in it.
 struct MixText {
     mosaic: Vec<SharedString>,
     title: SharedString,
     subtitle: SharedString,
 }
 
-/// Uno scaffale: dove parte la riga, la rotella, se è aperto in griglia.
+/// One shelf: where the row starts, the wheel, whether it is open as a grid.
 #[derive(Clone, Copy, Debug, Default)]
 struct ShelfState {
     start: usize,
@@ -359,7 +359,7 @@ struct ShelfState {
     open: bool,
 }
 
-/// Le tre cifre di *Il tuo ascolto*.
+/// The three figures of *Il tuo ascolto*.
 struct Listening {
     time: SharedString,
     plays: SharedString,
@@ -376,7 +376,7 @@ pub struct HomePage {
     downloads: Arc<DownloadsView>,
     liked: Arc<HashSet<Uuid>>,
     now: Option<(Uuid, PlayState)>,
-    /// L'album del brano in corso: la sua copertina mostra l'equalizzatore.
+    /// The album of the track playing: its cover shows the equaliser.
     now_album: Option<Uuid>,
     greeting: SharedString,
     shortcuts: Vec<ShortcutItem>,
@@ -402,14 +402,14 @@ pub struct HomePage {
     /// The page enter in progress, if any.
     enter: Option<Enter>,
     list: ListState,
-    /// I posti dell'equalizzatore del brano in corso: li dipinge `Shell` (BACKLOG 23).
+    /// The equaliser spots of the playing track: `Shell` paints them (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
 
 impl EventEmitter<PageEvent> for HomePage {}
 
-/// Lo stesso dato: i due `Arc` sono la stessa allocazione (o lo stato non ne ha, ed è uguale).
+/// The same data: the two `Arc`s are the same allocation (or the state has none, and they are equal).
 fn same<T: ?Sized>(a: &Load<Arc<T>>, b: &Load<Arc<T>>) -> bool {
     match (a, b) {
         (Load::Ready(a), Load::Ready(b)) => Arc::ptr_eq(a, b),
@@ -424,7 +424,7 @@ fn now_album(view: &PlaybackView) -> Option<Uuid> {
 }
 
 impl HomePage {
-    /// I posti dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// The equaliser spots of this view, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -471,8 +471,8 @@ impl HomePage {
         page
     }
 
-    /// La Home è in vista: il core la carica se serve, e se è già pronta rifà il feed quando gli ascolti
-    /// sono cambiati (come il client Iced a ogni rientro).
+    /// The Home is in view: the core loads it if needed, and if it is ready it rebuilds the feed when the listens
+    /// have changed.
     pub fn show(&mut self, cx: &mut Context<Self>) {
         self.core.read(cx).catalog(CatalogCmd::Ensure(Resource::Home));
     }
@@ -497,7 +497,7 @@ impl HomePage {
         }
         if changed.downloads && !Arc::ptr_eq(&snapshot.downloads, &self.downloads) {
             self.downloads = Arc::clone(&snapshot.downloads);
-            // Solo la classifica mostra lo stato dei download.
+            // Only the chart shows the download status.
             dirty |= !self.top.is_empty();
         }
         if changed.playback {
@@ -517,7 +517,7 @@ impl HomePage {
         }
     }
 
-    /// Prende dal catalogo le tre sezioni della Home; `true` se una è cambiata.
+    /// Takes the three sections of the Home from the catalogue; `true` if one has changed.
     fn take(&mut self, catalog: &CatalogView) -> bool {
         let home = &catalog.home;
         let changed = !same(&home.recent, &self.recent)
@@ -531,7 +531,7 @@ impl HomePage {
         changed
     }
 
-    /// Rifà testi e righe: quando cambiano i dati, le colonne o uno scaffale si apre.
+    /// Rebuilds the texts and rows: when the data, the columns or a shelf opens, they change.
     fn rebuild(&mut self) {
         let library = Arc::clone(&self.library);
         let feed = Arc::clone(&library.feed);
@@ -603,7 +603,7 @@ impl HomePage {
         remeasure_header(&self.list);
     }
 
-    /// *Riprendi*: i brani che ti piacciono, le prime playlist, poi gli ultimi ascolti (al più 8).
+    /// *Riprendi*: the liked tracks, the first playlists, then the last listens (at most 8).
     fn shortcut_items(&self, library: &LibraryView) -> Vec<ShortcutItem> {
         let mut items = Vec::new();
         if !library.liked.is_empty() {
@@ -710,7 +710,7 @@ impl HomePage {
         cx.notify();
     }
 
-    /// Suona dei brani da `start`, o mette in pausa se è il brano in corso.
+    /// Plays tracks from `start`, or pauses if it is the playing track.
     fn play_tracks(&self, tracks: &Arc<[Track]>, start: usize, cx: &gpui::App) {
         let core = self.core.read(cx);
         match (tracks.get(start), self.now) {
@@ -719,7 +719,7 @@ impl HomePage {
         }
     }
 
-    /// Suona un'uscita: l'album intero (lo chiede il core al server) o il singolo. Se suona già, pausa.
+    /// Plays a release: the whole album (the core asks the server for it) or the single. If it already plays, pause.
     fn play_release(&self, release: &Release, cx: &gpui::App) {
         let core = self.core.read(cx);
         if self.release_playing(release).is_some() {
@@ -996,7 +996,7 @@ impl HomePage {
         shelf.into_any_element()
     }
 
-    /// La copertina `position` di uno scaffale (o della sua griglia).
+    /// The cover `position` of a shelf (or of its grid).
     fn tile(&self, kind: Kind, position: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
         let id = (SharedString::from(format!("home-{kind:?}")), position);
         let tile = match kind {
@@ -1077,7 +1077,7 @@ impl HomePage {
         Some(tile.side(self.frame.grid.tile).into_any_element())
     }
 
-    /// Uno scaffale che aspetta: l'intestazione e le copertine vuote alla misura vera.
+    /// A shelf that waits: the header and the empty covers at the real size.
     fn skeleton_shelf(&self, kind: Kind) -> AnyElement {
         let tile = self.frame.grid.tile;
         let tiles = (0..self.frame.grid.columns.max(1)).map(|_| {
@@ -1137,11 +1137,11 @@ impl HomePage {
         if let Some(state) = self.track_playing(track) {
             row = row.playing_at(state, &self.spot);
         }
-        // L'ultima riga della classifica lascia lo spazio prima della sezione dopo.
+        // The last row of the chart leaves the space before the next section.
         Some(row)
     }
 
-    /// *Il tuo ascolto*: tempo, brani e l'artista più ascoltato, in una scheda.
+    /// *Il tuo ascolto*: time, tracks and the most played artist, in a card.
     fn listening_card(&self) -> Option<AnyElement> {
         let listening = self.listening.as_ref()?;
         let stat = |value: SharedString, label: &'static str, pixel: bool| {
@@ -1194,7 +1194,7 @@ fn sections(rows: &[Row]) -> Vec<usize> {
         .collect()
 }
 
-/// La scheda di *Il tuo ascolto*: le cifre in tipo pixel (l'artista, che viene dal catalogo, in Inter).
+/// The card of *Il tuo ascolto*: the figures in pixel type (the artist, which comes from the catalogue, in Inter).
 #[derive(IntoElement)]
 struct ListeningCard {
     stats: [(AnyElement, &'static str); 3],
@@ -1271,7 +1271,7 @@ fn log_skeleton(margin: f32) -> AnyElement {
 
 impl Render for HomePage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // I posti si segnano di nuovo nel paint di questo fotogramma, se ciò che suona è visibile.
+        // The spots are marked again in this frame's paint, if what plays is visible.
         self.spot.clear();
         // The layout comes from the real width, read at every draw: if it changes, the rows follow on the next
         // frame (one frame).
@@ -1402,7 +1402,7 @@ mod tests {
             vec![Row::Grid(Kind::Albums, 0), Row::Grid(Kind::Albums, 4), Row::Grid(Kind::Albums, 8)]
         );
         assert!(rows.contains(&Row::Heading(Head::Kind(Kind::Albums))));
-        // Se le copertine stanno in una riga, aperto o no è uno scaffale.
+        // If the covers fit in one row, open or not it is a shelf.
         let rows = plan(Shape { album_count: 3, open, ..ready() });
         assert!(rows.contains(&Row::Shelf(Kind::Albums)));
     }

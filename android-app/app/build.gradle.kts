@@ -46,8 +46,7 @@ android {
             applicationIdSuffix = ".kotlin"
         }
         release {
-            // Unsigned here: scripts/android-kotlin.sh aligns it and signs it with the release key,
-            // as scripts/android-apk.sh does for the Iced APK.
+            // Unsigned here: scripts/android-kotlin.sh aligns it and signs it with the release key.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -111,9 +110,9 @@ val repo = rootDir.parentFile
 val designResources = tasks.register<DesignResources>("designResources") {
     sprites.from(fileTree(repo.resolve("design/assets/pixel/export/1x")) { include("*.png") })
     fonts.from(
-        repo.resolve("client/assets/fonts/Inter-Regular.ttf"),
-        repo.resolve("client/assets/fonts/Inter-Medium.ttf"),
-        repo.resolve("client/assets/fonts/Inter-SemiBold.ttf"),
+        repo.resolve("design/assets/fonts/Inter-Regular.ttf"),
+        repo.resolve("design/assets/fonts/Inter-Medium.ttf"),
+        repo.resolve("design/assets/fonts/Inter-SemiBold.ttf"),
         repo.resolve("design/assets/fonts/DepartureMono-Regular.otf"),
     )
     output.set(layout.buildDirectory.dir("generated/design-res"))

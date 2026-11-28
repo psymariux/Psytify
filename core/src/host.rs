@@ -1,10 +1,10 @@
-//! L'host del core: il thread `psytify-core` che tiene lo stato, riceve i comandi, esegue gli effetti
-//! chiesti dal riduttore e pubblica le istantanee. I frontend vedono solo [`Core`]: comandi in
-//! ingresso, istantanee in uscita.
+//! The core's host: the `psytify-core` thread that keeps the state, receives the commands, runs the effects
+//! the reducer asks for and publishes the snapshots. The frontends see only [`Core`]: commands in,
+//! snapshots out.
 //!
-//! Fermo, il core non lavora: aspetta un comando, l'esito di un lavoro o il prossimo timer armato,
-//! e senza timer non si sveglia. Pubblica solo quando un dominio cambia, una volta per giro: un
-//! frontend fermo non riceve nulla, e una raffica di comandi arriva come una sola istantanea.
+//! When idle, the core does no work: it waits for a command, a job's outcome or the next armed timer,
+//! and without timers it does not wake up. It publishes only when a domain changes, once per round: an
+//! idle frontend receives nothing, and a burst of commands arrives as a single snapshot.
 
 use std::collections::VecDeque;
 use std::io;
@@ -37,106 +37,106 @@ use crate::state::system::{DiscordOp, MediaOp};
 use crate::state::{CoreState, Input};
 use crate::system_motion::SystemMotion;
 
-/// Quanto aspetta, alla chiusura, il lavoro bloccante ancora in corso sul runtime proprio del core.
+/// How long, at shutdown, it waits for the blocking job still running on the core's own runtime.
 const RUNTIME_GRACE: Duration = Duration::from_secs(1);
 
-/// Al più tanti comandi già in coda entrano nello stesso giro (e nella stessa istantanea).
+/// At most this many commands already queued enter the same round (and the same snapshot).
 const BURST: usize = 64;
 
-/// Su quale runtime di tokio gira il lavoro asincrono del core.
+/// On which tokio runtime the core's async work runs.
 #[derive(Debug, Clone)]
 pub enum RuntimeChoice {
-    /// Quello del frontend (Iced ne ha uno multi-thread): resta un solo runtime nel processo. Il
-    /// frontend aspetta [`Core::shutdown`] prima di chiuderlo.
+    /// The frontend's own: there stays a single runtime in the process. The
+    /// frontend waits for [`Core::shutdown`] before closing it.
     Borrow(Handle),
-    /// Uno del core, con `workers` thread (almeno uno), per i frontend che non usano tokio.
+    /// One of the core's, with `workers` threads (at least one), for frontends that do not use tokio.
     Own { workers: usize },
 }
 
-/// Quale uscita audio apre il core. Il core la tiene per tutta la sua vita, sul proprio thread: la
-/// scheda audio non si tocca da nessun altro.
+/// Which audio output the core opens. The core holds it for its whole life, on its own thread: the
+/// sound card is not touched by anyone else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AudioChoice {
-    /// La scheda audio predefinita del sistema. Se non si apre, la riproduzione risponde con
-    /// l'errore a ogni brano e la vista lo dice (`PlaybackView::device_error`).
+    /// The system's default sound card. If it does not open, playback answers with the
+    /// error on each track and the view says so (`PlaybackView::device_error`).
     #[default]
     System,
-    /// Nessuna uscita (un frontend senza suono).
+    /// No output (a frontend without sound).
     None,
-    /// Un'uscita senza scheda audio, da cui nessuno legge i campioni: i test che avviano un core
-    /// vero senza toccare la scheda.
+    /// An output without a sound card, from which nobody reads the samples: the tests that start a core
+    /// for real without touching the card.
     #[cfg(any(test, feature = "test-support"))]
     Detached,
 }
 
-/// I collegamenti col sistema che il core tiene sul proprio thread.
+/// The links with the system that the core holds on its own thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SystemChoice {
-    /// I controlli multimediali del sistema (MPRIS su Linux, la sessione multimediale su Android:
-    /// i comandi entrano nel core senza passare dall'interfaccia) e, se l'utente lo vuole, Discord.
+    /// The system's media controls (MPRIS on Linux, the media session on Android:
+    /// the commands enter the core without going through the interface) and, if the user wants it, Discord.
     #[default]
     Desktop,
-    /// Nessun collegamento: un frontend senza widget del sistema, e i test (che non devono
-    /// registrarsi sul bus della sessione).
+    /// No link: a frontend without system widgets, and the tests (which must not
+    /// register on the session bus).
     None,
 }
 
-/// Come si avvia il core.
+/// How the core is started.
 #[derive(Debug, Clone)]
 pub struct CoreOptions {
     pub runtime: RuntimeChoice,
     pub audio: AudioChoice,
     pub system: SystemChoice,
-    /// La cartella dei dati di questo core: `config.json` si legge all'avvio e si scrive lì. Senza,
-    /// il core parte dai default e non scrive niente (i test, un frontend che non salva).
+    /// The data folder of this core: `config.json` is read at startup and written there. Without it,
+    /// the core starts from the defaults and writes nothing (the tests, a frontend that does not save).
     pub data_dir: Option<PathBuf>,
-    /// Dove finiscono i brani scaricati. Senza, `data_dir/Download`; senza nemmeno quella, una
-    /// cartella temporanea (un core di prova non scrive mai nella cartella Download di chi lo
-    /// prova). I pacchetti degli aggiornamenti stanno in `data_dir/updates`.
+    /// Where the downloaded tracks end up. Without it, `data_dir/Download`; without even that, a
+    /// temporary folder (a test core never writes to the Download folder of whoever
+    /// tries it). The update packages sit in `data_dir/updates`.
     pub downloads_dir: Option<PathBuf>,
 }
 
-/// Il core non è partito, o non ha salvato prima di fermarsi.
+/// The core did not start, or did not save before stopping.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
-    /// Il sistema non ha dato il thread o il runtime.
+    /// The system did not give the thread or the runtime.
     #[error("il core non è partito: {0}")]
     Start(#[from] io::Error),
-    /// L'ultima scrittura di `config.json`, alla chiusura, non è riuscita: il file resta quello di
-    /// prima, intero.
+    /// The last write of `config.json`, at shutdown, did not succeed: the file stays the previous one,
+    /// whole.
     #[error("impostazioni non salvate: {0}")]
     Save(AppError),
 }
 
-/// Chi aspetta la fine del core, e com'è andato l'ultimo salvataggio.
+/// Who waits for the core's end, and how the last save went.
 type Stopped = oneshot::Sender<Result<(), CoreError>>;
 
-/// Ciò che arriva al thread del core.
+/// What arrives at the core's thread.
 #[derive(Debug)]
 enum Control {
     Command(Command),
-    /// Fermarsi dopo aver salvato, e dirlo a chi aspetta quando è fatto.
+    /// Stop after saving, and tell whoever waits when it is done.
     Shutdown(Stopped),
 }
 
-/// La prima istantanea e il runtime su cui gira il lavoro del core, che il thread del core manda a
-/// `start` quando è pronto.
+/// The first snapshot and the runtime the core's work runs on, which the core's thread sends to
+/// `start` when it is ready.
 type Ready = io::Result<(watch::Receiver<Arc<Snapshot>>, Handle)>;
 
-/// Il core in esecuzione, visto da un frontend. Lasciarlo cadere ferma il core anche senza
-/// [`Core::shutdown`], ma senza aspettarlo e senza scrivere le modifiche ancora in attesa.
+/// The running core, seen from a frontend. Dropping it stops the core even without
+/// [`Core::shutdown`], but without waiting and without writing the changes still pending.
 #[derive(Debug)]
 pub struct Core {
     commands: mpsc::UnboundedSender<Control>,
     changes: watch::Receiver<Arc<Snapshot>>,
-    /// Il runtime del core: ci girano le copertine chieste da un frontend ([`Core::artwork`]).
+    /// The core's runtime: the covers a frontend asks for ([`Core::artwork`]) run there.
     runtime: Handle,
-    /// Il client HTTP delle copertine, rifatto solo se il backend cambia (le connessioni si riusano).
+    /// The cover HTTP client, rebuilt only if the backend changes (connections are reused).
     covers: Mutex<Option<ApiClient>>,
 }
 
 impl Core {
-    /// Avvia il thread del core e aspetta che sia pronto: al ritorno c'è già la prima istantanea.
+    /// Starts the core's thread and waits until it is ready: on return the first snapshot is already there.
     pub fn start(options: CoreOptions) -> Result<Core, CoreError> {
         let (commands, inbox) = mpsc::unbounded_channel();
         let (ready, started) = std_mpsc::sync_channel(1);
@@ -146,27 +146,27 @@ impl Core {
         Ok(Core { commands, changes, runtime, covers: Mutex::new(None) })
     }
 
-    /// Manda un comando al core. Non blocca mai; a core fermo il comando si perde.
+    /// Sends a command to the core. Never blocks; with the core stopped the command is lost.
     pub fn send(&self, command: Command) {
         let _ = self.commands.send(Control::Command(command));
     }
 
-    /// L'ultima istantanea pubblicata.
+    /// The last published snapshot.
     pub fn snapshot(&self) -> Arc<Snapshot> {
         Arc::clone(&self.changes.borrow())
     }
 
-    /// Le istantanee a venire: `changed().await` si sveglia solo quando il core ne pubblica una.
-    /// Un ricevitore preso subito dopo `start` non perde nulla di ciò che segue la prima.
+    /// The snapshots to come: `changed().await` wakes up only when the core publishes one.
+    /// A receiver taken right after `start` loses nothing of what follows the first.
     pub fn changes(&self) -> watch::Receiver<Arc<Snapshot>> {
         self.changes.clone()
     }
 
-    /// Scarica e decodifica una copertina, fuori dal thread del frontend: l'indirizzo va al backend
-    /// (`/v1/cover`, mai alla fonte) e la risposta è un quadrato RGBA già ridotto
-    /// ([`artwork::CoverPixels`]). `None` se l'indirizzo non è ammesso, se il backend non risponde,
-    /// se l'immagine non è valida o se il core si ferma prima: il frontend resta sulla copertina
-    /// disegnata. Il frontend tiene la sua cache di texture e chiede ogni indirizzo una volta sola.
+    /// Downloads and decodes a cover, off the frontend's thread: the address goes to the backend
+    /// (`/v1/cover`, never to the source) and the reply is a square RGBA already reduced
+    /// ([`artwork::CoverPixels`]). `None` if the address is not allowed, if the backend does not answer,
+    /// if the image is not valid or if the core stops first: the frontend stays on the drawn cover.
+    /// The frontend keeps its own texture cache and asks for each address only once.
     pub fn artwork(&self, url: String) -> oneshot::Receiver<Option<CoverPixels>> {
         self.artwork_side(url, artwork::COVER_SIDE)
     }
@@ -186,7 +186,7 @@ impl Core {
         answer
     }
 
-    /// Il client delle copertine per il backend scelto adesso nelle impostazioni.
+    /// The cover client for the backend chosen now in the settings.
     fn cover_client(&self) -> Option<ApiClient> {
         let snapshot = self.snapshot();
         let base = config::api_url(snapshot.settings.config.server.as_deref());
@@ -199,11 +199,11 @@ impl Core {
         Some(api)
     }
 
-    /// Ferma il core dopo aver salvato: aspetta la scrittura di `config.json` in corso e scrive
-    /// subito ciò che manca. Il ricevitore si risolve quando il thread ha chiuso tutto (lo stato e
-    /// il runtime proprio, se c'è): un frontend che ha prestato il suo runtime lo aspetta prima di
-    /// chiuderlo. Dentro c'è [`CoreError::Save`] se l'ultima scrittura non è riuscita; un errore di
-    /// ricezione vuol dire che il thread si era già fermato.
+    /// Stops the core after saving: waits for the `config.json` write in progress and writes at once
+    /// what is missing. The receiver resolves when the thread has closed everything (the state and
+    /// its own runtime, if any): a frontend that lent its runtime waits for it before
+    /// closing it. Inside there is [`CoreError::Save`] if the last write did not succeed; a receive
+    /// error means the thread had already stopped.
     pub fn shutdown(self) -> oneshot::Receiver<Result<(), CoreError>> {
         let (done, stopped) = oneshot::channel();
         let _ = self.commands.send(Control::Shutdown(done));
@@ -211,8 +211,8 @@ impl Core {
     }
 }
 
-/// Il seme dei mix: cambia a ogni avvio e resta lo stesso per la sessione. Lo sceglie l'host perché
-/// il riduttore non legge l'orologio.
+/// The seed of the mixes: it changes at each startup and stays the same for the session. The host picks it because
+/// the reducer does not read the clock.
 fn mix_seed() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -220,8 +220,8 @@ fn mix_seed() -> u64 {
         .unwrap_or(0x5eed)
 }
 
-/// Il corpo del thread `psytify-core`. Il runtime proprio nasce e muore qui, mai nel contesto
-/// asincrono di chi ha chiamato `start`.
+/// The body of the `psytify-core` thread. Its own runtime is born and dies here, never in the async
+/// context of whoever called `start`.
 fn host(options: CoreOptions, inbox: mpsc::UnboundedReceiver<Control>, ready: std_mpsc::SyncSender<Ready>) {
     let (downloads, updates) = download_dirs(&options);
     let (handle, owned) = match options.runtime {
@@ -241,18 +241,18 @@ fn host(options: CoreOptions, inbox: mpsc::UnboundedReceiver<Control>, ready: st
             }
         }
     };
-    // `config.json` si legge qui, una volta, prima della prima istantanea: al ritorno di `start` il
-    // frontend ha già la configurazione, come quando la leggeva da sé.
+    // `config.json` is read here, once, before the first snapshot: on return from `start` the
+    // frontend already has the configuration, as when it read it itself.
     let path = options.data_dir.as_deref().map(config::file_in);
     let config = config::load(path.as_deref());
-    // L'uscita audio nasce, vive e muore su questo thread (la scheda audio non va spostata altrove).
+    // The audio output is born, lives and dies on this thread (the sound card must not be moved elsewhere).
     let (mut audio, device_error) = open_audio(options.audio);
     if let Some(audio) = &audio {
         audio.set_equalizer(config.core.equalizer);
     }
     let mut system = Integrations::open(options.system);
-    // La sessione del login sta accanto a `config.json`, nella cartella di questo core; se c'è, il
-    // dominio sociale parte già su «accesso in corso» e la riprende all'avvio.
+    // The login session sits next to `config.json`, in this core's folder; if there is one, the
+    // social domain already starts on "sign-in in progress" and resumes it at startup.
     let session_file = options.data_dir.as_ref().map(|dir| dir.join("session.json"));
     let session_stored = session_file.as_deref().is_some_and(std::path::Path::exists);
     let state = CoreState::new(config, path, mix_seed())
@@ -274,7 +274,7 @@ fn host(options: CoreOptions, inbox: mpsc::UnboundedReceiver<Control>, ready: st
     }
 }
 
-/// Le cartelle dei download e degli aggiornamenti di questo core (vedi [`CoreOptions::downloads_dir`]).
+/// The download and update folders of this core (see [`CoreOptions::downloads_dir`]).
 fn download_dirs(options: &CoreOptions) -> (PathBuf, PathBuf) {
     let temp = std::env::temp_dir();
     let downloads = options
@@ -287,7 +287,7 @@ fn download_dirs(options: &CoreOptions) -> (PathBuf, PathBuf) {
     (downloads, updates)
 }
 
-/// Apre l'uscita audio scelta: l'uscita (se c'è) e perché non si è aperta (se non si è aperta).
+/// Opens the chosen audio output: the output (if there is one) and why it did not open (if it did not).
 fn open_audio(choice: AudioChoice) -> (Option<AudioOutput>, Option<AppError>) {
     match choice {
         AudioChoice::System => match AudioOutput::open() {
@@ -300,25 +300,25 @@ fn open_audio(choice: AudioChoice) -> (Option<AudioOutput>, Option<AppError>) {
     }
 }
 
-/// I collegamenti col sistema: i comandi che arrivano (tasti multimediali), il capo per mostrare il
-/// brano, Discord e la stanza della jam. Nascono, vivono e muoiono sul thread del core, come
-/// l'uscita audio.
+/// The system links: the commands that arrive (media keys), the handle to show the
+/// track, Discord and the jam room. They are born, live and die on the core's thread, like
+/// the audio output.
 struct Integrations {
-    /// Con `SystemChoice::None` niente si esegue: un core di prova non deve accendere Discord né
-    /// mostrare un brano nel widget di chi lo prova.
+    /// With `SystemChoice::None` nothing runs: a test core must not turn on Discord nor
+    /// show a track in the widget of whoever tries it.
     desktop: bool,
-    /// I comandi del sistema; `None` se non c'è collegamento o il flusso è finito.
+    /// The system's commands; `None` if there is no link or the stream has ended.
     commands: Option<Pin<Box<dyn Stream<Item = media::Event> + Send>>>,
-    /// Il collegamento multimediale, dopo `Event::Ready`.
+    /// The media link, after `Event::Ready`.
     media: Option<media::Handle>,
     #[cfg(not(target_os = "android"))]
     discord: Option<crate::discord::Presence>,
-    /// Il collegamento alla stanza della jam, finché c'è una jam. A differenza degli altri non
-    /// dipende da `SystemChoice`: non è un widget del sistema, è rete, e un test lo prova con una
-    /// stanza finta.
+    /// The link to the jam room, as long as there is a jam. Unlike the others it does not
+    /// depend on `SystemChoice`: it is not a system widget, it is network, and a test checks it with a
+    /// fake room.
     jam: Option<jam::Link>,
-    /// Il collegamento che ascolta il movimento chiesto dal sistema, mentre un frontend lo vuole
-    /// (`Effect::WatchMotion`); `None` se spento o se il flusso è finito (nessun bus).
+    /// The link that listens to the motion requested by the system, while a frontend wants it
+    /// (`Effect::WatchMotion`); `None` if it is off or if the stream has ended (no bus).
     motion: Option<Pin<Box<dyn Stream<Item = SystemMotion> + Send>>>,
 }
 
@@ -341,23 +341,23 @@ impl Integrations {
         }
     }
 
-    /// Apre o chiude il collegamento del movimento. Un core senza collegamenti col sistema (i
-    /// test) non si iscrive al bus della sessione.
+    /// Opens or closes the motion link. A core without system links (the tests)
+    /// does not subscribe to the session bus.
     fn watch_motion(&mut self, on: bool) {
         self.motion = (on && self.desktop).then(|| {
             Box::pin(crate::system_motion::events()) as Pin<Box<dyn Stream<Item = SystemMotion> + Send>>
         });
     }
 
-    /// Apre un indirizzo nel browser del sistema. `false` se non si è aperto. Un core senza
-    /// collegamenti col sistema (i test) non apre niente e lo dice come riuscito: nessun browser
-    /// compare a chi prova il core.
+    /// Opens an address in the system browser. `false` if it did not open. A core without
+    /// system links (the tests) opens nothing and reports it as a success: no browser
+    /// appears for whoever tries the core.
     fn open_url(&self, url: &crate::auth::Secret) -> bool {
         !self.desktop || crate::platform::open_url(url.expose())
     }
 
-    /// Il prossimo comando dal sistema o evento della stanza; senza collegamenti non arriva mai.
-    /// Le due attese stanno insieme, su campi diversi, per poterle aspettare con una sola borrow.
+    /// The next command from the system or event from the room; without links it never arrives.
+    /// The two waits sit together, on different fields, so they can be awaited with a single borrow.
     async fn next(&mut self) -> Heard {
         let Self { commands, jam, motion, .. } = self;
         tokio::select! {
@@ -382,18 +382,18 @@ impl Integrations {
         }
     }
 
-    /// Ciò che si è sentito: lo smista.
+    /// What was heard: it sorts it out.
     fn heard(&mut self, heard: Heard, inputs: &mut Vec<Input>) {
         match heard {
             Heard::System(event) => self.received(event, inputs),
             Heard::Jam(event) => self.jam_received(event, inputs),
             Heard::Motion(Some(reading)) => inputs.push(Input::SystemMotion(reading)),
-            // Il flusso è finito (nessun bus della sessione): la vista resta senza preferenza.
+            // The stream has ended (no session bus): the view stays without a preference.
             Heard::Motion(None) => self.motion = None,
         }
     }
 
-    /// Un comando arrivato: il capo del collegamento si tiene qui, il resto va al riduttore.
+    /// A command arrived: the link's sender is kept here, the rest goes to the reducer.
     fn received(&mut self, event: Option<media::Event>, inputs: &mut Vec<Input>) {
         match event {
             Some(event) => {
@@ -402,14 +402,14 @@ impl Integrations {
                 }
                 inputs.push(Input::Media(event));
             }
-            // Il flusso è finito (nessun bus della sessione): non lo si interroga più.
+            // The stream has ended (no session bus): it is no longer polled.
             None => self.commands = None,
         }
     }
 
-    /// Un evento della stanza arrivato: va al riduttore. Una chiusura, o un canale che si è svuotato
-    /// senza dirla (il thread del collegamento è caduto), toglie il collegamento: non lo si
-    /// interroga più, e il riduttore chiude la jam.
+    /// A room event arrived: it goes to the reducer. A close, or a channel that emptied
+    /// without saying so (the link's thread fell), removes the link: it is no longer
+    /// polled, and the reducer closes the jam.
     fn jam_received(&mut self, event: Option<jam::Event>, inputs: &mut Vec<Input>) {
         let event = event.unwrap_or_else(|| jam::Event::Closed(jam::LOST.into()));
         if matches!(event, jam::Event::Closed(_)) {
@@ -418,10 +418,10 @@ impl Integrations {
         inputs.push(Input::Jam(event));
     }
 
-    /// Esegue un'operazione sul collegamento alla stanza.
+    /// Runs an operation on the room link.
     fn jam(&mut self, op: JamOp) {
         match op {
-            // Il collegamento che c'era cade con il suo thread: la stanza libera il posto.
+            // The link that was there falls with its thread: the room frees the place.
             JamOp::Start { base, target, name } => self.jam = Some(jam::Link::start(&base, target, name)),
             JamOp::Send(snapshot) => {
                 if let Some(link) = &self.jam {
@@ -464,24 +464,24 @@ impl Integrations {
         }
     }
 
-    /// Discord non c'è su Android: il riduttore non chiede niente.
+    /// There is no Discord on Android: the reducer asks for nothing.
     #[cfg(target_os = "android")]
     fn discord(&mut self, _op: DiscordOp) {}
 }
 
-/// Ciò che i collegamenti dell'host hanno da dire: un comando del sistema (`None`: il flusso è
-/// finito) o un evento della stanza della jam (`None`: il canale si è svuotato).
+/// What the host's links have to say: a system command (`None`: the stream has
+/// ended) or a jam room event (`None`: the channel has emptied).
 enum Heard {
     System(Option<media::Event>),
     Jam(Option<jam::Event>),
-    /// Una lettura del movimento chiesto dal sistema (`None`: il flusso è finito).
+    /// A reading of the motion requested by the system (`None`: the stream has ended).
     Motion(Option<SystemMotion>),
 }
 
-/// Il ciclo del core: aspetta un comando, l'esito di un lavoro o un timer, lo passa al riduttore,
-/// esegue gli effetti e pubblica se qualcosa è cambiato. Dopo `shutdown` non legge più comandi e
-/// gira finché i domini non hanno salvato ([`Effect::Flushed`]); allora restituisce chi aspetta la
-/// fine e l'esito del salvataggio. Se il `Core` cade senza `shutdown`, si ferma subito.
+/// The core's loop: waits for a command, a job's outcome or a timer, passes it to the reducer,
+/// runs the effects and publishes if anything changed. After `shutdown` it reads no more commands and
+/// runs until the domains have saved ([`Effect::Flushed`]); then it returns whoever waits for the
+/// end and the outcome of the save. If the `Core` drops without `shutdown`, it stops at once.
 async fn actor(
     mut state: CoreState,
     mut inbox: mpsc::UnboundedReceiver<Control>,
@@ -492,7 +492,7 @@ async fn actor(
     let mut timers = Timers::default();
     let mut jobs = JoinSet::new();
     let mut closing: Option<Stopped> = None;
-    // Il primo giro è l'avvio: nessuno ha ancora scritto, ma i domini hanno letto il file.
+    // The first round is the startup: nobody has written yet, but the domains have read the file.
     let mut starting = Some(Input::Start);
     loop {
         let mut inputs = Vec::new();
@@ -502,22 +502,22 @@ async fn actor(
             tokio::select! {
             control = inbox.recv(), if closing.is_none() => match control {
                 Some(control) => receive(control, &mut inbox, &mut inputs, &mut closing),
-                // Il `Core` è caduto senza `shutdown`: nessuno aspetta.
+                // The `Core` dropped without `shutdown`: nobody is waiting.
                 None => return None,
             },
-            // Un lavoro annullato non ha esito: succede solo se il runtime si chiude prima del core.
+            // A cancelled job has no outcome: it only happens if the runtime closes before the core.
             Some(done) = jobs.join_next() => inputs.extend(done.ok().map(Input::Done)),
             () = deadline(timers.next()) => inputs.extend(timers.expired(Instant::now()).into_iter().map(Input::Timer)),
-            // I comandi del sistema e gli eventi della stanza della jam: entrano nel core da qui,
-            // senza che nessun battito li vada a leggere.
+            // The system's commands and the jam room's events: they enter the core from here,
+            // without any tick going to read them.
             heard = system.next() => system.heard(heard, &mut inputs),
             }
         }
         let mut flushed = None;
         for input in inputs {
             let now = Instant::now();
-            // Ciò che l'audio risponde a un'operazione rientra nello stesso giro, subito dopo gli
-            // effetti che l'hanno chiesta.
+            // What the audio answers to an operation re-enters in the same round, right after the
+            // effects that asked for it.
             let mut pending = VecDeque::from([input]);
             while let Some(input) = pending.pop_front() {
                 for effect in state.apply(input, now.into_std()) {
@@ -528,7 +528,7 @@ async fn actor(
                         Effect::Jam(op) => system.jam(op),
                         Effect::WatchMotion(on) => system.watch_motion(on),
                         Effect::OpenUrl(url) => {
-                            // Se il browser non si apre, il dominio smette di aspettarlo.
+                            // If the browser does not open, the domain stops waiting for it.
                             if !system.open_url(&url) {
                                 pending.push_back(Input::Done(Done::Social(
                                     crate::state::social::Done::BrowserFailed,
@@ -547,9 +547,9 @@ async fn actor(
     }
 }
 
-/// Mette in `inputs` il comando appena arrivato e quelli già in coda dietro di lui (al più
-/// [`BURST`]): una raffica diventa un solo giro e una sola istantanea. Si ferma a `shutdown`, dopo
-/// il quale nessuno manda più niente.
+/// Puts in `inputs` the command that just arrived and those already queued behind it (at most
+/// [`BURST`]): a burst becomes a single round and a single snapshot. It stops at `shutdown`, after
+/// which nobody sends anything any more.
 fn receive(
     first: Control,
     inbox: &mut mpsc::UnboundedReceiver<Control>,
@@ -569,7 +569,7 @@ fn receive(
     }
 }
 
-/// Esegue un effetto. Restituisce l'esito del salvataggio quando l'effetto chiude il core.
+/// Runs an effect. Returns the outcome of the save when the effect closes the core.
 fn run(
     effect: Effect,
     timers: &mut Timers<TimerKey>,
@@ -579,17 +579,17 @@ fn run(
     match effect {
         Effect::Timer { key, after } => match now.checked_add(after) {
             Some(at) => timers.arm(key, at),
-            // Una scadenza oltre la fine del tempo non arriva mai: basta togliere il timer.
+            // A deadline beyond the end of time never arrives: it is enough to remove the timer.
             None => timers.cancel(key),
         },
         Effect::CancelTimer(key) => timers.cancel(key),
-        // Un panic nel lavoro diventa l'esito `lost`: il dominio non resta ad aspettare.
+        // A panic in the job becomes the outcome `lost`: the domain does not keep waiting.
         Effect::Run(job) => {
             let lost = job.lost();
             jobs.spawn(async move { AssertUnwindSafe(job.run()).catch_unwind().await.unwrap_or(lost) });
         }
         Effect::Flushed(saved) => return Some(saved),
-        // L'audio e i collegamenti col sistema li esegue chi li tiene (`actor`), nello stesso giro.
+        // The audio and the system links are run by whoever holds them (`actor`), in the same round.
         Effect::Audio(_)
         | Effect::Media(_)
         | Effect::Discord(_)
@@ -600,7 +600,7 @@ fn run(
     None
 }
 
-/// Pubblica l'istantanea successiva se un dominio è cambiato.
+/// Publishes the next snapshot if a domain has changed.
 fn publish_changes(state: &CoreState, publish: &watch::Sender<Arc<Snapshot>>) {
     let previous = Arc::clone(&publish.borrow());
     if let Some(next) = state.publish(&previous) {
@@ -608,7 +608,7 @@ fn publish_changes(state: &CoreState, publish: &watch::Sender<Arc<Snapshot>>) {
     }
 }
 
-/// Aspetta fino a `at`; senza scadenza, per sempre.
+/// Waits until `at`; without a deadline, forever.
 async fn deadline(at: Option<Instant>) {
     match at {
         Some(at) => tokio::time::sleep_until(at).await,
@@ -616,8 +616,8 @@ async fn deadline(at: Option<Instant>) {
     }
 }
 
-/// I timer armati, in ordine di scadenza (a pari scadenza, in ordine di arrivo). Sono pochi, uno
-/// per chiave: basta una lista.
+/// The armed timers, in deadline order (on equal deadlines, in arrival order). There are few, one
+/// per key: a list is enough.
 #[derive(Debug)]
 struct Timers<K> {
     armed: Vec<(K, Instant)>,
@@ -630,7 +630,7 @@ impl<K> Default for Timers<K> {
 }
 
 impl<K: Copy + PartialEq> Timers<K> {
-    /// Arma `key` per `at`; se era già armato, il timer precedente si annulla.
+    /// Arms `key` for `at`; if it was already armed, the previous timer is cancelled.
     fn arm(&mut self, key: K, at: Instant) {
         self.cancel(key);
         let index = self.armed.partition_point(|(_, other)| *other <= at);
@@ -641,12 +641,12 @@ impl<K: Copy + PartialEq> Timers<K> {
         self.armed.retain(|(armed, _)| *armed != key);
     }
 
-    /// La prossima scadenza.
+    /// The next deadline.
     fn next(&self) -> Option<Instant> {
         self.armed.first().map(|(_, at)| *at)
     }
 
-    /// Toglie i timer scaduti a `now` e li restituisce nell'ordine in cui scadono.
+    /// Removes the timers expired by `now` and returns them in the order they expire.
     fn expired(&mut self, now: Instant) -> Vec<K> {
         let due = self.armed.partition_point(|(_, at)| *at <= now);
         self.armed.drain(..due).map(|(key, _)| key).collect()
@@ -663,7 +663,7 @@ mod tests {
     use crate::config::{Config, CoreConfig};
     use crate::state::settings::SAVE_DELAY;
 
-    /// Un core sul runtime `handle`, senza cartella dei dati: non legge e non scrive file.
+    /// A core on the `handle` runtime, without a data folder: it reads and writes no files.
     fn borrowing(handle: Handle) -> CoreOptions {
         CoreOptions {
             runtime: RuntimeChoice::Borrow(handle),
@@ -674,7 +674,7 @@ mod tests {
         }
     }
 
-    /// Una cartella dei dati nuova, solo per questo test.
+    /// A new data folder, just for this test.
     fn data_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("psytify-core-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -685,8 +685,8 @@ mod tests {
         Command::Settings(SettingsCmd::Store(Box::new(core)))
     }
 
-    /// L'audio è del core dal passo 4.3: questo test lo apre staccato (`AudioChoice::Detached`),
-    /// mai sulla scheda audio, e lo chiude sul thread che l'ha aperto.
+    /// The audio belongs to the core since step 4.3: this test opens it detached (`AudioChoice::Detached`),
+    /// never on the sound card, and closes it on the thread that opened it.
     #[test]
     fn core_starts_and_stops_100_times() {
         let runtime = Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
@@ -730,9 +730,9 @@ mod tests {
         Core::start(options).unwrap().shutdown().blocking_recv().unwrap().unwrap();
     }
 
-    /// Il `config.json` di una release, nella cartella di questo core (nessun lucchetto fra i test,
-    /// `docs/transformation/BACKLOG.md`, 11): il core lo legge all'avvio e alla chiusura lo riscrive
-    /// con l'ultimo stato, senza aspettare il ritardo e senza perdere le chiavi che non conosce.
+    /// The `config.json` of a release, in this core's folder (no lock between the tests,
+    /// `docs/transformation/BACKLOG.md`, 11): the core reads it at startup and at shutdown rewrites it
+    /// with the last state, without waiting for the delay and without losing the keys it does not know.
     #[tokio::test(start_paused = true)]
     async fn the_core_loads_a_release_config_and_close_writes_the_last_state() {
         let dir = data_dir();
@@ -755,9 +755,9 @@ mod tests {
         assert!(!dir.join("config.json.tmp").exists());
     }
 
-    /// Senza chiusura, una modifica arriva sul disco da sola dopo [`SAVE_DELAY`]. Qui il disco la
-    /// rifiuta (al posto della cartella c'è un file): l'errore si pubblica, e la chiusura, dopo
-    /// un ultimo tentativo, lo riporta. Il core si ferma comunque.
+    /// Without a shutdown, a change reaches the disk by itself after [`SAVE_DELAY`]. Here the disk
+    /// refuses it (there is a file in place of the folder): the error is published, and the shutdown, after
+    /// one last attempt, reports it. The core stops anyway.
     #[tokio::test(start_paused = true)]
     async fn a_change_is_saved_after_the_delay_and_a_failed_save_is_reported() {
         let blocked = data_dir().join("not-a-dir");
@@ -779,9 +779,9 @@ mod tests {
         assert!(matches!(stopped, Err(CoreError::Save(AppError::Io(_)))), "{stopped:?}");
     }
 
-    /// Passo 4.2: la libreria passa dal core, che la scrive in `config.json` dopo [`SAVE_DELAY`]
-    /// insieme agli altri campi, e la ritrova al riavvio. Una chiusura subito dopo il comando non
-    /// perde niente.
+    /// Step 4.2: the library goes through the core, which writes it to `config.json` after [`SAVE_DELAY`]
+    /// together with the other fields, and finds it again on restart. A shutdown right after the command does
+    /// not lose anything.
     #[tokio::test(start_paused = true)]
     async fn library_changes_are_saved_and_come_back_after_a_restart() {
         use crate::api::models::fixtures::track;
@@ -798,7 +798,7 @@ mod tests {
         }
         assert_eq!(changes.borrow().library.liked.len(), 1);
         assert!(!config::file_in(&dir).exists(), "nothing on disk before the delay");
-        // Lo scrive il core quando vuole lui, sul runtime del test: si guarda il disco finché non arriva.
+        // The core writes it when it wants to, on the test's runtime: the disk is watched until it arrives.
         let give_up = std::time::Instant::now() + Duration::from_secs(10);
         let saved = loop {
             let saved = config::load(Some(&config::file_in(&dir)));
@@ -810,7 +810,7 @@ mod tests {
         assert_eq!(saved.core.liked.len(), 1);
         assert_eq!(*saved.core.search_history, ["eminem"]);
 
-        // Un cambio e subito la chiusura: la scrittura si fa lo stesso.
+        // A change and then the shutdown at once: the write happens all the same.
         core.send(Command::library(LibraryCmd::ToggleLike(track(2))));
         core.shutdown().await.unwrap().unwrap();
         assert_eq!(config::load(Some(&config::file_in(&dir))).core.liked.len(), 2);
@@ -821,10 +821,10 @@ mod tests {
         core.shutdown().await.unwrap().unwrap();
     }
 
-    /// Passo 5: un frontend chiede una copertina al core, che la scarica dal backend scelto nelle
-    /// impostazioni (`/v1/cover`) sul proprio runtime e la restituisce decodificata. Un indirizzo non
-    /// ammesso (non https, o un host che non è archive.org né il CDN di Deezer) non esce dal core: `None`
-    /// senza nessuna richiesta.
+    /// Step 5: a frontend asks the core for a cover, which downloads it from the backend chosen in the
+    /// settings (`/v1/cover`) on its own runtime and returns it decoded. An address that is not
+    /// Not allowed (not https, or a host that is neither archive.org nor Deezer's CDN) it does not leave the core:
+    /// `None` with no request at all.
     #[tokio::test]
     async fn a_cover_is_fetched_through_the_backend_and_a_foreign_address_is_refused() {
         use crate::testing::fake_backend;
@@ -846,17 +846,17 @@ mod tests {
         assert!(other.is_none());
         assert_eq!(backend.count("/v1/cover"), 1, "gli indirizzi non ammessi non arrivano al backend");
 
-        // Il client delle copertine si riusa finché il backend è lo stesso.
+        // The cover client is reused as long as the backend is the same.
         core.artwork(url).await.unwrap().expect("ancora una");
         assert_eq!(backend.count("/v1/cover"), 2);
         core.shutdown().await.unwrap().unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Passo 4.5 (BACKLOG 24): un solo comando, `ExternalCmd::PlaySource`, porta un risultato del
-    /// catalogo ufficiale nel catalogo del server e lo fa suonare, tutto sul runtime del core: il
-    /// frontend non importa, non accoda e non rilegge niente. La riga «in importazione» c'è finché
-    /// il server lavora, poi il brano è quello in corso.
+    /// Step 4.5 (BACKLOG 24): a single command, `ExternalCmd::PlaySource`, brings an official catalog result
+    /// into the server's catalog and plays it, all on the core's runtime: the frontend does not import, does not
+    /// queue and does not reread anything. The "importing" row stays while the server works,
+    /// then the track is the one playing.
     #[tokio::test]
     async fn playing_an_official_result_imports_it_and_starts_it_from_one_command() {
         use crate::api::SourceKind;
@@ -888,12 +888,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Passo 4.9: il videoclip passa dal core, sul runtime. Finché il video è nascosto il core non
-    /// chiede l'indirizzo; con il video mostrato lo chiede al backend e pubblica quello a 360p; sei
-    /// secondi dopo (il timer del core, armato da lui) lo richiede e pubblica il 720p, una volta, e
-    /// poi non chiede più niente. Il brano che parte fa preparare il suo videoclip una volta sola.
-    /// Nascosto il video, il dominio torna a riposo. Tempo vero: il timer è di sei secondi e il backend è una porta
-    /// vera, su cui un orologio fermo salterebbe dritto ai timeout.
+    /// Step 4.9: the music video goes through the core, on the runtime. While the video is hidden the core
+    /// does not ask for the address; with the video shown it asks the backend and publishes the 360p one; six
+    /// seconds later (the core's timer, armed by it) it asks for and publishes the 720p, once, and then it
+    /// no longer asks for anything. The track that starts has its video prepared only once.
+    /// With the video hidden, the domain rests. Real time: the timer is six seconds and the backend is a real
+    /// port, on which a stopped clock would jump straight to the timeouts.
     #[cfg(feature = "video")]
     #[tokio::test]
     async fn a_shown_clip_is_asked_of_the_backend_and_upgraded_on_the_core_timer() {
@@ -914,8 +914,8 @@ mod tests {
         let clip = Track { has_video: true, ..track(1) };
         let video_url = format!("GET /v1/tracks/{}/video-url", clip.id);
 
-        // Il brano parte con i videoclip voluti ma nascosti: il server prepara il suo, una volta, e
-        // nessuno chiede l'indirizzo.
+        // The track starts with the videos wanted but hidden: the server prepares its own, once, and
+        // nobody asks for the address.
         core.send(Command::Video(VideoCmd::PrepareAhead(true)));
         core.send(Command::Playback(PlaybackCmd::Play { tracks: vec![clip.clone()].into(), start: 0 }));
         until(&mut changes, |snapshot| snapshot.playback.is_playing()).await;
@@ -930,7 +930,7 @@ mod tests {
         assert!(!backend.hits().contains(&video_url), "nascosto: nessun indirizzo chiesto");
         assert_eq!(changes.borrow().video.state, ClipState::Idle);
 
-        // Mostrato: l'indirizzo, a 360p, con l'origine del backend davanti all'indirizzo del proxy.
+        // Shown: the address, at 360p, with the backend's origin in front of the proxy address.
         let shown = Instant::now();
         core.send(Command::Video(VideoCmd::Show(true)));
         let ready = until(&mut changes, |snapshot| matches!(snapshot.video.state, ClipState::Ready(_))).await;
@@ -938,7 +938,7 @@ mod tests {
         assert_eq!((ready.video.track, first.height), (Some(clip.id), Some(360)));
         assert_eq!(first.url(), format!("{}/v1/media?t=clip", backend.url));
 
-        // Sei secondi dopo, da sola, la versione completa; poi il core non chiede più niente.
+        // Six seconds later, on its own, the full version; then the core no longer asks for anything.
         let full = until(
             &mut changes,
             |snapshot| matches!(&snapshot.video.state, ClipState::Ready(clip) if clip.height == Some(720)),
@@ -951,7 +951,7 @@ mod tests {
         assert_eq!(backend.count(&video_url["GET ".len()..]), 2, "360p e 720p, non una richiesta in più");
         assert_eq!(backend.hits().iter().filter(|hit| **hit == prepare).count(), 1);
 
-        // Nascosto di nuovo, il videoclip se ne va e il core torna a riposo.
+        // Hidden again, the video goes away and the core goes back to rest.
         core.send(Command::Video(VideoCmd::Show(false)));
         let idle = until(&mut changes, |snapshot| snapshot.video.state == ClipState::Idle).await;
         tokio::time::sleep(Duration::from_millis(900)).await;
@@ -961,9 +961,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Passo 4.3: un `Play` fa partire il caricamento sul runtime del core e la risposta (qui un
-    /// errore: il backend è una porta chiusa) rientra nel dominio nello stesso modo che a un brano
-    /// vero. Il core tiene l'uscita audio (staccata) e la chiude con sé.
+    /// Step 4.3: a `Play` starts the loading on the core's runtime and the reply (here an
+    /// error: the backend is a closed port) re-enters the domain the same way as for a real
+    /// track. The core holds the audio output (detached) and closes it with itself.
     #[tokio::test]
     async fn a_play_runs_its_load_on_the_runtime_and_the_answer_comes_back() {
         use crate::api::models::fixtures::track;
@@ -994,8 +994,8 @@ mod tests {
         core.shutdown().await.unwrap().unwrap();
     }
 
-    /// Passo 4.4: il tasto arma l'attesa nel core, la ricerca parte sul runtime allo scadere e le
-    /// risposte (qui errori: il backend è una porta chiusa) rientrano nel dominio; poi il core è fermo.
+    /// Step 4.4: the key arms the wait in the core, the search starts on the runtime when it expires and the
+    /// replies (here errors: the backend is a closed port) re-enter the domain; then the core is idle.
     #[tokio::test]
     async fn the_debounced_search_runs_on_the_runtime_and_the_core_goes_quiet() {
         use crate::catalog::Load;
@@ -1006,7 +1006,7 @@ mod tests {
         let core = Core::start(CoreOptions { data_dir: Some(dir), ..borrowing(Handle::current()) }).unwrap();
         let mut changes = core.changes();
         core.send(Command::Catalog(CatalogCmd::SearchInput("low".into())));
-        // Scrivere non pubblica niente: la ricerca parte solo allo scadere dei 300 ms.
+        // Writing publishes nothing: the search starts only when the 300 ms expire.
         let waited = tokio::time::timeout(Duration::from_millis(150), changes.changed()).await;
         assert!(waited.is_err(), "nothing is published while the debounce waits");
         let settled = tokio::time::timeout(Duration::from_secs(20), async {
@@ -1026,7 +1026,7 @@ mod tests {
         .await
         .expect("the three searches end, even if they fail");
         assert_eq!(settled.submitted, "low");
-        // Fermo: dopo le risposte, e dopo il salvataggio che ne segue, niente più pubblicazioni.
+        // Idle: after the replies, and after the save that follows, no more publishing.
         tokio::time::sleep(Duration::from_millis(900)).await;
         changes.borrow_and_update();
         let quiet = tokio::time::timeout(Duration::from_millis(700), changes.changed()).await;
@@ -1034,7 +1034,7 @@ mod tests {
         core.shutdown().await.unwrap().unwrap();
     }
 
-    /// Una raffica di comandi già in coda è un solo giro: una sola istantanea, con l'ultimo stato.
+    /// A burst of commands already queued is a single round: a single snapshot, with the last state.
     #[tokio::test(start_paused = true)]
     async fn a_burst_of_commands_publishes_once() {
         let (commands, inbox) = mpsc::unbounded_channel();
@@ -1089,7 +1089,7 @@ mod tests {
         assert_eq!(timers.expired(start + Duration::from_secs(1)), Vec::<u8>::new());
     }
 
-    /// Aspetta, al massimo 20 s, che l'istantanea del core soddisfi `ready`.
+    /// Waits, at most 20 s, for the core's snapshot to satisfy `ready`.
     async fn until(
         changes: &mut watch::Receiver<Arc<Snapshot>>,
         ready: impl Fn(&Snapshot) -> bool,
@@ -1107,13 +1107,13 @@ mod tests {
         .expect("the core reaches the expected state")
     }
 
-    /// Un'istanza Clerk che non risponde (https su una porta chiusa di localhost): nessun test
-    /// parla con Clerk, e nessun test usa una sessione vera.
+    /// A Clerk instance that does not answer (https on a closed localhost port): no test
+    /// talks to Clerk, and no test uses a real session.
     fn dead_clerk(session_file: Option<PathBuf>) -> crate::auth::ClerkApp {
         crate::auth::ClerkApp { issuer: "https://127.0.0.1:9".into(), port: 53682, session_file }
     }
 
-    /// Una cartella dei dati con la configurazione che punta a Clerk e al backend finti.
+    /// A data folder with the configuration pointing at the fake Clerk and backend.
     fn social_dir() -> PathBuf {
         let dir = data_dir();
         std::fs::write(
@@ -1124,10 +1124,10 @@ mod tests {
         dir
     }
 
-    /// Passo 4.7 e BACKLOG 11: la sessione salvata sta nella cartella dei dati di questo core, senza
-    /// un percorso per processo. Un core con la sua `session.json` parte già su «accesso in corso» e
-    /// la riprende da sé; un altro, in un'altra cartella, nello stesso processo, non la vede. Se
-    /// Clerk non risponde la sessione non si perde: il file resta per il prossimo avvio.
+    /// Step 4.7 and BACKLOG 11: the saved session sits in this core's data folder, with no
+    /// per-process path. A core with its own `session.json` starts already on "sign-in in progress" and
+    /// resumes it by itself; another, in another folder, in the same process, does not see it. If
+    /// Clerk does not answer the session is not lost: the file stays for the next startup.
     #[tokio::test]
     async fn the_session_file_belongs_to_each_cores_own_data_dir() {
         use crate::state::social::{Account, SocialEvent};
@@ -1164,8 +1164,8 @@ mod tests {
         alone.shutdown().await.unwrap().unwrap();
     }
 
-    /// Uscire toglie `session.json` della cartella di questo core, anche con Clerk e il backend che
-    /// non rispondono, e il core si ferma: nessun timer del sondaggio resta armato.
+    /// Signing out removes `session.json` from this core's folder, even with Clerk and the backend not
+    /// answering, and the core stops: no polling timer stays armed.
     #[tokio::test]
     async fn signing_out_removes_the_session_file_of_that_core() {
         use crate::state::social::{Account, SocialCmd};
@@ -1178,7 +1178,7 @@ mod tests {
         let spare =
             Core::start(CoreOptions { data_dir: Some(other), ..borrowing(Handle::current()) }).unwrap();
 
-        // Un accesso già fatto, come dopo l'ultimo passo: nessuna chiamata di rete all'avvio.
+        // A sign-in already done, as after the last step: no network call at startup.
         let core = Core::start(CoreOptions { data_dir: Some(dir), ..borrowing(Handle::current()) }).unwrap();
         let mut changes = core.changes();
         let session = crate::auth::Session::for_tests(dead_clerk(Some(file.clone())));
@@ -1208,9 +1208,9 @@ mod tests {
         }));
     }
 
-    /// Passo 4.6b, su un core vero: un brano scaricato (da un backend finto, in una cartella dei dati
-    /// temporanea) entra nell'indice con peso e SHA-256, e si suona dal disco con il backend spento:
-    /// nessuna richiesta di ascolto, niente rete. Il file è quello scaricato, byte per byte.
+    /// Step 4.6b, on a real core: a downloaded track (from a fake backend, in a temporary data folder)
+    /// enters the index with weight and SHA-256, and plays from the disk with the backend off:
+    /// no listen request, no network. The file is the downloaded one, byte for byte.
     #[tokio::test]
     async fn a_downloaded_track_plays_from_disk_with_the_backend_gone() {
         use sha2::{Digest, Sha256};
@@ -1246,7 +1246,7 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty(), "nessun temporaneo rimasto: {leftovers:?}");
 
-        // Senza backend: il brano parte lo stesso, dal file.
+        // Without a backend: the track starts anyway, from the file.
         let media_before = backend.count("/v1/media");
         backend.stop();
         play_one(&core, &track);
@@ -1259,9 +1259,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Il file sparisce: il brano si suona dalla rete, l'indice lo segna mancante e non lo toglie; a un
-    /// nuovo avvio il controllo veloce lo segna da sé; «Rimuovi» toglie la voce e non trova niente da
-    /// cancellare. L'indice sopravvive al riavvio (sta in `config.json`).
+    /// The file disappears: the track plays from the network, the index marks it missing and does not remove it; at a
+    /// new startup the quick check marks it by itself; "Remove" removes the entry and finds nothing to
+    /// delete. The index survives the restart (it sits in `config.json`).
     #[tokio::test]
     async fn a_deleted_file_falls_back_to_streaming_and_the_index_survives_a_restart() {
         use crate::api::models::fixtures;
@@ -1284,7 +1284,7 @@ mod tests {
         let done = until(&mut changes, |snapshot| snapshot.downloads.saved.len() == 1).await;
         let path = done.downloads.saved[0].path.clone();
 
-        // Il file sparisce fuori dall'app, il core non lo sa: il caricamento lo scopre.
+        // The file disappears outside the app, the core does not know: the loading discovers it.
         std::fs::remove_file(&path).unwrap();
         play_one(&core, &track);
         let playing = until(&mut changes, |snapshot| {
@@ -1296,7 +1296,7 @@ mod tests {
         assert!(playing.downloads.is_saved(track.id), "la voce resta");
         assert!(!playing.downloads.is_offline_ready(track.id));
 
-        // Riavvio: l'indice è in `config.json`, il controllo veloce segna il file mancante.
+        // Restart: the index is in `config.json`, the quick check marks the missing file.
         core.shutdown().await.unwrap().unwrap();
         let core = Core::start(options()).unwrap();
         let mut changes = core.changes();
@@ -1319,7 +1319,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Aspetta, al massimo 20 s, che `ready` sia vero (per ciò che sta fuori dal core: la stanza finta).
+    /// Waits, at most 20 s, for `ready` to be true (for what is outside the core: the fake room).
     async fn eventually(ready: impl Fn() -> bool) {
         tokio::time::timeout(Duration::from_secs(20), async {
             while !ready() {
@@ -1330,10 +1330,10 @@ mod tests {
         .expect("the outside world reaches the expected state");
     }
 
-    /// Passo 4.8: la jam gira sugli eventi del collegamento, che l'host aspetta insieme a tutto il
-    /// resto. Il core crea la stanza (con il nome del comando), gli eventi della stanza lo svegliano
-    /// da soli (i membri, uno stato degli altri con i brani da chiedere al catalogo), una jam ferma
-    /// non pubblica niente e non manda niente alla stanza, e uscire chiude il socket.
+    /// Step 4.8: the jam runs on the link's events, which the host waits for together with everything
+    /// else. The core creates the room (with the command's name), the room's events wake it
+    /// by themselves (the members, a state of the others with the tracks to ask the catalog for), an idle jam
+    /// publishes nothing and sends nothing to the room, and leaving closes the socket.
     #[tokio::test]
     async fn a_jam_runs_on_the_rooms_events_and_an_idle_jam_wakes_nothing() {
         use crate::api::models::fixtures::track;
@@ -1356,12 +1356,12 @@ mod tests {
         assert_eq!(room.names(), ["Luca"]);
         assert_eq!(open.jam.events.len(), 1, "«Sei nella jam»");
 
-        // Ferma: nessuna istantanea, nessuno stato alla stanza (niente in coda, niente da dire).
+        // Idle: no snapshot, no state to the room (nothing queued, nothing to say).
         let quiet = tokio::time::timeout(Duration::from_millis(400), changes.changed()).await;
         assert!(quiet.is_err(), "una jam ferma non sveglia il core");
         assert!(room.received().is_empty());
 
-        // Un membro entra: la stanza lo dice, il core pubblica la sola jam.
+        // A member joins: the room says so, the core publishes only the jam.
         let before = core.snapshot();
         room.say(&serde_json::json!({
             "type": "members",
@@ -1374,8 +1374,8 @@ mod tests {
         assert_eq!(more.versions.jam, before.versions.jam + 1);
         assert!(Arc::ptr_eq(&more.playback, &before.playback) && Arc::ptr_eq(&more.social, &before.social));
 
-        // Lo stato degli altri: i brani non ci sono, si chiedono al catalogo (sul runtime del core) e
-        // la coda diventa quella del gruppo, sul secondo brano.
+        // The others' state: the tracks are not there, they are asked of the catalog (on the core's runtime) and
+        // the queue becomes the group's, on the second track.
         room.say(&serde_json::json!({
             "type": "state", "queue": [first.id, second.id], "index": 1, "position_ms": 9000,
             "playing": true, "from": "Sara", "at_ms": 2,
@@ -1397,7 +1397,7 @@ mod tests {
             aligned.jam.events
         );
 
-        // Uscire: il socket si chiude, la vista torna vuota.
+        // Leaving: the socket closes, the view goes back to empty.
         core.send(Command::Jam(JamCmd::Leave));
         let left = until(&mut changes, |snapshot| !snapshot.jam.is_active()).await;
         assert!(left.jam.code.is_none() && left.jam.members.is_empty());
@@ -1406,7 +1406,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Un server che non risponde chiude la jam con il suo motivo, e si può ripartire.
+    /// A server that does not answer closes the jam with its reason, and it can be started again.
     #[tokio::test]
     async fn a_jam_whose_server_is_down_ends_with_the_reason() {
         use crate::command::JamCmd;

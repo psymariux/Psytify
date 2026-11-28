@@ -1,24 +1,24 @@
-//! Riproduzione (passo 4.3): coda, brani preparati in anticipo, orologio, timer di spegnimento,
-//! riproduzione automatica, ascolti contati e il battito del core.
+//! Playback (step 4.3): queue, tracks prepared in advance, clock, sleep timer,
+//! automatic playback, counted plays and the core's tick.
 //!
-//! Il dominio possiede la coda, il volume, la qualità, l'equalizzatore e l'autoplay di `config.json`
-//! (li consegna alle impostazioni, come la libreria) e l'uscita audio: è l'host a tenerla, sul
-//! thread del core, e a eseguire le [`AudioOp`] che il riduttore chiede; ciò che l'audio dice
-//! (partito o no, la posizione, il brano finito) torna come [`AudioFact`] nello stesso giro.
+//! The domain owns the queue, the volume, the quality, the equalizer and the autoplay of `config.json`
+//! (it hands them to the settings, as the library does) and the audio output: the host holds it, on the
+//! core's thread, and runs the [`AudioOp`]s that the reducer asks for; what the audio says
+//! (started or not, the position, the track ended) comes back as [`AudioFact`] in the same round.
 //!
-//! **La posizione non si pubblica.** La vista porta un [`Clock`], ancorato a ogni transizione e
-//! quando il battito sente uno scarto oltre `clock::DRIFT` (250 ms): ogni frontend calcola `clock.at(now)`. Il
-//! battito (`Timer::Tick`, 250 ms) è armato solo mentre suona; in pausa, fermo o in caricamento il
-//! core non si sveglia. Un battito che non cambia niente non pubblica.
+//! **The position is not published.** The view carries a [`Clock`], anchored at each transition and
+//! when the tick senses a drift beyond `clock::DRIFT` (250 ms): each frontend computes `clock.at(now)`. The
+//! tick (`Timer::Tick`, 250 ms) is armed only while playing; paused, stopped or loading, the
+//! core does not wake up. A tick that changes nothing publishes nothing.
 //!
-//! Con il passo 4.3b il dominio possiede anche il testo del brano (caricato solo se un frontend lo
-//! mostra, [`PlaybackCmd::Lyrics`]), la radio, gli album e i mix da riprodurre, e ciò che il sistema
-//! e Discord mostrano del brano (`system.rs`): i comandi dei tasti multimediali entrano come
-//! `Input::Media` e diventano comandi del dominio.
+//! With step 4.3b the domain also owns the track's text (loaded only if a frontend shows it,
+//! [`PlaybackCmd::Lyrics`]), the radio, the albums and mixes to play, and what the system and Discord
+//! show of the track (`system.rs`): the media-key commands enter as
+//! `Input::Media` and become commands of the domain.
 //!
-//! Gli esiti che il frontend deve mostrare (il timer che ferma la musica, l'autoplay che aggiunge
-//! brani, un seek fallito, un brano che il server non ha più) non hanno un canale: stanno nella
-//! vista come [`Raised`], l'ultimo con il suo numero d'ordine, e il frontend reagisce al numero nuovo.
+//! The outcomes the frontend must show (the timer that stops the music, the autoplay that adds tracks,
+//! a failed seek, a track the server no longer has) have no channel: they sit in the view as [`Raised`],
+//! the last one with its sequence number, and the frontend reacts to the new number.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -39,38 +39,38 @@ use crate::player::{Advance, AudioOutput, Clock, PlaybackState, Queue, WarmCache
 use crate::state::library::LibraryCmd;
 use crate::state::system::{Artwork, System};
 
-/// Ogni quanto batte il core mentre suona un brano.
+/// How often the core ticks while a track plays.
 pub const TICK: Duration = Duration::from_millis(250);
-/// Sotto questa posizione «precedente» cambia brano, sopra riparte da capo.
+/// Below this position "previous" changes track, above it restarts from the beginning.
 const RESTART_THRESHOLD: Duration = Duration::from_secs(3);
-/// Quanto prima della fine si comincia a scaricare tutto il brano successivo (la testata è già
-/// calda da quando parte quello corrente): il passaggio è immediato.
+/// How long before the end the whole next track starts downloading (its head is already
+/// warm since the current one started): the change is immediate.
 const PREFETCH_BEFORE_END: Duration = Duration::from_secs(25);
-/// Brani della coda preparati in anticipo mentre ne suona uno.
+/// Queue tracks prepared in advance while one plays.
 const WARM_AHEAD: usize = 2;
-/// Brani aggiunti dalla riproduzione automatica.
+/// Tracks added by automatic playback.
 const AUTOPLAY_COUNT: usize = 10;
-/// Brani di una radio.
+/// Tracks of a radio.
 const RADIO_SIZE: usize = 25;
-/// Dopo quanto un brano si considera ascoltato.
+/// After how long a track counts as listened to.
 const HEARD_AFTER: Duration = Duration::from_secs(30);
-/// Fra due battiti la posizione avanza di più di così solo per un salto (seek): non è ascolto.
+/// Between two ticks the position advances by more than this only through a jump (seek): it is not listening.
 const LISTENED_STEP: Duration = Duration::from_secs(1);
-/// Il tempo ascoltato arriva alla libreria a gruppi di almeno tanti millisecondi, e a ogni
-/// pausa, fine o cambio di brano: una pubblicazione ogni qualche secondo sveglierebbe i frontend
-/// per niente.
+/// Listening time reaches the library in groups of at least this many milliseconds, and at each
+/// pause, end or track change: a publish every few seconds would wake the frontends
+/// for nothing.
 const LISTENED_FLUSH_MS: u64 = 15_000;
 
-/// Dopo quanto il timer ferma la musica.
+/// After how long the timer stops the music.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SleepChoice {
     Minutes(u32),
-    /// Alla fine del brano che suona.
+    /// At the end of the track playing.
     EndOfTrack,
 }
 
 impl SleepChoice {
-    /// Le scelte del menu, in ordine.
+    /// The menu's choices, in order.
     pub const ALL: [Self; 6] = [
         Self::Minutes(5),
         Self::Minutes(15),
@@ -89,7 +89,7 @@ impl SleepChoice {
     }
 }
 
-/// Il timer attivo.
+/// The active timer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SleepTimer {
     pub choice: SleepChoice,
@@ -105,7 +105,7 @@ impl SleepTimer {
         Self { choice, until }
     }
 
-    /// Il tempo che manca, in testo breve («12 min», «fine brano»).
+    /// The time left, in short text ("12 min", "fine brano").
     pub fn remaining_label(&self, now: Instant) -> String {
         match self.until {
             Some(until) => {
@@ -121,46 +121,46 @@ impl SleepTimer {
     }
 }
 
-/// Dopo quanto un brano si considera ascoltato: 30 secondi, o metà se dura meno di un minuto.
+/// After how long a track counts as listened to: 30 seconds, or half if it lasts less than a minute.
 pub fn heard_enough(position: Duration, length: Duration) -> bool {
     position >= HEARD_AFTER.min(length / 2)
 }
 
-/// Il gruppo da seguire (jam): la coda, il brano, la posizione condivisa e se il gruppo suona.
+/// The group to follow (jam): the queue, the track, the shared position and whether the group plays.
 #[derive(Debug, Clone)]
 pub struct Align {
-    /// I brani nell'ordine del gruppo, se la coda locale va rifatta (lo shuffle si spegne: l'ordine
-    /// lo decide chi suona per primo). `None` se è già quella.
+    /// The tracks in the group's order, if the local queue must be made again (shuffle turns off: the order
+    /// is decided by whoever plays first). `None` if it is already that one.
     pub tracks: Option<Vec<Track>>,
-    /// La posizione del brano corrente nell'ordine di ascolto.
+    /// The position of the current track in the listening order.
     pub index: usize,
     pub position: Duration,
     pub playing: bool,
 }
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone)]
 pub enum PlaybackCmd {
-    /// Sostituisce la coda con `tracks` e fa partire quello in `start`.
+    /// Replaces the queue with `tracks` and starts the one at `start`.
     Play {
         tracks: Arc<[Track]>,
         start: usize,
     },
-    /// Sostituisce la coda, accende lo shuffle e parte da un brano a caso.
+    /// Replaces the queue, turns shuffle on and starts from a random track.
     ShufflePlay(Arc<[Track]>),
-    /// Salta alla voce della coda in quella posizione dell'ordine di ascolto e la fa partire.
+    /// Jumps to the queue entry at that position of the listening order and starts it.
     PlayAt(usize),
-    /// Play e pausa; da fermo o dopo un errore, riparte dal brano corrente.
+    /// Play and pause; from stopped or after an error, it restarts the current track.
     Toggle,
     Next,
     Previous,
     SeekTo(Duration),
-    /// Avanti (positivo) o indietro, in secondi.
+    /// Forward (positive) or back, in seconds.
     SeekBy(i64),
-    /// Una frazione della durata del brano (0 – 1).
+    /// A fraction of the track's duration (0 – 1).
     SeekFraction(f32),
-    /// Il volume (0 – 1). Non salva da solo: si salva con [`PlaybackCmd::Save`] (al rilascio dello
-    /// slider) o con il prossimo cambio che si salva.
+    /// The volume (0 – 1). It does not save by itself: it is saved with [`PlaybackCmd::Save`] (on release of the
+    /// slider) or with the next change that saves.
     Volume(f32),
     ToggleMute,
     Quality(Quality),
@@ -172,71 +172,71 @@ pub enum PlaybackCmd {
     EqualizerGains([f32; eq::BANDS]),
     Sleep(Option<SleepChoice>),
     Autoplay(bool),
-    /// Prepara la testata di un brano che forse si ascolterà (il mouse si è fermato su di lui).
+    /// Prepares the head of a track that may be listened to (the mouse has stopped on it).
     Warm(Uuid),
     Enqueue(Box<Track>),
     EnqueueNext(Box<Track>),
-    /// Toglie la voce in quella posizione dell'ordine di ascolto.
+    /// Removes the entry at that position of the listening order.
     Remove(usize),
     Clear,
-    /// Riordino a trascinamento: da una posizione dell'ordine di ascolto a un'altra.
+    /// Drag reorder: from one position of the listening order to another.
     Move {
         from: usize,
         to: usize,
     },
     ToggleShuffle,
     CycleRepeat,
-    /// `new` al posto del brano `old` in coda (ritrovato nel catalogo, o riletto dal server). Se
-    /// `restart` e il brano corrente è cambiato, riparte.
+    /// `new` in place of the track `old` in the queue (found again in the catalog, or reread from the server). If
+    /// `restart` and the current track has changed, it restarts.
     ReplaceTrack {
         old: Uuid,
         new: Box<Track>,
         restart: bool,
     },
-    /// Il brano `old` non si è ritrovato nel catalogo: se è il corrente, resta in errore.
+    /// The track `old` was not found again in the catalog: if it is the current one, it stays in error.
     HealFailed(Uuid),
-    /// Le copertine che il catalogo ha appena rimandato, per brano.
+    /// The covers the catalog has just sent back, per track.
     PatchCovers(Arc<HashMap<Uuid, Option<String>>>),
-    /// Si è dentro una jam: la coda è del gruppo, l'autoplay non aggiunge nulla da solo.
+    /// We are inside a jam: the queue belongs to the group, the autoplay adds nothing by itself.
     Group(bool),
-    /// Allinea la riproduzione al gruppo.
+    /// Aligns playback to the group.
     Align(Box<Align>),
-    /// Consegna alle impostazioni il volume e l'equalizzatore come stanno (rilascio dello slider).
+    /// Hands the volume and the equalizer to the settings as they are (release of the slider).
     Save,
-    /// Un frontend mostra (o smette di mostrare) il testo del brano: il core lo carica solo finché
-    /// serve. Mandarlo di nuovo con `true` riprova un testo che non è arrivato.
+    /// A frontend shows (or stops showing) the track's text: the core loads it only while it is
+    /// needed. Sending it again with `true` retries a text that did not arrive.
     Lyrics(bool),
-    /// Riproduce un album dall'inizio: i suoi brani non sono nel feed per intero, il core li chiede
-    /// al server.
+    /// Plays an album from the beginning: its tracks are not in the feed in full, the core asks for them
+    /// of the server.
     PlayAlbum(Uuid),
-    /// Avvia una radio da un brano: lui, poi altri dello stesso artista e qualche brano da scoprire.
+    /// Starts a radio from a track: it, then others of the same artist and a few tracks to discover.
     StartRadio(Box<Track>),
-    /// Riproduce il mix in quella posizione del feed della Home.
+    /// Plays the mix at that position of the Home's feed.
     PlayMix(usize),
-    /// La copertina del brano in corso già decodificata, per la sessione multimediale di Android.
+    /// The current track's cover already decoded, for Android's media session.
     Artwork(Box<Artwork>),
 }
 
-/// Qualcosa che il frontend deve far sapere all'ascoltatore.
+/// Something the frontend must make known to the listener.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlaybackEvent {
-    /// Il timer di spegnimento ha fermato la musica.
+    /// The sleep timer has stopped the music.
     SleepStopped,
-    /// La riproduzione automatica ha aggiunto brani alla coda.
+    /// Automatic playback has added tracks to the queue.
     AutoplayAdded,
-    /// Lo spostamento nel brano non è riuscito.
+    /// Moving within the track did not succeed.
     SeekFailed,
-    /// Una radio è partita da questo brano.
+    /// A radio has started from this track.
     RadioStarted(Arc<Track>),
-    /// Un album è partito: le sue copertine si possono preparare.
+    /// An album has started: its covers can be prepared.
     AlbumStarted,
-    /// L'album chiesto non è arrivato.
+    /// The album asked for did not arrive.
     PlayFailed(AppError),
-    /// Il sistema ha chiesto di portare la finestra in primo piano (il widget del desktop).
+    /// The system asked to bring the window to the front (the desktop widget).
     Raise,
 }
 
-/// Il testo del brano che un frontend mostra.
+/// The track's text that a frontend shows.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum LyricsState {
     #[default]
@@ -246,36 +246,36 @@ pub enum LyricsState {
     Failed(AppError),
 }
 
-/// Il testo di `track` e a che punto è: il frontend lo mostra se `track` è il brano in corso.
+/// The text of `track` and where it has got to: the frontend shows it if `track` is the current track.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LyricsView {
     pub track: Option<Uuid>,
     pub state: LyricsState,
 }
 
-/// L'ultimo [`PlaybackEvent`], con un numero d'ordine che cresce a ogni evento: il frontend lo
-/// mostra quando il numero è nuovo.
+/// The latest [`PlaybackEvent`], with a sequence number that grows with each event: the frontend
+/// shows it when the number is new.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Raised {
     pub seq: u64,
     pub event: PlaybackEvent,
 }
 
-/// Ciò che i frontend vedono del dominio.
+/// What the frontends see of the domain.
 #[derive(Debug, Clone, Default)]
 pub struct PlaybackView {
     pub state: PlaybackState,
-    /// Dove si trova il brano e se scorre. La posizione di adesso è `clock.at(Instant::now())`.
+    /// Where the track is and whether it runs. The position now is `clock.at(Instant::now())`.
     pub clock: Clock,
-    /// Cresce a ogni caricamento: ogni brano che parte ha il suo numero.
+    /// Grows at each load: each track that starts has its number.
     pub generation: u64,
-    /// Il numero del caricamento che è partito per ultimo (0 se nessuno): cambia quando un brano
-    /// comincia a suonare davvero.
+    /// The number of the load that started last (0 if none): it changes when a track
+    /// really starts playing.
     pub started: u64,
-    /// Cresce a ogni spostamento nel brano (seek, riparti da capo, allineamento al gruppo): chi
-    /// tiene un secondo orologio (il videoclip, i controlli del sistema) si riallinea quando cambia.
+    /// Grows at each move within the track (seek, restart from the beginning, alignment to the group): whoever
+    /// keeps a second clock (the music video, the system's controls) realigns when it changes.
     pub seeks: u64,
-    /// Il volume (0 – 1); 0 mentre è muto.
+    /// The volume (0 – 1); 0 while muted.
     pub volume: f32,
     pub muted: bool,
     pub quality: Quality,
@@ -283,12 +283,12 @@ pub struct PlaybackView {
     pub autoplay: bool,
     pub sleep: Option<SleepTimer>,
     pub queue: Arc<Queue>,
-    /// Il brano in corso è già stato contato negli ascolti.
+    /// The current track has already been counted in the plays.
     pub play_counted: bool,
     pub event: Option<Raised>,
-    /// Il testo del brano, caricato solo mentre un frontend lo chiede ([`PlaybackCmd::Lyrics`]).
+    /// The track's text, loaded only while a frontend asks for it ([`PlaybackCmd::Lyrics`]).
     pub lyrics: LyricsView,
-    /// Perché l'uscita audio non si è aperta all'avvio.
+    /// Why the audio output did not open at startup.
     pub device_error: Option<AppError>,
 }
 
@@ -297,30 +297,30 @@ impl PlaybackView {
         self.state.is_playing()
     }
 
-    /// C'è un brano che suona o è in pausa.
+    /// There is a track playing or paused.
     pub fn is_active(&self) -> bool {
         self.state.is_active()
     }
 
-    /// La posizione del brano a `now`.
+    /// The track's position at `now`.
     pub fn position(&self, now: Instant) -> Duration {
         self.clock.at(now)
     }
 }
 
-/// I timer del dominio.
+/// The domain's timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Timer {
-    /// Il battito: legge la posizione e lo stato dell'audio. Armato solo mentre suona.
+    /// The tick: reads the audio's position and state. Armed only while playing.
     Tick,
 }
 
-/// I lavori asincroni del dominio (rete), che l'host esegue sul runtime.
+/// The domain's async jobs (network), which the host runs on the runtime.
 #[derive(Debug)]
 pub(crate) enum Job {
-    /// Apre il brano per l'ascolto progressivo (con il rinnovo dell'URL scaduto, `api::with_fresh_url`).
-    /// Con `local`, il file scaricato sul dispositivo ha la precedenza: se non si apre (manca, pesa
-    /// diverso) si ripiega sulla rete e l'esito lo dice in `lost`.
+    /// Opens the track for progressive listening (with the renewal of the expired URL, `api::with_fresh_url`).
+    /// With `local`, the file downloaded to the device takes precedence: if it does not open (it is missing, or
+    /// weighs differently) it falls back to the network, and the outcome says so in `lost`.
     Load {
         api: Result<ApiClient, AppError>,
         track_id: Uuid,
@@ -328,22 +328,22 @@ pub(crate) enum Job {
         generation: u64,
         local: Option<LocalFile>,
     },
-    /// Prepara un brano: solo la testata, o per intero (il prossimo della coda, a fine brano).
+    /// Prepares a track: only the head, or the whole (the next of the queue, at the end of the track).
     Warm { api: Result<ApiClient, AppError>, track_id: Uuid, quality: Quality, whole: bool },
-    /// Altri brani dell'artista, a fine coda.
+    /// Other tracks of the artist, at the end of the queue.
     Autoplay { api: Result<ApiClient, AppError>, artist: Uuid },
-    /// Il testo di un brano.
+    /// A track's text.
     Lyrics { api: Result<ApiClient, AppError>, track_id: Uuid },
-    /// I brani di un album da riprodurre. `ticket` dice di quale richiesta è la risposta.
+    /// The tracks of an album to play. `ticket` says which request the reply belongs to.
     Album { api: Result<ApiClient, AppError>, id: Uuid, ticket: u64 },
-    /// L'artista di una radio: i suoi brani sono la parte «stessa voce» della coda.
+    /// The artist of a radio: their tracks are the "same voice" part of the queue.
     Radio { api: Result<ApiClient, AppError>, start: Box<Track>, ticket: u64 },
 }
 
-/// L'esito di un [`Job`], che torna al dominio.
+/// The outcome of a [`Job`], which goes back to the domain.
 #[derive(Debug)]
 pub(crate) enum Done {
-    /// `lost`: il file scaricato che si doveva suonare non era più quello dell'indice.
+    /// `lost`: the downloaded file that had to be played was no longer the one in the index.
     Loaded {
         generation: u64,
         result: Result<StreamBuffer, AppError>,
@@ -370,7 +370,7 @@ pub(crate) enum Done {
     },
 }
 
-/// Un'operazione sull'uscita audio, che l'host esegue sul thread del core.
+/// An operation on the audio output, which the host runs on the core's thread.
 #[derive(Debug)]
 pub(crate) enum AudioOp {
     Play {
@@ -383,16 +383,16 @@ pub(crate) enum AudioOp {
     Seek(Duration),
     Volume(f32),
     Equalizer(eq::Settings),
-    /// Legge la posizione, se il brano è finito e se un seek è fallito.
+    /// Reads the position, whether the track has ended and whether a seek has failed.
     Poll,
 }
 
-/// Ciò che l'uscita audio risponde.
+/// What the audio output answers.
 #[derive(Debug)]
 pub(crate) enum AudioFact {
-    /// Il brano è partito, o l'uscita non l'ha aperto.
+    /// The track has started, or the output did not open it.
     Started(Result<(), AppError>),
-    /// La posizione vera dopo una pausa.
+    /// The true position after a pause.
     Position(Duration),
     Polled {
         position: Duration,
@@ -401,8 +401,8 @@ pub(crate) enum AudioFact {
     },
 }
 
-/// Esegue `op` sull'uscita `audio` (assente se non c'è la scheda audio). Sta qui perché lo usano
-/// l'host e il core sincrono dei test.
+/// Runs `op` on the output `audio` (absent if there is no sound card). It is here because the
+/// host and the synchronous test core both use it.
 pub(crate) fn run_audio(audio: &mut Option<AudioOutput>, op: AudioOp) -> Option<AudioFact> {
     match (op, audio.as_mut()) {
         (AudioOp::Play { stream, volume }, Some(audio)) => {
@@ -442,7 +442,7 @@ pub(crate) fn run_audio(audio: &mut Option<AudioOutput>, op: AudioOp) -> Option<
     }
 }
 
-/// Il brano del gruppo da raggiungere quando il suo audio parte.
+/// The group's track to reach when its audio starts.
 #[derive(Debug, Clone, Copy)]
 struct Target {
     track: Uuid,
@@ -450,64 +450,64 @@ struct Target {
     playing: bool,
 }
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug)]
 pub(crate) struct Playback {
     pub(crate) view: Arc<PlaybackView>,
     api: Result<ApiClient, AppError>,
-    /// Il backend scelto che ha dato `api`: se cambia nelle impostazioni, `api` si rifà.
+    /// The chosen backend that gave `api`: if it changes in the settings, `api` is made again.
     server: Option<String>,
-    /// I brani recenti del catalogo (da cui nasce il feed della Home): il serbatoio dei brani di
-    /// riserva per la riproduzione automatica.
+    /// The catalog's recent tracks (from which the Home's feed comes): the store of spare tracks for the
+    /// automatic playback.
     pool: Option<Arc<[Track]>>,
     warm: WarmCache,
-    /// L'ultimo brano suonato, con la sua qualità: si riascolta dal buffer, senza riscaricarlo.
+    /// The last track played, with its quality: it is listened to again from the buffer, without downloading it again.
     cached: Option<(Uuid, Quality, StreamBuffer)>,
-    /// Il brano che si sta avviando sull'uscita audio.
+    /// The track starting on the audio output.
     starting: Option<(Uuid, Quality, StreamBuffer)>,
-    /// I file scaricati da cui suonare, dal dominio dei download: un brano che ha il suo file si
-    /// suona da lì, senza rete.
+    /// The downloaded files to play from, from the downloads domain: a track that has its file
+    /// plays from there, without network.
     local: Arc<HashMap<Uuid, LocalFile>>,
-    /// I file scaricati che non si sono potuti suonare, da dire ai download (`take_lost_files`).
+    /// The downloaded files that could not be played, to tell the downloads (`take_lost_files`).
     lost_files: Vec<(Uuid, LostReason)>,
-    /// Il volume di prima del muto.
+    /// The volume from before the mute.
     before_mute: Option<f32>,
     autoplay_busy: Option<u64>,
     group: bool,
     healing: HashSet<Uuid>,
-    /// I brani che il server non ha più, da far ritrovare al catalogo (`take_heal`): lui risponde
-    /// con `ReplaceTrack` o `HealFailed`.
+    /// The tracks the server no longer has, for the catalog to find again (`take_heal`): it answers
+    /// with `ReplaceTrack` or `HealFailed`.
     heal: Vec<Arc<Track>>,
-    /// I brani appena contati come ascoltati, da dire al dominio sociale (`take_listens`): il suo
-    /// profilo li manda al server, se c'è un accesso in quel momento.
+    /// The tracks just counted as listened to, to tell the social domain (`take_listens`): its
+    /// profile sends them to the server, if there is a sign-in at that moment.
     listens: Vec<Uuid>,
     target: Option<Target>,
     /// Where to resume the current entry after a restart (read from `config.json`, or kept at
     /// shutdown). Only «play» on the stopped entry uses it; starting anything else forgets it.
     resume: Option<(Uuid, Duration)>,
-    /// La posizione dell'audio al battito precedente: il tempo ascoltato è la differenza.
+    /// The audio's position at the previous tick: the listening time is the difference.
     last_polled: Duration,
-    /// Millisecondi ascoltati che la libreria non ha ancora.
+    /// Milliseconds listened to that the library does not have yet.
     listened_ms: u64,
     ticking: bool,
-    /// Un campo di `config.json` è cambiato e le impostazioni non l'hanno ancora (`take_persist`).
+    /// A `config.json` field has changed and the settings have not taken it yet (`take_persist`).
     persist: bool,
     seed: u64,
     events: u64,
-    /// L'ora del sistema all'avvio, in secondi dal 1970, e il primo istante visto: l'ora di un
-    /// ascolto contato si ricava da qui, perché il riduttore non legge l'orologio.
+    /// The system time at startup, in seconds since 1970, and the first instant seen: the time of a
+    /// counted listen is derived from here, because the reducer does not read the clock.
     unix: u64,
     origin: Option<Instant>,
-    /// Ciò che il dominio chiede alla libreria (ascolti, brani sostituiti): lo smista `CoreState`.
+    /// What the domain asks of the library (plays, replaced tracks): `CoreState` sorts it out.
     library: Vec<LibraryCmd>,
-    /// Un frontend mostra il testo.
+    /// A frontend shows the text.
     lyrics_wanted: bool,
-    /// Il numero dell'ultima richiesta di un album o di una radio: la risposta di una richiesta
-    /// superata (un'altra scelta nel frattempo) si ignora.
+    /// The number of the last request of an album or a radio: the reply of a superseded request
+    /// (another choice in the meantime) is ignored.
     ticket: u64,
-    /// Il feed della Home, da cui vengono i mix.
+    /// The Home's feed, from which the mixes come.
     feed: Option<Arc<Feed>>,
-    /// Ciò che il sistema e Discord mostrano.
+    /// What the system and Discord show.
     system: System,
 }
 
@@ -518,7 +518,7 @@ impl Default for Playback {
     }
 }
 
-/// Il passo successivo di un generatore SplitMix64: da un seme ne esce un altro, senza orologio.
+/// The next step of a SplitMix64 generator: from one seed another comes out, with no clock.
 fn next_seed(seed: u64) -> u64 {
     let mut z = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -527,7 +527,7 @@ fn next_seed(seed: u64) -> u64 {
 }
 
 impl Playback {
-    /// Il dominio con i campi letti all'avvio. `seed` e `unix` (secondi dal 1970) li sceglie l'host.
+    /// The domain with the fields read at startup. `seed` and `unix` (seconds since 1970) are chosen by the host.
     pub(crate) fn new(fields: PlaybackFields, server: Option<String>, seed: u64, unix: u64) -> Self {
         let resume = fields
             .queue
@@ -578,14 +578,14 @@ impl Playback {
         }
     }
 
-    /// L'uscita audio non si è aperta: la vista lo dice, e il primo brano riceve questo errore.
+    /// The audio output did not open: the view says so, and the first track receives this error.
     pub(crate) fn set_device_error(&mut self, error: Option<AppError>) {
         if self.view.device_error != error {
             Arc::make_mut(&mut self.view).device_error = error;
         }
     }
 
-    /// Il backend scelto nelle impostazioni è cambiato: il client HTTP si rifà.
+    /// The backend chosen in the settings has changed: the HTTP client is made again.
     pub(crate) fn set_server(&mut self, server: &Option<String>) {
         if self.server != *server {
             self.server.clone_from(server);
@@ -604,8 +604,8 @@ impl Playback {
         }
     }
 
-    /// I campi di `config.json` di questo dominio come stanno adesso: il volume è quello di prima
-    /// del muto.
+    /// The `config.json` fields of this domain as they are now: the volume is the one from before
+    /// the mute.
     pub(crate) fn fields(&self, now: Instant) -> PlaybackFields {
         PlaybackFields {
             volume: self.before_mute.unwrap_or(self.view.volume),
@@ -631,53 +631,53 @@ impl Playback {
         }
     }
 
-    /// La riproduzione è in un gruppo (una jam): per i test della jam.
+    /// Playback is in a group (a jam): for the jam's tests.
     #[cfg(test)]
     pub(crate) fn grouped(&self) -> bool {
         self.group
     }
 
-    /// Dice se c'è qualcosa da consegnare alle impostazioni, e lo azzera.
+    /// Says whether there is something to hand to the settings, and resets it.
     pub(crate) fn take_persist(&mut self) -> bool {
         std::mem::take(&mut self.persist)
     }
 
-    /// Ciò che il dominio chiede alla libreria, e lo svuota.
+    /// What the domain asks of the library, and empties it.
     pub(crate) fn take_library(&mut self) -> Vec<LibraryCmd> {
         std::mem::take(&mut self.library)
     }
 
-    /// I file scaricati da cui suonare, dal dominio dei download.
+    /// The downloaded files to play from, from the downloads domain.
     pub(crate) fn set_local(&mut self, local: &Arc<HashMap<Uuid, LocalFile>>) {
         if !Arc::ptr_eq(&self.local, local) {
             self.local = Arc::clone(local);
         }
     }
 
-    /// I file scaricati che non si sono potuti suonare, e li svuota: i download li segnano persi.
+    /// The downloaded files that could not be played, and empties them: the downloads mark them lost.
     pub(crate) fn take_lost_files(&mut self) -> Vec<(Uuid, LostReason)> {
         std::mem::take(&mut self.lost_files)
     }
 
-    /// I brani appena contati come ascoltati, e li svuota: il profilo li manda al server.
+    /// The tracks just counted as listened to, and empties them: the profile sends them to the server.
     pub(crate) fn take_listens(&mut self) -> Vec<Uuid> {
         std::mem::take(&mut self.listens)
     }
 
-    /// I brani che il server non ha più, e li svuota: il catalogo li ritrova.
+    /// The tracks the server no longer has, and empties them: the catalog finds them again.
     pub(crate) fn take_heal(&mut self) -> Vec<Arc<Track>> {
         std::mem::take(&mut self.heal)
     }
 
-    /// Il feed della Home è cambiato: da lì vengono i mix.
+    /// The Home's feed has changed: the mixes come from there.
     pub(crate) fn set_feed(&mut self, feed: &Arc<Feed>) {
         if !self.feed.as_ref().is_some_and(|held| Arc::ptr_eq(held, feed)) {
             self.feed = Some(Arc::clone(feed));
         }
     }
 
-    /// L'impostazione di Discord (interruttore e app) letta dalle impostazioni: se cambia accende o
-    /// spegne il collegamento.
+    /// The Discord setting (switch and app) read from the settings: if it changes it turns the link on or
+    /// off.
     pub(crate) fn set_discord(
         &mut self,
         presence: bool,
@@ -690,14 +690,14 @@ impl Playback {
         }
     }
 
-    /// Il collegamento multimediale del sistema è pronto: gli si dice ciò che suona.
+    /// The system's media link is ready: it is told what plays.
     pub(crate) fn media_ready(&mut self, now: Instant, effects: &mut Vec<Effect>) {
         self.system.ready();
         self.sync(now, effects);
     }
 
-    /// Un comando arrivato dal sistema (tasti multimediali, widget del desktop, cuffie): diventa il
-    /// comando che l'ascoltatore avrebbe dato dall'interfaccia.
+    /// A command arrived from the system (media keys, desktop widget, headphones): it becomes the
+    /// command the listener would give from the interface.
     pub(crate) fn media(&mut self, event: media::Event, now: Instant, effects: &mut Vec<Effect>) {
         use media::Event;
         let playing = self.view.is_playing();
@@ -950,12 +950,12 @@ impl Playback {
                 self.loaded(generation, result, effects);
             }
             Done::Warmed { track_id, quality, result } => {
-                // Se non riesce, il brano si apre normalmente quando parte.
+                // If it does not succeed, the track opens normally when it starts.
                 self.warm.finish(track_id, quality, result.ok());
             }
             Done::Autoplay(result) => self.autoplay_loaded(result.map(|page| *page), now, effects),
             Done::Lyrics { track_id, result } => {
-                // Il testo di un brano già passato non si mostra.
+                // The text of a track already past is not shown.
                 if self.view.lyrics.track == Some(track_id) {
                     let state = match result {
                         Ok(text) => LyricsState::Ready(text),
@@ -981,7 +981,7 @@ impl Playback {
                 if ticket != self.ticket {
                     return self.sync(now, effects);
                 }
-                // Se l'artista non risponde la radio parte lo stesso, dal catalogo recente.
+                // If the artist does not answer, the radio starts anyway, from the recent catalog.
                 let own = result.map(|page| page.tracks).unwrap_or_default();
                 let seed = self.next_seed();
                 let queue = taste::radio(&start, &own, self.pool.as_deref().unwrap_or(&[]), RADIO_SIZE, seed);
@@ -1008,8 +1008,8 @@ impl Playback {
         self.sync(now, effects);
     }
 
-    /// Il core si ferma: l'audio tace, le connessioni dei brani caldi si chiudono e il tempo
-    /// ascoltato arriva alla libreria prima che le impostazioni scrivano l'ultima volta.
+    /// The core stops: the audio goes silent, the connections of the warm tracks close, and the listening time
+    /// reaches the library before the settings write for the last time.
     pub(crate) fn close(&mut self, now: Instant, effects: &mut Vec<Effect>) {
         // The last save keeps where the entry was, so the next start resumes it there.
         if self.view.is_active()
@@ -1024,15 +1024,15 @@ impl Playback {
         self.sync(now, effects);
     }
 
-    // ---------- Vista ----------
+    // ---------- View ----------
 
-    /// La vista da cambiare: copiata se un frontend tiene ancora la precedente. Si chiama solo
-    /// quando qualcosa cambia davvero.
+    /// The view to change: copied if a frontend still holds the previous one. It is called only
+    /// when something really changes.
     fn view_mut(&mut self) -> &mut PlaybackView {
         Arc::make_mut(&mut self.view)
     }
 
-    /// La coda da cambiare. Una coda che cambia si salva.
+    /// The queue to change. A queue that changes is saved.
     fn queue_mut(&mut self) -> &mut Queue {
         self.persist = true;
         Arc::make_mut(&mut self.view_mut().queue)
@@ -1061,15 +1061,15 @@ impl Playback {
         self.seed
     }
 
-    /// Dopo ogni ingresso: il battito, il testo del brano in corso e ciò che il sistema mostra.
+    /// After each input: the tick, the current track's text and what the system shows.
     fn sync(&mut self, now: Instant, effects: &mut Vec<Effect>) {
         self.sync_tick(effects);
         self.sync_lyrics(false, effects);
         self.system.sync(&self.view, now, effects);
     }
 
-    /// Carica il testo del brano in corso se un frontend lo mostra e non è già quello (o, con
-    /// `retry`, se non è arrivato). Chiamata a ogni ingresso: senza novità confronta e basta.
+    /// Loads the current track's text if a frontend shows it and it is not already that one (or, with
+    /// `retry`, if it did not arrive). Called at each input: without news it compares and that is all.
     fn sync_lyrics(&mut self, retry: bool, effects: &mut Vec<Effect>) {
         if !self.lyrics_wanted {
             return;
@@ -1084,20 +1084,20 @@ impl Playback {
         effects.push(Effect::Run(effect::Job::Playback(Job::Lyrics { api: self.api.clone(), track_id })));
     }
 
-    /// Una richiesta nuova di album o di radio: le risposte delle precedenti non valgono più.
+    /// A new request for an album or a radio: the replies of the earlier ones no longer count.
     fn next_ticket(&mut self) -> u64 {
         self.ticket += 1;
         self.ticket
     }
 
-    /// Sostituisce la coda con `tracks` e fa partire il primo.
+    /// Replaces the queue with `tracks` and starts the first.
     fn play_all(&mut self, tracks: Vec<Track>, now: Instant, effects: &mut Vec<Effect>) {
         let seed = self.next_seed();
         self.queue_mut().replace(tracks, 0, seed);
         self.start_current(now, effects);
     }
 
-    /// Il battito gira solo mentre suona: lo arma quando comincia, lo annulla quando finisce.
+    /// The tick runs only while playing: it arms it when it starts, cancels it when it ends.
     fn sync_tick(&mut self, effects: &mut Vec<Effect>) {
         let playing = self.view.is_playing();
         let key = TimerKey::Playback(Timer::Tick);
@@ -1110,15 +1110,15 @@ impl Playback {
         }
     }
 
-    /// L'ora di `now` in secondi dal 1970.
+    /// The time of `now` in seconds since 1970.
     fn wall(&self, now: Instant) -> u64 {
         let origin = self.origin.unwrap_or(now);
         self.unix.saturating_add(now.saturating_duration_since(origin).as_secs())
     }
 
-    // ---------- Transizioni ----------
+    // ---------- Transitions ----------
 
-    /// Carica e avvia il brano corrente della coda.
+    /// Loads and starts the queue's current track.
     fn start_current(&mut self, now: Instant, effects: &mut Vec<Effect>) {
         let Some(track_id) = self.view.queue.current().map(|t| t.id) else {
             self.stop(now, effects);
@@ -1127,8 +1127,8 @@ impl Playback {
         effects.push(Effect::Audio(AudioOp::Stop));
         let generation = self.begin_loading(track_id, now);
         let quality = self.view.quality;
-        // Un brano scaricato sul dispositivo si suona dal suo file: ha la precedenza sul buffer di
-        // un ascolto precedente e sulla testata calda (che per lui non si prepara nemmeno).
+        // A track downloaded to the device plays from its file: it takes precedence over the buffer of an
+        // earlier listen and over the warm head (which for it is not even prepared).
         let local = self.local.get(&track_id).cloned();
         if local.is_none() {
             if let Some((cached_id, cached_quality, stream)) = &self.cached
@@ -1155,8 +1155,8 @@ impl Playback {
         })));
     }
 
-    /// Comincia un caricamento: restituisce il suo numero. Le risposte di caricamenti superati si
-    /// ignorano.
+    /// Starts a load: returns its number. The replies of superseded loads are
+    /// ignored.
     fn begin_loading(&mut self, track_id: Uuid, now: Instant) -> u64 {
         self.flush_listened();
         self.starting = None;
@@ -1170,7 +1170,7 @@ impl Playback {
         view.generation
     }
 
-    /// Il brano aperto del caricamento `generation` è arrivato, o non si è aperto.
+    /// The open track of load `generation` has arrived, or did not open.
     fn loaded(&mut self, generation: u64, result: Result<StreamBuffer, AppError>, effects: &mut Vec<Effect>) {
         if generation != self.view.generation {
             return;
@@ -1185,8 +1185,8 @@ impl Playback {
                 effects.push(Effect::Audio(AudioOp::Play { stream, volume: self.view.volume }));
             }
             Err(err) if err.is_not_found() => {
-                // Il server non ha più questo brano (database ricreato): il frontend lo ritrova nel
-                // catalogo ufficiale, una volta sola per brano.
+                // The server no longer has this track (database recreated): the frontend finds it again in the
+                // official catalog, once per track.
                 match self.view.queue.current().cloned().filter(|track| self.healing.insert(track.id)) {
                     Some(track) => self.heal.push(Arc::new(track)),
                     None => self.set_state(PlaybackState::Error(err.to_string())),
@@ -1196,13 +1196,13 @@ impl Playback {
         }
     }
 
-    /// L'uscita audio ha risposto alla richiesta di avviare il brano.
+    /// The audio output has answered the request to start the track.
     fn started(&mut self, result: Result<(), AppError>, now: Instant, effects: &mut Vec<Effect>) {
         let Some((track_id, quality, stream)) = self.starting.take() else { return };
         if let Err(err) = result {
             if stream.is_file() {
-                // Un file scaricato che non si decodifica (cambiato senza cambiare peso): lo si segna
-                // perso e il brano parte dalla rete, una volta sola (questo caricamento non ha `local`).
+                // A downloaded file that does not decode (changed without changing its weight): it is marked
+                // lost and the track starts from the network, once (this load has no `local`).
                 self.lost_files.push((track_id, LostReason::Changed));
                 let api = self.api.clone();
                 let generation = self.view.generation;
@@ -1218,7 +1218,7 @@ impl Playback {
             self.set_state(PlaybackState::Error(err.to_string()));
             return;
         }
-        // Il download del brano precedente, se non è finito, non serve più.
+        // The previous track's download, if it has not finished, is no longer needed.
         if let Some((previous_id, _, previous)) = self.cached.replace((track_id, quality, stream))
             && previous_id != track_id
             && !previous.is_complete()
@@ -1234,8 +1234,8 @@ impl Playback {
             self.library.push(LibraryCmd::RememberListen(track));
         }
         self.warm_ahead(effects);
-        // Un brano del gruppo: ci si sposta sulla posizione condivisa e, se il gruppo è in pausa, ci
-        // si ferma lì. Un brano diverso da quello atteso fa scartare il riferimento.
+        // A track of the group: one moves to the shared position and, if the group is paused, one
+        // stops there. A track different from the one expected discards the reference.
         if let Some(target) = self.target.take()
             && self.view.queue.current().is_some_and(|t| t.id == target.track)
         {
@@ -1250,7 +1250,7 @@ impl Playback {
         match self.view.state {
             PlaybackState::Playing => self.pause(now, effects),
             PlaybackState::Paused => {
-                // Un timer a tempo scaduto mentre la musica era ferma non deve fermarla alla ripresa.
+                // A timer expired at a time while the music was stopped must not stop it at the resume.
                 if self.view.sleep.is_some_and(|timer| timer.expired(now)) {
                     self.view_mut().sleep = None;
                 }
@@ -1287,14 +1287,14 @@ impl Playback {
         effects.push(Effect::Audio(AudioOp::Stop));
         self.flush_listened();
         self.starting = None;
-        // Una richiesta di brani per la riproduzione automatica ancora in volo non vale più: la
-        // generazione 0 non è mai quella di un brano.
+        // A track request for automatic playback still in flight no longer counts: generation 0 is never a track's.
+        // generation 0 is never a track's.
         if let Some(pending) = &mut self.autoplay_busy {
             *pending = 0;
         }
         self.set_state(PlaybackState::Stopped);
-        // Già fermo e a zero: l'orologio non si riancora, altrimenti un comando senza effetto
-        // pubblicherebbe una vista nuova per niente.
+        // Already stopped and at zero: the clock is not re-anchored, otherwise a command with no effect
+        // would publish a new view for nothing.
         if self.view.clock.playing || !self.view.clock.position.is_zero() {
             self.set_clock(Clock::paused(Duration::ZERO, now));
         }
@@ -1337,9 +1337,9 @@ impl Playback {
         }
     }
 
-    // ---------- Gruppo (jam) ----------
+    // ---------- Group (jam) ----------
 
-    /// Allinea la riproduzione al gruppo: stesso brano e stessa posizione, oppure si cambia brano.
+    /// Aligns playback to the group: same track and same position, or the track changes.
     fn align(&mut self, align: Align, now: Instant, effects: &mut Vec<Effect>) {
         let Align { tracks, index, position, playing } = align;
         if let Some(tracks) = tracks {
@@ -1350,7 +1350,7 @@ impl Playback {
         }
         let Some(track) = self.view.queue.entries().nth(index).map(|(_, t)| t.id) else { return };
         let target = Target { track, position, playing };
-        // Il brano è già in caricamento: basta ricordare la posizione, senza ricominciare.
+        // The track is already loading: it is enough to remember the position, without starting again.
         if let PlaybackState::Loading { track_id } = self.view.state
             && track_id == track
         {
@@ -1374,7 +1374,7 @@ impl Playback {
         }
     }
 
-    // ---------- Battito ----------
+    // ---------- Tick ----------
 
     fn polled(
         &mut self,
@@ -1394,8 +1394,8 @@ impl Playback {
             self.track_ended(now, effects);
             return;
         }
-        // Il tempo ascoltato segue la posizione vera dell'audio: un seek è un salto, non ascolto, e
-        // un'uscita che non scorre (nessun campione letto) non conta niente.
+        // Listened time follows the audio's real position: a seek is a jump, not listening, and
+        // an output that does not advance (no sample read) counts for nothing.
         let heard = position.checked_sub(self.last_polled).filter(|step| *step <= LISTENED_STEP);
         self.last_polled = position;
         self.listened_ms = self.listened_ms.saturating_add(heard.map_or(0, |step| step.as_millis() as u64));
@@ -1414,7 +1414,7 @@ impl Playback {
         }
     }
 
-    /// Un brano conta come ascoltato dopo 30 secondi (o metà, se è più corto): saltarlo non lo conta.
+    /// A track counts as listened to after 30 seconds (or half, if it is shorter): skipping it does not count it.
     fn count_play(&mut self, position: Duration, now: Instant) {
         if self.view.play_counted {
             return;
@@ -1430,7 +1430,7 @@ impl Playback {
         self.library.push(LibraryCmd::CountPlay { track, at });
     }
 
-    /// Il timer a tempo è scaduto: `true` se va fermata la musica.
+    /// The timed timer has expired: `true` if the music must stop.
     fn sleep_due(&mut self, now: Instant) -> bool {
         if !self.view.sleep.is_some_and(|timer| timer.expired(now)) {
             return false;
@@ -1439,12 +1439,12 @@ impl Playback {
         true
     }
 
-    /// Il brano è finito: passa al successivo, o alla riproduzione automatica a fine coda.
+    /// The track has ended: it goes to the next one, or to automatic playback at the end of the queue.
     fn track_ended(&mut self, now: Instant, effects: &mut Vec<Effect>) {
         if self.autoplay_busy.is_some() {
             return;
         }
-        // Il timer era «alla fine del brano»: si ferma qui, e Play riparte dal brano dopo.
+        // The timer was "at the end of the track": it stops here, and Play restarts from the next track.
         if self.view.sleep.is_some_and(|timer| timer.choice == SleepChoice::EndOfTrack) {
             self.view_mut().sleep = None;
             self.stop(now, effects);
@@ -1459,15 +1459,15 @@ impl Playback {
         }
     }
 
-    /// La coda è finita: se la riproduzione automatica è attiva, chiede altri brani dell'artista.
-    /// Intanto l'audio è finito, e lo stato lo dice: il brano non suona più.
+    /// The queue has ended: if automatic playback is on, it asks for other tracks of the artist.
+    /// Meanwhile the audio has ended, and the state says so: the track no longer plays.
     fn queue_ended(&mut self, now: Instant, effects: &mut Vec<Effect>) {
         let Some(track) = self.view.queue.current() else {
             self.stop(now, effects);
             return;
         };
         let (artist, track_id) = (track.artist.id, track.id);
-        // In una jam la coda è del gruppo: non si aggiunge nulla da soli.
+        // In a jam the queue belongs to the group: nothing is added by itself.
         if !self.view.autoplay || self.group {
             self.stop(now, effects);
             return;
@@ -1487,7 +1487,7 @@ impl Playback {
         effects: &mut Vec<Effect>,
     ) {
         let Some(asked) = self.autoplay_busy.take() else { return };
-        // Nel frattempo si è scelto altro: i brani arrivati non servono più.
+        // Meanwhile something else was chosen: the tracks that arrived are no longer needed.
         if asked != self.view.generation {
             return;
         }
@@ -1495,7 +1495,7 @@ impl Playback {
         let pool: Vec<Track> = result.map(|page| page.tracks).unwrap_or_default();
         let mut fresh: Vec<Track> = pool.into_iter().filter(|t| !queued.contains(&t.id)).collect();
         if fresh.is_empty() {
-            // L'artista non ha altro: si passa alle uscite recenti del catalogo.
+            // The artist has nothing else: it goes to the catalog's recent releases.
             let current = self.view.queue.current().map(|t| t.artist.id);
             fresh = self
                 .pool
@@ -1528,10 +1528,10 @@ impl Playback {
         }
     }
 
-    // ---------- Brani caldi ----------
+    // ---------- Warm tracks ----------
 
-    /// Negli ultimi secondi di un brano fa scaricare per intero il successivo della coda (la sua
-    /// testata è già calda), così parte senza attesa.
+    /// In the last seconds of a track it has the next one of the queue downloaded whole (its head
+    /// is already warm), so it starts without waiting.
     fn prefetch_next(&mut self, position: Duration, effects: &mut Vec<Effect>) {
         let (Some(current), Some(next)) = (self.view.queue.current(), self.view.queue.peek_next()) else {
             return;
@@ -1551,12 +1551,12 @@ impl Playback {
         effects.push(Effect::Run(effect::Job::Playback(Job::Warm { api, track_id, quality, whole: true })));
     }
 
-    /// Prepara la testata di un brano che forse si ascolterà. Non fa nulla se è già caldo o in apertura.
+    /// Prepares the head of a track that may be listened to. Does nothing if it is already warm or being opened.
     fn warm_track(&mut self, track_id: Uuid, effects: &mut Vec<Effect>) {
         let quality = self.view.quality;
         let already_playing =
             self.cached.as_ref().is_some_and(|(id, cached, _)| *id == track_id && *cached == quality);
-        // Un brano sul dispositivo non ha bisogno di una testata calda dalla rete.
+        // A track on the device does not need a warm head from the network.
         if already_playing || self.local.contains_key(&track_id) || !self.warm.begin(track_id, quality) {
             return;
         }
@@ -1564,7 +1564,7 @@ impl Playback {
         effects.push(Effect::Run(effect::Job::Playback(Job::Warm { api, track_id, quality, whole: false })));
     }
 
-    /// Mentre un brano suona, prepara i prossimi della coda.
+    /// While a track plays, prepares the next ones of the queue.
     fn warm_ahead(&mut self, effects: &mut Vec<Effect>) {
         let ahead: Vec<Uuid> =
             self.view.queue.upcoming().take(WARM_AHEAD).map(|(_, track)| track.id).collect();
@@ -1573,9 +1573,9 @@ impl Playback {
         }
     }
 
-    // ---------- Ascolti ----------
+    // ---------- Plays ----------
 
-    /// Il tempo ascoltato che la libreria non ha ancora passa a lei.
+    /// The listening time that the library does not have yet goes to it.
     fn flush_listened(&mut self) {
         if self.listened_ms > 0 {
             self.library.push(LibraryCmd::Listen(std::mem::take(&mut self.listened_ms)));
@@ -1589,7 +1589,7 @@ impl Job {
             Self::Load { api, track_id, quality, generation, local } => {
                 let mut lost = None;
                 if let Some(file) = local {
-                    // Il file si apre fuori dal runtime (legge il disco).
+                    // The file opens outside the runtime (it reads the disk).
                     let opened = tokio::task::spawn_blocking(move || offline::open_local(&file))
                         .await
                         .unwrap_or(Err(None));
@@ -1621,7 +1621,7 @@ impl Job {
             }
             Self::Lyrics { api, track_id } => {
                 let result = match api {
-                    // Il testo si interpreta qui, sul runtime, non nella vista.
+                    // The text is interpreted here, on the runtime, not in the view.
                     Ok(api) => api.lyrics(track_id).await.map(|lyrics| Arc::new(Text::of(&lyrics))),
                     Err(err) => Err(err),
                 };
@@ -1644,7 +1644,7 @@ impl Job {
         }
     }
 
-    /// Se il lavoro va perso, l'esito è un errore di rete: il dominio non resta ad aspettare.
+    /// If the job is lost, the outcome is a network error: the domain does not keep waiting.
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::Load { generation, .. } => {
@@ -1665,9 +1665,9 @@ impl Job {
     }
 }
 
-/// I passi 0 di questo dominio (`characterization/playback.rs` del client), portati sul riduttore: il
-/// tempo è finto (`now` lo fa avanzare il test), l'audio lo simula chi guida (le `AudioOp` si
-/// raccolgono, le `AudioFact` si consegnano a mano) e la rete non c'è (i `Job` si raccolgono).
+/// This domain's step 0 (`characterization/playback.rs` of the client), brought to the reducer: the
+/// time is fake (`now` is advanced by the test), the audio is simulated by whoever drives it (the `AudioOp`s
+/// are collected, the `AudioFact`s are handed over by hand) and there is no network (the `Job`s are collected).
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1694,15 +1694,15 @@ mod tests {
         Duration::from_millis(ms)
     }
 
-    /// Il dominio con il tempo e l'audio in mano al test.
+    /// The domain with the time and the audio in the test's hands.
     struct Rig {
         playback: Playback,
         now: Instant,
         ops: Vec<AudioOp>,
         jobs: Vec<Job>,
-        /// Il battito è armato.
+        /// The tick is armed.
         armed: bool,
-        /// Quante volte è stato armato.
+        /// How many times it has been armed.
         arms: u32,
         media: Vec<MediaOp>,
         discord: Vec<DiscordOp>,
@@ -1774,7 +1774,7 @@ mod tests {
             self.view().queue.current().map(|t| t.id)
         }
 
-        /// I caricamenti chiesti dall'ultima volta, come (brano, generazione).
+        /// The loads asked since last time, as (track, generation).
         fn loads(&mut self) -> Vec<(Uuid, u64)> {
             let jobs = std::mem::take(&mut self.jobs);
             jobs.iter()
@@ -1790,18 +1790,18 @@ mod tests {
             ops.iter().filter(|op| matches!(op, AudioOp::Play { .. })).count()
         }
 
-        /// Il server manda il brano del caricamento `generation`.
+        /// The server sends the track of load `generation`.
         fn load_arrives(&mut self, generation: u64) {
             self.done(Done::Loaded { generation, result: Ok(StreamBuffer::new()), lost: None });
         }
 
-        /// L'uscita audio ha aperto il brano.
+        /// The audio output has opened the track.
         fn started(&mut self) {
             assert_eq!(self.plays_asked(), 1, "una sola richiesta di Play");
             self.audio(AudioFact::Started(Ok(())));
         }
 
-        /// `tracks` da `start`, caricati e partiti.
+        /// `tracks` from `start`, loaded and started.
         fn play(&mut self, tracks: Vec<Track>, start: usize) {
             self.cmd(PlaybackCmd::Play { tracks: tracks.into(), start });
             let (_, generation) = self.loads().pop().expect("un caricamento");
@@ -1810,7 +1810,7 @@ mod tests {
             assert!(self.view().is_playing(), "{:?}", self.state());
         }
 
-        /// Scocca il battito: il core chiede la posizione dell'audio e questa risponde.
+        /// Fires the tick: the core asks for the audio's position and this answers.
         fn poll(&mut self, position: Duration, finished: bool) {
             let mut effects = Vec::new();
             self.playback.fire(Timer::Tick, self.now, &mut effects);
@@ -1820,7 +1820,7 @@ mod tests {
             self.audio(AudioFact::Polled { position, finished, seek_failed: false });
         }
 
-        /// Un battito ogni 250 ms fino a `until`, con l'audio che avanza come il tempo.
+        /// A tick every 250 ms up to `until`, with the audio advancing as the time does.
         fn listen_until(&mut self, from: Duration, until: Duration) {
             let mut at = from;
             while at < until {
@@ -1878,7 +1878,7 @@ mod tests {
         assert_eq!(second, first + 1, "ogni caricamento ha la sua generazione");
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(2) });
 
-        // Le risposte del caricamento superato, buone o cattive, arrivano tardi e non cambiano nulla.
+        // The replies of the superseded load, good or bad, arrive late and change nothing.
         rig.load_arrives(first);
         rig.done(Done::Loaded { generation: first, result: Err(AppError::Network), lost: None });
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(2) });
@@ -1894,7 +1894,7 @@ mod tests {
     #[test]
     fn play_from_stopped_loads_the_current_track() {
         let mut rig = Rig::new();
-        // La coda ripresa dall'ultima sessione, ferma sul secondo brano.
+        // The queue resumed from the last session, stopped on the second track.
         let mut config = CoreConfig::default();
         Arc::make_mut(&mut config.queue).replace(vec![track(1, 4), track(2, 4)], 1, 7);
         rig.playback = Playback::new(config.playback(), None, 7, 1_000);
@@ -1906,12 +1906,12 @@ mod tests {
         assert_eq!(rig.view().queue.position(), Some(1));
         assert_eq!(rig.view().clock.at(rig.now), Duration::ZERO);
 
-        // Play durante il caricamento non fa nulla.
+        // Play during the loading does nothing.
         rig.cmd(PlaybackCmd::Toggle);
         assert_eq!((rig.state(), rig.view().generation), (PlaybackState::Loading { track_id: id(2) }, 1));
         assert!(rig.loads().is_empty());
 
-        // Dopo un errore, Play riprova lo stesso brano con un nuovo caricamento.
+        // After an error, Play retries the same track with a new load.
         rig.done(Done::Loaded { generation: 1, result: Err(AppError::Network), lost: None });
         assert_eq!(rig.state(), PlaybackState::Error(AppError::Network.to_string()));
         rig.cmd(PlaybackCmd::Toggle);
@@ -1997,7 +1997,7 @@ mod tests {
         rig.cmd(PlaybackCmd::Toggle);
         assert_eq!(rig.state(), PlaybackState::Paused);
         assert!(!rig.armed, "in pausa il core non si sveglia");
-        // L'uscita dice dov'è davvero: la pausa riancora l'orologio lì.
+        // The output says where it really is: the pause re-anchors the clock there.
         rig.audio(AudioFact::Position(millis(1_040)));
         rig.elapse(secs(5));
         assert_eq!(rig.view().clock.at(rig.now), millis(1_040), "in pausa la posizione non avanza");
@@ -2013,7 +2013,7 @@ mod tests {
 
     #[test]
     fn no_device_reports_the_device_error() {
-        // Senza scheda audio l'host risponde così a ogni Play (`run_audio` senza uscita).
+        // Without a sound card the host answers each Play this way (`run_audio` without an output).
         let mut none = None;
         let fact = run_audio(&mut none, AudioOp::Play { stream: StreamBuffer::new(), volume: 1.0 });
         let Some(AudioFact::Started(Err(AppError::AudioDevice))) = fact else { panic!("{fact:?}") };
@@ -2037,22 +2037,22 @@ mod tests {
         rig.cmd(PlaybackCmd::Play { tracks: vec![missing.clone(), track(2, 4)].into(), start: 0 });
         let generation = rig.loads()[0].1;
 
-        // Il server non ha più il brano: lo chiede al catalogo (il serbatoio del passaggio fra i
-        // domini), e intanto si resta in caricamento, senza errore.
+        // The server no longer has the track: it asks the catalog (the store of the passing between
+        // domains), and meanwhile it stays loading, without error.
         rig.done(Done::Loaded { generation, result: Err(not_found()), lost: None });
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(1) });
         let wanted = rig.playback.take_heal();
         assert_eq!(wanted.iter().map(|t| t.id).collect::<Vec<_>>(), [missing.id]);
         assert!(rig.playback.take_heal().is_empty(), "il serbatoio si svuota");
 
-        // Ritrovato con un altro identificatore: prende il suo posto in coda, e parte.
+        // Found again with another identifier: it takes its place in the queue, and starts.
         let found = track(9, 4);
         rig.cmd(PlaybackCmd::ReplaceTrack { old: missing.id, new: Box::new(found.clone()), restart: true });
         assert_eq!(rig.current(), Some(found.id));
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: found.id });
         assert_eq!(rig.view().generation, generation + 1);
 
-        // Un brano che non si ritrova resta in errore, e lo si cerca una volta sola per sessione.
+        // A track that is not found again stays in error, and it is searched for only once per session.
         let mut rig = Rig::new();
         rig.cmd(PlaybackCmd::Play { tracks: vec![missing.clone()].into(), start: 0 });
         let generation = rig.loads()[0].1;
@@ -2089,7 +2089,7 @@ mod tests {
         rig.elapse(millis(3_500));
         let generation = rig.view().generation;
 
-        // Oltre tre secondi «precedente» riparte da capo, sullo stesso brano e senza ricaricarlo.
+        // Beyond three seconds, "previous" restarts from the beginning, on the same track and without reloading it.
         rig.cmd(PlaybackCmd::Previous);
         assert_eq!(rig.view().queue.position(), Some(1));
         assert_eq!(rig.view().clock.at(rig.now), Duration::ZERO);
@@ -2098,7 +2098,7 @@ mod tests {
         assert!(rig.ops.iter().any(|op| matches!(op, AudioOp::Seek(at) if *at == Duration::ZERO)));
         assert_eq!(rig.view().seeks, 1, "il riparti da capo è uno spostamento");
 
-        // Entro tre secondi passa al brano prima.
+        // Within three seconds it goes to the previous track.
         rig.elapse(secs(1));
         rig.cmd(PlaybackCmd::Previous);
         assert_eq!(rig.view().queue.position(), Some(0));
@@ -2111,7 +2111,7 @@ mod tests {
         let mut rig = Rig::new();
         let quality = rig.view().quality;
         rig.play(vec![track(1, 4), track(2, 4)], 0);
-        // Partendo, il core prepara la testata del brano dopo.
+        // Starting, the core prepares the head of the next track.
         assert!(
             rig.jobs
                 .iter()
@@ -2121,13 +2121,13 @@ mod tests {
         );
         rig.jobs.clear();
 
-        // Il brano appena suonato si riascolta dal suo buffer: nessuna richiesta, l'audio riparte.
+        // The track just played is listened to again from its buffer: no request, the audio starts again.
         rig.cmd(PlaybackCmd::PlayAt(0));
         assert!(rig.loads().is_empty());
         rig.started();
         assert!(rig.view().is_playing());
 
-        // Un brano preparato in anticipo parte dalla sua testata calda, che esce dalla cache.
+        // A track prepared in advance starts from its warm head, which leaves the cache.
         rig.done(Done::Warmed { track_id: id(2), quality, result: Ok(StreamBuffer::new()) });
         assert!(!rig.playback.warm.wants(id(2), quality), "la testata è pronta");
         rig.cmd(PlaybackCmd::Next);
@@ -2138,7 +2138,7 @@ mod tests {
 
     #[test]
     fn the_next_track_is_released_or_fetched_whole_in_the_last_seconds() {
-        // La testata del prossimo è calda e ferma: negli ultimi secondi la si lascia scaricare.
+        // The next one's head is warm and idle: in the last seconds it is left to download.
         let mut rig = Rig::new();
         let quality = rig.view().quality;
         rig.play(vec![track(1, 60), track(2, 60)], 0);
@@ -2153,7 +2153,7 @@ mod tests {
         assert!(!head.is_held(), "negli ultimi 25 secondi il download continua");
         assert!(!rig.jobs.iter().any(|job| matches!(job, Job::Warm { .. })), "{:?}", rig.jobs);
 
-        // Se la testata non c'è (l'apertura è fallita), si chiede il brano per intero, una volta sola.
+        // If the head is not there (the opening failed), the whole track is asked for, once only.
         let mut rig = Rig::new();
         rig.play(vec![track(1, 60), track(2, 60)], 0);
         rig.done(Done::Warmed { track_id: id(2), quality, result: Err(AppError::Network) });
@@ -2178,7 +2178,7 @@ mod tests {
         assert_eq!(rig.view().queue.position(), Some(1));
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(2) });
         assert_eq!(rig.view().generation, generation + 1);
-        // Il tempo ascoltato fino al battito prima arriva alla libreria quando il brano cambia.
+        // The listened time up to the previous tick reaches the library when the track changes.
         assert!(matches!(rig.library().as_slice(), [LibraryCmd::Listen(750)]));
         assert!(!rig.armed, "in caricamento il core non si sveglia");
     }
@@ -2196,7 +2196,7 @@ mod tests {
         rig.poll(secs(1), true);
         assert_eq!(rig.view().queue.position(), Some(0), "resta sullo stesso brano");
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(1) }, "o meglio, riparte");
-        // Lo stesso brano riparte dal buffer in memoria, senza rete: il Play è già chiesto.
+        // The same track starts again from the buffer in memory, with no network: the Play is already asked.
         assert!(rig.loads().is_empty());
         rig.started();
         assert_eq!(rig.state(), PlaybackState::Playing);
@@ -2205,8 +2205,8 @@ mod tests {
         assert_eq!(rig.view().clock.at(rig.now), millis(500), "ricomincia da capo");
     }
 
-    /// BACKLOG 4: a fine coda con l'autoplay acceso, finché i brani arrivano lo stato non è più
-    /// `Playing` (l'audio è finito), e il battito si ferma.
+    /// BACKLOG 4: at the end of the queue with autoplay on, as long as tracks arrive the state is no longer
+    /// `Playing` (the audio has ended), and the tick stops.
     #[test]
     fn end_of_queue_asks_autoplay_once_and_is_not_playing_meanwhile() {
         let mut rig = Rig::new();
@@ -2216,19 +2216,19 @@ mod tests {
         rig.elapse(secs(1));
         rig.poll(secs(1), true);
 
-        // A fine coda si chiedono altri brani dello stesso artista.
+        // At the end of the queue other tracks of the same artist are asked for.
         assert!(
             matches!(rig.jobs.as_slice(), [Job::Autoplay { artist, .. }] if *artist == track(1, 1).artist.id)
         );
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(1) });
         assert!(!rig.armed, "il battito non gira più: nessuna seconda richiesta");
 
-        // La richiesta fallita, senza un catalogo recente da cui pescare, ferma la musica.
+        // The failed request, with no recent catalog to pick from, stops the music.
         rig.done(Done::Autoplay(Err(AppError::Network)));
         assert_eq!(rig.state(), PlaybackState::Stopped);
         assert!(rig.playback.autoplay_busy.is_none());
 
-        // Con dei brani nuovi, invece, si accodano (tolti quelli già in coda) e parte il primo.
+        // With new tracks, instead, they are queued (those already in the queue removed) and the first starts.
         let mut rig = Rig::new();
         rig.play(vec![track(1, 1)], 0);
         rig.jobs.clear();
@@ -2258,7 +2258,7 @@ mod tests {
         rig.play(vec![track(1, 1)], 0);
         rig.elapse(secs(1));
         rig.poll(secs(1), true);
-        // L'artista non ha altro: si passa alle uscite recenti di altri artisti.
+        // The artist has nothing else: it goes to the recent releases of other artists.
         rig.done(Done::Autoplay(Ok(Box::new(ArtistPage {
             id: track(1, 1).artist.id,
             name: String::new(),
@@ -2269,7 +2269,7 @@ mod tests {
         assert_eq!(rig.view().queue.len(), 2, "le uscite dello stesso artista restano fuori");
         assert_eq!(rig.current(), Some(id(5)));
 
-        // Si sceglie altro mentre i brani arrivano: la risposta tardiva non fa niente.
+        // Another choice is made while the tracks arrive: the late reply does nothing.
         let mut rig = Rig::new();
         rig.play(vec![track(1, 1)], 0);
         rig.elapse(secs(1));
@@ -2285,7 +2285,7 @@ mod tests {
         }))));
         assert_eq!((rig.state(), rig.view().queue.len()), (state, 1));
 
-        // In una jam la coda è del gruppo: l'autoplay non chiede niente.
+        // In a jam the queue belongs to the group: autoplay asks for nothing.
         let mut rig = Rig::new();
         rig.cmd(PlaybackCmd::Group(true));
         rig.play(vec![track(1, 1)], 0);
@@ -2311,7 +2311,7 @@ mod tests {
         assert!(rig.view().sleep.is_none(), "il timer si consuma");
         assert!(matches!(&rig.view().event, Some(Raised { event: PlaybackEvent::SleepStopped, .. })));
 
-        // Play riparte dal brano dopo.
+        // Play restarts from the next track.
         rig.cmd(PlaybackCmd::Toggle);
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(2) });
     }
@@ -2328,7 +2328,7 @@ mod tests {
         assert!(rig.view().sleep.is_none());
         assert!(matches!(&rig.view().event, Some(Raised { event: PlaybackEvent::SleepStopped, .. })));
 
-        // Un timer scaduto mentre la musica era ferma non deve fermarla alla ripresa.
+        // A timer expired while the music was stopped must not stop it at the resume.
         let mut rig = Rig::new();
         rig.play(vec![track(1, 600)], 0);
         rig.cmd(PlaybackCmd::Sleep(Some(SleepChoice::Minutes(5))));
@@ -2343,7 +2343,7 @@ mod tests {
 
     #[test]
     fn a_play_counts_after_thirty_seconds_or_half() {
-        // Un brano di quattro secondi conta a metà, all'ora del sistema che gli compete.
+        // A four-second track counts halfway, at the system time that belongs to it.
         let mut rig = Rig::new();
         let short = track(1, 4);
         rig.play(vec![short.clone()], 0);
@@ -2361,7 +2361,7 @@ mod tests {
             })
             .collect();
         assert_eq!(counted, [(short.id, 1_002)], "unix di avvio + i secondi passati dal primo comando");
-        // Passo 4.7: lo stesso ascolto va una volta sola anche al dominio sociale (il profilo).
+        // Step 4.7: the same listen goes only once to the social domain too (the profile).
         assert_eq!(rig.playback.take_listens(), [short.id]);
         rig.listen_until(millis(2_250), millis(3_000));
         assert!(rig.playback.take_listens().is_empty(), "una volta per ascolto");
@@ -2370,7 +2370,7 @@ mod tests {
             "una volta per ascolto"
         );
 
-        // Uno lungo conta dopo trenta secondi: qui ci si arriva con un salto in avanti.
+        // A long one counts after thirty seconds: here it is reached with a jump forward.
         let mut rig = Rig::new();
         rig.play(vec![track(2, 180)], 0);
         rig.listen_until(Duration::ZERO, secs(1));
@@ -2381,14 +2381,14 @@ mod tests {
         assert!(rig.view().play_counted);
     }
 
-    /// BACKLOG 6 e 15: il tempo ascoltato segue la posizione dell'audio, non i battiti.
+    /// BACKLOG 6 and 15: the listened time follows the audio's position, not the ticks.
     #[test]
     fn listened_time_follows_the_audio_position() {
         let mut rig = Rig::new();
         rig.play(vec![track(1, 600)], 0);
         rig.library();
 
-        // Nessun campione letto: i battiti passano, la posizione no, e non si ascolta niente.
+        // No sample read: the ticks pass, the position does not, and nothing is listened to.
         for _ in 0..3 {
             rig.elapse(TICK);
             rig.poll(Duration::ZERO, false);
@@ -2398,13 +2398,13 @@ mod tests {
         rig.listen_until(Duration::ZERO, secs(2));
         assert_eq!(rig.playback.listened_ms, 2_000);
 
-        // Un seek è un salto, non ascolto: conta solo ciò che si sente dopo.
+        // A seek is a jump, not listening: only what is heard afterwards counts.
         rig.cmd(PlaybackCmd::SeekTo(secs(100)));
         rig.elapse(TICK);
         rig.poll(secs(100) + TICK, false);
         assert_eq!(rig.playback.listened_ms, 2_250);
 
-        // In pausa no.
+        // Not while paused.
         rig.cmd(PlaybackCmd::Toggle);
         let sent: Vec<_> = rig.library().into_iter().filter(|c| matches!(c, LibraryCmd::Listen(_))).collect();
         assert!(
@@ -2435,26 +2435,26 @@ mod tests {
         rig.play(vec![track(1, 600)], 0);
         let anchored = Arc::clone(&rig.playback.view);
 
-        // Il battito che trova l'audio dove l'orologio lo calcola non cambia niente.
+        // The tick that finds the audio where the clock computes it changes nothing.
         rig.elapse(TICK);
         rig.poll(TICK + millis(40), false);
         assert!(Arc::ptr_eq(&anchored, &rig.playback.view) || rig.view().clock == anchored.clock);
         assert_eq!(rig.view().clock, anchored.clock, "40 ms di scarto: l'ancora resta");
 
-        // Oltre 250 ms l'orologio si riancora sulla posizione vera.
+        // Beyond 250 ms the clock re-anchors to the true position.
         rig.elapse(TICK);
         rig.poll(secs(2), false);
         assert_eq!(rig.view().clock.position, secs(2));
         assert_eq!(rig.view().clock.at(rig.now), secs(2));
 
-        // Un seek riancora subito, e da fermo la posizione resta quella.
+        // A seek re-anchors at once, and from stopped the position stays the same.
         rig.cmd(PlaybackCmd::SeekTo(secs(100)));
         assert_eq!(rig.view().clock.at(rig.now), secs(100));
         rig.cmd(PlaybackCmd::Toggle);
         rig.elapse(secs(10));
         assert_eq!(rig.view().clock.at(rig.now), secs(100));
 
-        // Fermo del tutto (coda svuotata): torna all'inizio.
+        // Fully stopped (queue emptied): it goes back to the beginning.
         rig.cmd(PlaybackCmd::Clear);
         assert_eq!((rig.state(), rig.view().clock.at(rig.now)), (PlaybackState::Stopped, Duration::ZERO));
     }
@@ -2528,7 +2528,7 @@ mod tests {
         assert!(Arc::ptr_eq(&before, &rig.playback.view), "nothing changed, nothing published");
         assert!(!rig.playback.take_persist());
 
-        // Il riordino a trascinamento del telefono: il brano corrente resta lo stesso.
+        // The drag reorder on the phone: the current track stays the same.
         rig.cmd(PlaybackCmd::Move { from: 0, to: 2 });
         let order: Vec<_> = rig.view().queue.entries().map(|(_, t)| t.id).collect();
         assert_eq!(order, [id(3), id(2), id(1)]);
@@ -2566,7 +2566,7 @@ mod tests {
         assert!(matches!(&rig.view().event, Some(Raised { seq: 1, event: PlaybackEvent::SeekFailed })));
     }
 
-    // ---------- Passo 4.3b: testo, radio, album, mix, sistema e Discord ----------
+    // ---------- Step 4.3b: text, radio, albums, mixes, system and Discord ----------
 
     fn page(artist: &Track, tracks: Vec<Track>) -> ArtistPage {
         ArtistPage {
@@ -2599,7 +2599,7 @@ mod tests {
         assert!(lyrics_jobs(&mut rig).is_empty(), "nessuno li mostra: nessuna richiesta");
         assert_eq!(rig.view().lyrics, LyricsView::default());
 
-        // Un frontend li vuole: si chiedono quelli del brano in corso, una volta sola.
+        // A frontend wants them: those of the current track are asked, once only.
         rig.cmd(PlaybackCmd::Lyrics(true));
         assert_eq!(lyrics_jobs(&mut rig), vec![id(1)]);
         assert_eq!(rig.view().lyrics, LyricsView { track: Some(id(1)), state: LyricsState::Loading });
@@ -2610,19 +2610,19 @@ mod tests {
         rig.done(Done::Lyrics { track_id: id(1), result: Ok(Arc::clone(&text)) });
         assert_eq!(rig.view().lyrics.state, LyricsState::Ready(Arc::clone(&text)));
 
-        // Un altro brano: si chiedono quelli nuovi, e la risposta di quello vecchio non conta.
+        // Another track: the new ones are asked, and the reply for the old one does not count.
         rig.cmd(PlaybackCmd::Next);
         assert_eq!(lyrics_jobs(&mut rig), vec![id(2)]);
         rig.done(Done::Lyrics { track_id: id(1), result: Ok(Arc::clone(&text)) });
         assert_eq!(rig.view().lyrics, LyricsView { track: Some(id(2)), state: LyricsState::Loading });
 
-        // Un testo che non arriva si riprova solo se il frontend lo richiede.
+        // A text that does not arrive is retried only if the frontend asks for it.
         rig.done(Done::Lyrics { track_id: id(2), result: Err(AppError::Network) });
         assert_eq!(rig.view().lyrics.state, LyricsState::Failed(AppError::Network));
         rig.cmd(PlaybackCmd::Lyrics(true));
         assert_eq!(lyrics_jobs(&mut rig), vec![id(2)]);
 
-        // Il pannello si chiude: i brani seguenti non chiedono più niente.
+        // The panel closes: the following tracks no longer ask for anything.
         rig.cmd(PlaybackCmd::Lyrics(false));
         rig.cmd(PlaybackCmd::Next);
         assert!(lyrics_jobs(&mut rig).is_empty());
@@ -2640,7 +2640,7 @@ mod tests {
             Some(Job::Radio { ticket, start, .. }) => (ticket, start),
             other => panic!("{other:?}"),
         };
-        // Intanto si sceglie altro: la radio arriva tardi e non cambia niente.
+        // Meanwhile another is chosen: the radio arrives late and changes nothing.
         rig.play(vec![track(5, 60)], 0);
         rig.done(Done::Radio {
             ticket: first.0,
@@ -2650,7 +2650,7 @@ mod tests {
         assert_eq!(rig.current(), Some(id(5)));
         assert!(rig.view().event.is_none());
 
-        // Questa volta è l'ultima richiesta.
+        // This time it is the last request.
         rig.cmd(PlaybackCmd::StartRadio(Box::new(start.clone())));
         let ticket = match rig.jobs.pop() {
             Some(Job::Radio { ticket, .. }) => ticket,
@@ -2669,7 +2669,7 @@ mod tests {
             matches!(&rig.view().event, Some(Raised { event: PlaybackEvent::RadioStarted(t), .. }) if t.id == id(1))
         );
 
-        // Se l'artista non risponde, la radio parte lo stesso dal catalogo recente.
+        // If the artist does not answer, the radio starts anyway from the recent catalog.
         let mut rig = Rig::new();
         rig.playback.set_pool(Some(&pool));
         rig.cmd(PlaybackCmd::StartRadio(Box::new(start.clone())));
@@ -2710,7 +2710,7 @@ mod tests {
         assert!(matches!(&rig.view().event, Some(Raised { event: PlaybackEvent::AlbumStarted, .. })));
         assert_eq!(rig.loads().len(), 1, "il primo brano si carica");
 
-        // Un album vuoto non fa niente; un errore si dice.
+        // An empty album does nothing; an error is said.
         let ticket = ask(&mut rig);
         rig.done(Done::Album { ticket, result: Ok(Box::new(album(Vec::new()))) });
         assert_eq!(rig.current(), Some(id(7)));
@@ -2721,7 +2721,7 @@ mod tests {
             Some(Raised { event: PlaybackEvent::PlayFailed(AppError::Network), .. })
         ));
 
-        // Una risposta superata dalla scelta di un altro brano non lo scavalca.
+        // A reply superseded by the choice of another track does not overtake it.
         let ticket = ask(&mut rig);
         rig.cmd(PlaybackCmd::PlayAt(1));
         rig.done(Done::Album { ticket, result: Ok(Box::new(album(vec![track(9, 60)]))) });
@@ -2751,7 +2751,7 @@ mod tests {
         assert_eq!(rig.loads().len(), 1);
     }
 
-    /// Un frontend con il collegamento multimediale pronto.
+    /// A frontend with the media link ready.
     fn rig_with_media() -> Rig {
         let mut rig = Rig::new();
         let mut effects = Vec::new();
@@ -2773,23 +2773,23 @@ mod tests {
     #[test]
     fn the_system_is_told_at_a_transition_and_never_at_a_beat() {
         let mut rig = rig_with_media();
-        // Appena pronto: niente suona, e il volume.
+        // As soon as it is ready: nothing plays, and the volume.
         assert_eq!(shown(&mut rig), vec![None]);
         rig.media.clear();
 
         rig.cmd(PlaybackCmd::Play { tracks: vec![track(1, 60)].into(), start: 0 });
-        // Il brano che si carica non suona ancora: il sistema non ne sa niente.
+        // The track that loads does not play yet: the system knows nothing about it.
         assert!(shown(&mut rig).is_empty());
         let (_, generation) = rig.loads().pop().expect("un caricamento");
         rig.load_arrives(generation);
         rig.started();
         assert_eq!(shown(&mut rig), vec![Some(("Brano 1".to_string(), true))]);
 
-        // I battiti che non cambiano niente non dicono niente al sistema.
+        // Ticks that change nothing say nothing to the system.
         rig.listen_until(Duration::ZERO, secs(3));
         assert!(rig.media.is_empty(), "{:?}", rig.media);
 
-        // Un salto, la pausa e la ripresa sì, ognuno una volta; la posizione è quella dell'orologio.
+        // A jump, the pause and the resume do, each once; the position is that of the clock.
         rig.cmd(PlaybackCmd::SeekTo(secs(30)));
         let positions: Vec<Duration> = std::mem::take(&mut rig.media)
             .into_iter()
@@ -2804,7 +2804,7 @@ mod tests {
         rig.cmd(PlaybackCmd::Toggle);
         assert_eq!(shown(&mut rig), vec![Some(("Brano 1".to_string(), true))]);
 
-        // La coda svuotata: il sistema torna a «niente».
+        // The queue emptied: the system goes back to "niente".
         rig.cmd(PlaybackCmd::Clear);
         assert_eq!(shown(&mut rig), vec![None]);
     }
@@ -2839,10 +2839,10 @@ mod tests {
                 rgba: bytes::Bytes::from_static(&[0; 16]),
             }))
         };
-        // La copertina di un altro brano non serve.
+        // Another track's cover is not needed.
         rig.cmd(art("https://covers.example/other.jpg"));
         assert!(rig.media.is_empty());
-        // Quella del brano in corso la riceve il sistema, una volta.
+        // The current track's one is received by the system, once.
         rig.cmd(art("https://covers.example/1.jpg"));
         let artwork: Vec<Option<u32>> = std::mem::take(&mut rig.media)
             .into_iter()
@@ -2865,7 +2865,7 @@ mod tests {
         let mut rig = Rig::new();
         rig.play(vec![track(1, 120), track(2, 120)], 0);
 
-        // «Play» mentre suona non fa niente; «Pause» mette in pausa; «Play» riprende.
+        // "Play" while playing does nothing; "Pause" pauses; "Play" resumes.
         command(&mut rig, Event::Play);
         assert!(rig.view().is_playing());
         command(&mut rig, Event::Pause);
@@ -2886,12 +2886,12 @@ mod tests {
         command(&mut rig, Event::Previous);
         assert_eq!(rig.current(), Some(id(1)));
 
-        // Il volume dal sistema si salva, come lo slider rilasciato.
+        // The volume from the system is saved, as the released slider.
         command(&mut rig, Event::SetVolume(0.3));
         assert!((rig.view().volume - 0.3).abs() < f32::EPSILON);
         assert!(rig.playback.take_persist());
 
-        // «Raise» arriva al frontend come un evento.
+        // "Raise" reaches the frontend as an event.
         command(&mut rig, Event::Raise);
         assert!(matches!(&rig.view().event, Some(Raised { event: PlaybackEvent::Raise, .. })));
     }
@@ -2916,7 +2916,7 @@ mod tests {
                 .collect()
         };
 
-        // Spento, o con lo stesso valore: niente.
+        // Off, or with the same value: nothing.
         set(&mut rig, false, "123");
         assert!(ops(&mut rig).is_empty());
         set(&mut rig, true, " 123 ");
@@ -2924,7 +2924,7 @@ mod tests {
         set(&mut rig, true, "123");
         assert!(ops(&mut rig).is_empty(), "nessun cambiamento");
 
-        // Suona: Discord lo mostra; i battiti no; in pausa sparisce; un salto lo rimanda.
+        // It plays: Discord shows it; the ticks do not; paused it disappears; a jump sends it again.
         rig.play(vec![track(1, 60)], 0);
         let after_play = ops(&mut rig);
         assert_eq!(after_play.last().map(String::as_str), Some("Brano 1 @ 0ns"), "{after_play:?}");
@@ -2935,14 +2935,14 @@ mod tests {
         rig.cmd(PlaybackCmd::Toggle);
         assert_eq!(ops(&mut rig), vec!["nothing"]);
 
-        // L'app cambia: il thread si riavvia; l'interruttore spento lo ferma.
+        // The app changes: the thread restarts; the switch off stops it.
         set(&mut rig, true, "456");
         assert_eq!(ops(&mut rig), vec!["stop", "start 456", "nothing"]);
         set(&mut rig, false, "456");
         assert_eq!(ops(&mut rig), vec!["stop"]);
     }
 
-    // ---------- Gruppo (jam) ----------
+    // ---------- Group (jam) ----------
 
     fn align(tracks: Option<Vec<Track>>, index: usize, position: Duration, playing: bool) -> PlaybackCmd {
         PlaybackCmd::Align(Box::new(Align { tracks, index, position, playing }))
@@ -2955,8 +2955,8 @@ mod tests {
         rig.cmd(align(Some(queue.clone()), 1, secs(30), false));
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(2) });
         let (_, generation) = rig.loads().pop().expect("a load");
-        // La stessa risposta del gruppo arriva di nuovo mentre il brano si carica: si ricorda la
-        // posizione, senza ricominciare.
+        // The same reply from the group arrives again while the track loads: the position is remembered,
+        // without starting again.
         rig.cmd(align(None, 1, secs(31), false));
         assert!(rig.loads().is_empty());
 
@@ -2973,14 +2973,14 @@ mod tests {
         let mut rig = Rig::new();
         rig.play(vec![track(1, 200), track(2, 200)], 0);
         rig.ops.clear();
-        // Stesso brano, pochi decimi di scarto: niente da fare.
+        // Same track, a few tenths of difference: nothing to do.
         rig.cmd(align(None, 0, millis(500), true));
         assert!(rig.ops.is_empty());
-        // Oltre la soglia ci si sposta, e se il gruppo è in pausa ci si ferma.
+        // Beyond the threshold one moves, and if the group is paused one stops there.
         rig.cmd(align(None, 0, secs(60), false));
         assert!(rig.ops.iter().any(|op| matches!(op, AudioOp::Seek(at) if *at == secs(60))));
         assert_eq!(rig.state(), PlaybackState::Paused);
-        // Un altro brano del gruppo si carica da capo.
+        // Another track of the group loads from the start.
         rig.cmd(align(None, 1, secs(5), true));
         assert_eq!(rig.state(), PlaybackState::Loading { track_id: id(2) });
     }
@@ -2999,9 +2999,9 @@ mod tests {
         assert!(!rig.armed);
     }
 
-    // ---------- Brani sul dispositivo (passo 4.6b) ----------
+    // ---------- Tracks on the device (step 4.6b) ----------
 
-    /// Un file di `size` byte in una cartella nuova, per i test che lo aprono davvero.
+    /// A file of `size` bytes in a new folder, for the tests that really open it.
     fn local_file(size: usize) -> LocalFile {
         let dir = std::env::temp_dir().join(format!("psytify-playback-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -3014,7 +3014,7 @@ mod tests {
         Arc::new(entries.iter().map(|(n, file)| (id(*n), (*file).clone())).collect())
     }
 
-    /// I caricamenti chiesti dall'ultima volta, con il file locale di ciascuno.
+    /// The loads asked since last time, with each one's local file.
     fn load_jobs(rig: &mut Rig) -> Vec<(Uuid, u64, Option<LocalFile>)> {
         let jobs = std::mem::take(&mut rig.jobs);
         jobs.into_iter()
@@ -3056,12 +3056,12 @@ mod tests {
         let mut rig = Rig::new();
         rig.play(vec![track(1, 200)], 0);
         rig.jobs.clear();
-        // Senza file locale, riascoltarlo riusa il buffer in memoria: nessun caricamento.
+        // Without a local file, listening again reuses the buffer in memory: no loading.
         rig.cmd(PlaybackCmd::Play { tracks: vec![track(1, 200)].into(), start: 0 });
         assert!(load_jobs(&mut rig).is_empty());
         rig.started();
 
-        // Scaricato nel frattempo: si suona dal file, non dal buffer.
+        // Downloaded in the meantime: it plays from the file, not from the buffer.
         rig.playback.set_local(&local_map(&[(1, &file)]));
         rig.cmd(PlaybackCmd::Play { tracks: vec![track(1, 200)].into(), start: 0 });
         assert_eq!(load_jobs(&mut rig).len(), 1);
@@ -3075,7 +3075,7 @@ mod tests {
         rig.cmd(PlaybackCmd::Play { tracks: vec![track(1, 200)].into(), start: 0 });
         let (_, generation, _) = load_jobs(&mut rig).pop().expect("a load");
 
-        // Una risposta di un caricamento superato non dice niente sul brano di adesso.
+        // A reply from a superseded load says nothing about the track now playing.
         rig.done(Done::Loaded {
             generation: generation + 7,
             result: Ok(StreamBuffer::new()),
@@ -3083,7 +3083,7 @@ mod tests {
         });
         assert!(rig.playback.take_lost_files().is_empty());
 
-        // Il file non c'era: il brano è arrivato dalla rete e il dominio lo dice ai download.
+        // The file was not there: the track came from the network and the domain tells the downloads.
         rig.done(Done::Loaded {
             generation,
             result: Ok(StreamBuffer::new()),
@@ -3106,7 +3106,7 @@ mod tests {
         rig.done(Done::Loaded { generation, result: Ok(from_disk), lost: None });
         assert_eq!(rig.plays_asked(), 1);
 
-        // L'uscita audio non lo decodifica: niente errore, il brano riparte dalla rete, senza file locale.
+        // The audio output does not decode it: no error, the track restarts from the network, without a local file.
         rig.audio(AudioFact::Started(Err(AppError::AudioDecode)));
         assert!(matches!(rig.state(), PlaybackState::Loading { .. }), "{:?}", rig.state());
         assert_eq!(rig.playback.take_lost_files(), [(id(1), LostReason::Changed)]);
@@ -3115,7 +3115,7 @@ mod tests {
         rig.load_arrives(generation);
         rig.started();
         assert!(rig.view().is_playing());
-        // Un errore di una sorgente di rete resta un errore.
+        // An error from a network source stays an error.
         rig.cmd(PlaybackCmd::Play { tracks: vec![track(2, 200)].into(), start: 0 });
         let (_, generation, _) = load_jobs(&mut rig).pop().expect("a load");
         rig.load_arrives(generation);
@@ -3141,7 +3141,7 @@ mod tests {
         };
         assert!(stream.is_file() && stream.is_complete());
 
-        // Il file è sparito: ripiega sulla rete (qui una porta chiusa: l'errore è quello della rete) e dice perché.
+        // The file has gone: it falls back to the network (here a closed port) and says why.
         std::fs::remove_file(&file.path).unwrap();
         let Done::Loaded { result: Err(_), lost, .. } = runtime.block_on(load(Some(file)).run()) else {
             panic!("falls back to the network and fails")

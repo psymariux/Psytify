@@ -1,5 +1,5 @@
-//! Card (`SURFACE_RAISED`, tacca 2, padding `SPACE_5`) e Panel (regioni del chrome).
-//! La Card non ha bordo né ombra a riposo; se cliccabile ha hover, premuto, focus e selezionato.
+//! Card (`SURFACE_RAISED`, notch 2, padding `SPACE_5`) and Panel (chrome regions).
+//! The Card has no border or shadow at rest; if clickable it has hover, pressed, focus and selected states.
 
 use gpui::{AnyElement, App, ElementId, IntoElement, ParentElement, RenderOnce, Styled, Window, div};
 use psytify_design::tokens::color::{
@@ -37,7 +37,7 @@ impl Card {
         }
     }
 
-    /// Rende la card cliccabile (hover, premuto, focus).
+    /// Makes the card clickable (hover, pressed, focus).
     pub fn interactive(mut self, id: impl Into<ElementId>) -> Self {
         self.id = Some(id.into());
         self
@@ -113,8 +113,8 @@ impl RenderOnce for Card {
     }
 }
 
-/// Regione del chrome: fill `SURFACE_CHROME`, intestazione di 40 dp con titolo `TYPE_LABEL` e
-/// azioni a destra, separatore di 1 AP. Senza raggio, senza ombra.
+/// Chrome region: `SURFACE_CHROME` fill, 40 dp header with a `TYPE_LABEL` title and
+/// actions on the right, 1 AP separator. No radius, no shadow.
 #[derive(IntoElement)]
 pub struct Panel {
     title: Option<gpui::SharedString>,

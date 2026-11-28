@@ -1,7 +1,7 @@
 //! The Home as shelves of tiles, built from the catalogue's Home sections and the feed the library
-//! derives from them (`LibraryView::feed`), in the order of the phone Home of the Iced client. The
+//! derives from them (`LibraryView::feed`), in the order of the phone Home. The
 //! app draws the tiles; what a tap does is decided here ([`HomeModel::activate`]), with the rules of
-//! the Iced phone Home: an album opens its page, a single plays (or pauses if it is the current
+//! the phone Home: an album opens its page, a single plays (or pauses if it is the current
 //! track), a mix plays the feed's mix, a track plays its shelf from there.
 
 use std::sync::Arc;

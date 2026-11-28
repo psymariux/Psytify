@@ -89,7 +89,7 @@ fn kicker(playlist: &SourcePlaylist) -> &'static str {
     }
 }
 
-/// How the audio arrives (the texts of the Iced client).
+/// How the audio arrives.
 fn explanation(source: SourceKind) -> &'static str {
     if source == SourceKind::Deezer {
         "Il server trova l'audio quando premi play. Salvando, i brani entrano nella libreria uno alla volta, \

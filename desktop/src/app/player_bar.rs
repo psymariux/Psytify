@@ -67,20 +67,20 @@ pub enum BarEvent {
     ToggleVideo,
 }
 
-/// Il segno della jam nella barra.
+/// The jam sign in the bar.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum JamChip {
-    /// Nessuna jam: niente.
+    /// No jam: nothing.
     #[default]
     None,
     Connecting,
-    /// In stanza: il codice e quante persone (per il suggerimento).
+    /// In a room: the code and how many people (for the hint).
     Live {
         tip: SharedString,
     },
 }
 
-/// Il segno della jam dalla sua vista. Puro.
+/// The jam sign from its view. Pure.
 pub fn jam_chip(view: &JamView) -> JamChip {
     match view.phase {
         JamPhase::Idle => JamChip::None,
@@ -118,7 +118,7 @@ impl PlayerBar {
     }
 }
 
-/// Il brano in corso, con i testi già pronti.
+/// The playing track, with the texts already ready.
 struct Now {
     track: Track,
     title: SharedString,
@@ -146,7 +146,7 @@ pub struct PlayerBar {
     view: Arc<PlaybackView>,
     liked: Arc<HashSet<Uuid>>,
     now: Option<Now>,
-    /// Il pannello laterale aperto (il suo pulsante è acceso).
+    /// The open side panel (its button is lit).
     panel: Option<SidePanel>,
     /// The stage covers the bar: no tick.
     hidden: bool,
@@ -155,11 +155,11 @@ pub struct PlayerBar {
     video_shown: bool,
     /// The cover of the track before a change and when the change began: the cross-fade.
     swap: Option<(Option<SharedString>, Instant)>,
-    /// Il timer da 250 ms: c'è solo mentre il brano suona.
+    /// The 250 ms timer: it runs only while the track plays.
     tick: Option<Task<()>>,
-    /// Il testo del tempo trascorso, rifatto solo quando cambia il secondo.
+    /// The elapsed time text, rebuilt only when the second changes.
     elapsed: (u64, SharedString),
-    /// Il segno della jam.
+    /// The jam sign.
     jam: JamChip,
     _changes: Subscription,
 }
@@ -190,7 +190,7 @@ impl PlayerBar {
         bar
     }
 
-    /// La finestra dice quale pannello è aperto (il suo pulsante si accende).
+    /// The window says which panel is open (its button lights up).
     pub fn set_panel(&mut self, panel: Option<SidePanel>, cx: &mut Context<Self>) {
         if self.panel != panel {
             self.panel = panel;
@@ -207,7 +207,7 @@ impl PlayerBar {
         }
     }
 
-    /// La vista immersiva copre la barra (o la scopre): coperta non ha il battito.
+    /// The immersive view covers the bar (or uncovers it): covered, it has no beat.
     pub fn set_hidden(&mut self, hidden: bool, cx: &mut Context<Self>) {
         if self.hidden != hidden {
             self.hidden = hidden;
@@ -270,7 +270,7 @@ impl PlayerBar {
         Some(ease_out(t.max(0.0)))
     }
 
-    /// Accende il timer mentre suona (e la barra si vede) e lo spegne altrimenti.
+    /// Turns the timer on while it plays (and the bar is visible) and off otherwise.
     fn sync_tick(&mut self, cx: &mut Context<Self>) {
         if !self.view.is_playing() || self.hidden {
             self.tick = None;
@@ -560,7 +560,7 @@ impl Render for PlayerBar {
                     .on_click(toggle_focus),
             );
 
-        // Il filo sopra la barra lo disegna `Shell`: la barra entra in `.cached()` alla sua altezza esatta.
+        // The line above the bar is drawn by `Shell`: the bar enters `.cached()` at its exact height.
         div()
             .size_full()
             .h(dp(PLAYER_BAR_H))

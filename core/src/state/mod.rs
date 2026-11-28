@@ -1,10 +1,10 @@
-//! Lo stato del core: un riduttore senza IO. `apply` riceve un ingresso e l'istante corrente e
-//! restituisce gli effetti da eseguire; non apre la rete, non legge l'orologio, non tocca i file.
-//! Così i test lo guidano con un tempo finto e controllano gli effetti senza eseguirli.
+//! The core's state: a reducer with no IO. `apply` receives an input and the current instant and
+//! returns the effects to run; it does not open the network, does not read the clock, does not touch files.
+//! So the tests drive it with a fake time and check the effects without running them.
 //!
-//! Ogni dominio sta nel suo modulo e cambia la sua vista con `Arc::make_mut`: finché un frontend
-//! tiene l'istantanea precedente la vista si copia, e `publish` riconosce dal puntatore cambiato
-//! quali domini pubblicare.
+//! Each domain sits in its own module and changes its view with `Arc::make_mut`: as long as a frontend
+//! holds the previous snapshot the view is copied, and `publish` recognises from the changed pointer
+//! which domains to publish.
 
 pub mod catalog;
 pub mod downloads;
@@ -27,33 +27,33 @@ use crate::config::Config;
 use crate::effect::{Done, Effect, TimerKey};
 use crate::snapshot::{DomainVersions, Snapshot};
 
-/// Ciò che fa muovere lo stato.
+/// What makes the state move.
 #[derive(Debug)]
 pub(crate) enum Input {
-    /// Un comando di un frontend.
+    /// A command from a frontend.
     Command(Command),
-    /// Un timer armato con [`Effect::Timer`] è scaduto.
+    /// A timer armed with [`Effect::Timer`] has expired.
     Timer(TimerKey),
-    /// Un lavoro chiesto con [`Effect::Run`] è finito.
+    /// A job asked for with [`Effect::Run`] has finished.
     Done(Done),
     /// L'uscita audio ha risposto a un'[`Effect::Audio`].
     Audio(playback::AudioFact),
-    /// Un comando dal sistema (tasti multimediali, widget del desktop, cuffie) o il collegamento
+    /// A command from the system (media keys, desktop widget, headphones) or the link
     /// multimediale pronto.
     Media(crate::media::Event),
-    /// Qualcosa dalla stanza della jam (ingresso, membri, lo stato degli altri, la chiusura): l'host
-    /// aspetta il collegamento insieme a tutto il resto, e una jam ferma non ha bisogno di un battito.
+    /// Something from the jam room (entry, members, the others' state, closing): the host
+    /// waits for the link together with everything else, and an idle jam needs no tick.
     Jam(crate::jam::Event),
-    /// Che cosa il sistema chiede del movimento, a ogni cambio vero (dopo `Effect::WatchMotion`).
+    /// What the system asks about motion, at each real change (after `Effect::WatchMotion`).
     SystemMotion(crate::system_motion::SystemMotion),
-    /// Il core è appena partito: i domini si passano ciò che hanno letto da `config.json` (Discord,
-    /// se l'utente lo vuole, parte da qui, prima di ogni comando).
+    /// The core has just started: the domains pass on what they read from `config.json` (Discord,
+    /// if the user wants it, starts from here, before any command).
     Start,
-    /// Il frontend chiude: i domini finiscono di scrivere, poi [`Effect::Flushed`].
+    /// The frontend closes: the domains finish writing, then [`Effect::Flushed`].
     Shutdown,
 }
 
-/// Lo stato di tutti i domini.
+/// The state of all the domains.
 #[derive(Debug, Default)]
 pub(crate) struct CoreState {
     pub(crate) settings: settings::Settings,
@@ -69,9 +69,9 @@ pub(crate) struct CoreState {
 }
 
 impl CoreState {
-    /// Lo stato all'avvio, con la configurazione già letta da `path` (l'host la legge prima di
-    /// partire: il riduttore non tocca i file). Senza `path` non si scrive niente. `seed` tiene
-    /// fermi i mix della Home per la sessione (lo sceglie l'host: il riduttore non ha orologio).
+    /// The state at startup, with the configuration already read from `path` (the host reads it before
+    /// starting: the reducer does not touch files). Without `path` nothing is written. `seed` keeps
+    /// the Home's mixes fixed for the session (the host picks it: the reducer has no clock).
     pub(crate) fn new(config: Config, path: Option<PathBuf>, seed: u64) -> Self {
         let library = library::Library::new(config.core.library(), seed);
         let playback = playback::Playback::new(
@@ -105,30 +105,30 @@ impl CoreState {
         }
     }
 
-    /// Le cartelle dove scrivono i download: i brani e i pacchetti degli aggiornamenti. Le sceglie
-    /// l'host (il riduttore non conosce il sistema).
+    /// The folders where downloads are written: the tracks and the update packages. They are chosen by
+    /// the host (the reducer does not know the system).
     #[must_use]
     pub(crate) fn with_dirs(mut self, downloads: PathBuf, updates: PathBuf) -> Self {
         self.downloads.set_dirs(downloads::Dirs { downloads, updates });
         self
     }
 
-    /// Il login: dove sta `session.json` (nella cartella dei dati di questo core) e se l'host l'ha
-    /// trovato sul disco. Con una sessione salvata il dominio parte già su «accesso in corso» e la
-    /// riprende al primo `Input::Start`.
+    /// The login: where `session.json` sits (in this core's data folder) and whether the host found it
+    /// on disk. With a saved session the domain already starts on "sign-in in progress" and
+    /// resumes at the first `Input::Start`.
     #[must_use]
     pub(crate) fn with_session(mut self, file: Option<PathBuf>, stored: bool) -> Self {
         self.social = std::mem::take(&mut self.social).with_session(file, stored);
         self
     }
 
-    /// L'uscita audio non si è aperta: la riproduzione lo sa dall'avvio.
+    /// The audio output did not open: playback knows it from the start.
     pub(crate) fn with_device_error(mut self, error: Option<crate::error::AppError>) -> Self {
         self.playback.set_device_error(error);
         self
     }
 
-    /// Passa l'ingresso al dominio che lo riguarda e raccoglie gli effetti che chiede.
+    /// Passes the input to the domain that concerns it and collects the effects it asks for.
     pub(crate) fn apply(&mut self, input: Input, now: Instant) -> Vec<Effect> {
         let mut effects = Vec::new();
         match input {
@@ -177,17 +177,17 @@ impl CoreState {
                 #[cfg(feature = "video")]
                 Done::Video(done) => self.video.done(done, now, &mut effects),
             },
-            // Il passaggio fra i domini avviene dopo ogni ingresso, qui sotto: il catalogo rilegge
-            // i brani salvati senza copertina.
+            // The passing between domains happens after each input, below: the catalog rereads
+            // the saved tracks without a cover.
             Input::Start => {
                 self.catalog.start();
                 self.external.start();
                 self.downloads.start(&mut effects);
                 self.social.start(&mut effects);
             }
-            // Ogni dominio salva attraverso le impostazioni: è lì che la chiusura aspetta il disco.
+            // Each domain saves through the settings: that is where the closing waits for the disk.
             Input::Shutdown => {
-                // Prima della riproduzione: fermarsi alla chiusura non va detto alla stanza.
+                // Before playback: stopping at close is not to be told to the room.
                 self.jam.close();
                 self.playback.close(now, &mut effects);
                 self.handoff(now, &mut effects);
@@ -198,14 +198,14 @@ impl CoreState {
         effects
     }
 
-    /// Ciò che un dominio passa agli altri dopo un ingresso: il serbatoio dei brani recenti e il
-    /// backend a chi ne ha bisogno, ciò che la riproduzione chiede alla libreria (ascolti, tempo
-    /// ascoltato), e i campi che un dominio possiede alle impostazioni, che scrivono il file.
+    /// What a domain passes to the others after an input: the store of recent tracks and the
+    /// backend for whoever needs it, what playback asks of the library (plays, listening
+    /// time), and the fields a domain owns for the settings, which write the file.
     fn handoff(&mut self, now: Instant, effects: &mut Vec<Effect>) {
-        // Le fonti esterne, per prime: leggono la libreria, il catalogo e la riproduzione, e ciò che
-        // chiedono (un brano importato, un `Play`, «il catalogo è cambiato») lo applicano gli altri
-        // domini nello stesso giro, qui e nei passaggi che seguono. La prossima importazione parte
-        // solo dopo, con la libreria già aggiornata.
+        // The external sources first: they read the library, the catalog and playback, and what
+        // they ask (an imported track, a `Play`, "the catalog has changed") is applied by the other
+        // domains in the same round, here and in the passes that follow. The next import starts
+        // only afterwards, with the library already updated.
         self.external.set_server(&self.settings.view.config.server);
         self.external.settle(&self.library.view, &self.catalog.view, &self.playback.view, effects);
         for command in self.external.take_library() {
@@ -218,9 +218,9 @@ impl CoreState {
             self.catalog.apply(command, now, effects);
         }
         self.external.pace(&self.library.view, effects);
-        // Il catalogo: ritrova i brani che la riproduzione dice spariti, rilegge quello appena
-        // partito, e consegna alla libreria e alla riproduzione ciò che ha chiesto di cambiare (i
-        // brani recenti da cui nasce il feed, le copertine corrette, i brani ritrovati).
+        // The catalog: finds again the tracks that playback says have vanished, rereads the one just
+        // started, and hands to the library and playback what it has asked to change (the recent
+        // tracks the feed comes from, the correct covers, the tracks found again).
         for track in self.playback.take_heal() {
             self.catalog.heal(track, effects);
         }
@@ -243,9 +243,9 @@ impl CoreState {
         self.playback.set_feed(&self.library.view.feed);
         let config = &self.settings.view.config;
         self.playback.set_discord(config.discord_presence, &config.discord_app_id, now, effects);
-        // La jam: legge la riproduzione e il profilo. Ciò che chiede alla riproduzione (il gruppo,
-        // l'allineamento) si applica subito, e solo dopo la stanza riceve lo stato locale, già
-        // allineato. Il frontend non fa da tramite.
+        // The jam: reads playback and the profile. What it asks of playback (the group,
+        // the alignment) applies at once, and only afterwards the room receives the local state,
+        // already aligned. The frontend does not act as go-between.
         self.jam.set_server(&self.settings.view.config.server);
         self.jam.set_profile(self.social.view.account.profile().map(|profile| profile.display_name.as_str()));
         self.jam.settle(&self.playback.view, now, effects);
@@ -256,8 +256,8 @@ impl CoreState {
         for command in self.playback.take_library() {
             self.library.apply(command, now, effects);
         }
-        // Il profilo: gli ascolti appena contati, e poi ciò che è cambiato nel brano in ascolto e
-        // nelle playlist pubbliche, a cose già assestate. Un ascolto senza accesso si butta.
+        // The profile: the plays just counted, and then what changed in the track being listened to and
+        // in the public playlists, once things have settled. A play without access is thrown away.
         self.social.set_server(&self.settings.view.config.server);
         self.social.set_jam(self.jam.code());
         for track in self.playback.take_listens() {
@@ -270,8 +270,8 @@ impl CoreState {
         if self.playback.take_persist() {
             self.settings.store_playback(self.playback.fields(now), effects);
         }
-        // I file scaricati: la riproduzione dice quelli che non ha potuto aprire (i download li
-        // segnano persi), e riceve la mappa di quelli da cui suonare.
+        // The downloaded files: playback says which ones it could not open (the downloads give the
+        // mark them as lost), and receives the map of the ones to play from.
         let lost = self.playback.take_lost_files();
         if !lost.is_empty() {
             self.downloads.files_lost(lost);
@@ -280,8 +280,8 @@ impl CoreState {
         if self.downloads.take_persist() {
             self.settings.store_downloads(self.downloads.fields(), effects);
         }
-        // Il videoclip, per ultimo: legge la riproduzione già assestata (il brano in corso, la coda,
-        // il brano che è appena partito) e non chiede niente a nessun altro dominio.
+        // The music video, last: it reads playback already settled (the track playing, the queue,
+        // the track that has just started) and asks nothing of any other domain.
         #[cfg(feature = "video")]
         {
             self.video.set_server(&self.settings.view.config.server);
@@ -289,7 +289,7 @@ impl CoreState {
         }
     }
 
-    /// La prima istantanea, prima di ogni ingresso: versione zero per tutti.
+    /// The first snapshot, before any input: version zero for everyone.
     pub(crate) fn snapshot(&self) -> Snapshot {
         Snapshot {
             version: 0,
@@ -307,9 +307,9 @@ impl CoreState {
         }
     }
 
-    /// L'istantanea che segue `previous`, se almeno un dominio è cambiato; `None` altrimenti, così
-    /// un core fermo non sveglia nessun frontend. La versione di un dominio cresce quando la sua
-    /// vista non è più quella pubblicata.
+    /// The snapshot that follows `previous`, if at least one domain has changed; `None` otherwise, so
+    /// an idle core wakes no frontend. A domain's version grows when its view
+    /// is no longer the one published.
     pub(crate) fn publish(&self, previous: &Snapshot) -> Option<Snapshot> {
         let mut versions = previous.versions;
         let mut changed = false;
@@ -329,7 +329,7 @@ impl CoreState {
     }
 }
 
-/// Fa crescere `version` se la vista corrente non è quella pubblicata. Dice se è cambiata.
+/// Grows `version` if the current view is not the published one. Says whether it has changed.
 fn bump<T>(published: &Arc<T>, current: &Arc<T>, version: &mut u64) -> bool {
     if Arc::ptr_eq(published, current) {
         return false;
@@ -355,7 +355,7 @@ mod tests {
         Command::library(LibraryCmd::ToggleLike(track(n)))
     }
 
-    /// Un core con un file da scrivere, così i cambi della libreria armano il salvataggio.
+    /// A core with a file to write, so the library's changes arm the save.
     fn state_with_a_file() -> CoreState {
         CoreState::new(Config::default(), Some(PathBuf::from("/dati/psytify/config.json")), 1)
     }
@@ -379,15 +379,15 @@ mod tests {
         assert!(state.publish(&next).is_none(), "pubblicata una volta, non si ripubblica");
     }
 
-    /// Prestazioni (passo 4.2): fermo, o con comandi che non cambiano niente, il core non pubblica;
-    /// un cambio vero è una pubblicazione sola, con la sola versione dei domini toccati.
+    /// Performance (step 4.2): idle, or with commands that change nothing, the core does not publish;
+    /// a real change is a single publish, with only the version of the domains touched.
     #[test]
     fn idle_and_unrelated_commands_publish_only_real_changes() {
         let mut state = CoreState::default();
         let start = state.snapshot();
         assert!(state.publish(&start).is_none(), "idle");
 
-        // Comandi di altri domini e comandi della libreria senza effetto: nessuna pubblicazione.
+        // Commands of other domains and library commands with no effect: no publish.
         let nothing = [
             Command::Settings(SettingsCmd::Store(Box::default())),
             Command::library(LibraryCmd::Listen(0)),
@@ -402,7 +402,7 @@ mod tests {
         }
         assert!(state.publish(&start).is_none(), "commands that change nothing");
 
-        // Un cambio vero: una pubblicazione, con la libreria e le impostazioni (il file da scrivere).
+        // A real change: one publish, with the library and the settings (the file to write).
         command(&mut state, like(1));
         let next = state.publish(&start).expect("a like is a change");
         assert_eq!(next.version, 1);
@@ -412,14 +412,14 @@ mod tests {
         assert!(Arc::ptr_eq(&next.playback, &start.playback));
         assert!(state.publish(&next).is_none(), "published once");
 
-        // Lo stesso brano in testa agli ascolti due volte: la seconda non cambia niente.
+        // The same track at the top of the plays twice: the second changes nothing.
         command(&mut state, Command::library(LibraryCmd::RememberListen(track(1))));
         let heard = state.publish(&next).expect("first listen");
         command(&mut state, Command::library(LibraryCmd::RememberListen(track(1))));
         assert!(state.publish(&heard).is_none());
     }
 
-    /// Una raffica di cambi della libreria è un giro solo: i campi finiscono insieme in `config.json`.
+    /// A burst of library changes is a single round: the fields end up together in `config.json`.
     #[test]
     fn library_changes_reach_the_settings_and_arm_one_save() {
         let mut state = state_with_a_file();
@@ -436,8 +436,8 @@ mod tests {
         assert!(state.library.view.liked.same(&config.liked), "the view and the file share the list");
     }
 
-    /// `SettingsCmd::Store` del frontend non cancella ciò che la libreria ha: i suoi campi si
-    /// ignorano, gli altri passano.
+    /// The frontend's `SettingsCmd::Store` does not delete what the library has: its fields are
+    /// ignored, the others pass.
     #[test]
     fn the_frontends_stored_config_never_overwrites_the_library() {
         let mut state = state_with_a_file();
@@ -461,9 +461,9 @@ mod tests {
         assert!(snapshot.library.liked.same(&snapshot.settings.config.liked), "the same list, not a copy");
     }
 
-    /// Passo 4.3b: l'interruttore di Discord e l'app (impostazioni) arrivano alla riproduzione con il
-    /// passaggio fra i domini: attivarlo avvia il collegamento, cambiare l'app lo riavvia,
-    /// spegnerlo lo ferma; un `Store` uguale non fa niente.
+    /// Step 4.3b: the Discord switch and the app (settings) reach playback with the passing between
+    /// domains: turning it on starts the link, changing the app restarts it,
+    /// turning it off stops it; an identical `Store` does nothing.
     #[test]
     fn the_discord_setting_reaches_playback_through_the_handoff() {
         use crate::state::system::DiscordOp;
@@ -501,8 +501,8 @@ mod tests {
         assert_eq!(discord(command(&mut state, store(false, "100"))), vec!["stop"]);
     }
 
-    /// Prestazioni (passo 4.3): fermo, o in pausa, il core non pubblica e non arma il battito; una
-    /// transizione vera è una pubblicazione sola, e la posizione (che avanza) non è nell'istantanea.
+    /// Performance (step 4.3): idle, or paused, the core does not publish and does not arm the tick; a
+    /// real transition is a single publish, and the position (which advances) is not in the snapshot.
     #[test]
     fn idle_and_paused_playback_publish_nothing_and_a_transition_publishes_once() {
         use std::time::Duration;
@@ -516,7 +516,7 @@ mod tests {
         let run = |state: &mut CoreState, input: Input| -> Vec<Effect> { state.apply(input, Instant::now()) };
         let ticks = |effects: &[Effect]| effects.iter().filter(|e| matches!(e, Effect::Timer { .. })).count();
 
-        // Fermo: niente comandi, niente istantanee, niente battito.
+        // Stopped: no commands, no snapshots, no tick.
         assert!(state.publish(&snapshot).is_none());
         let effects = run(&mut state, Input::Command(Command::Playback(PlaybackCmd::Toggle)));
         assert!(
@@ -524,7 +524,7 @@ mod tests {
             "play con la coda vuota non fa niente"
         );
 
-        // Play: Loading, una pubblicazione sola e solo del dominio della riproduzione.
+        // Play: Loading, a single publish and only of the playback domain.
         let tracks: Arc<[Track]> = vec![track(1), track(2)].into();
         let effects =
             run(&mut state, Input::Command(Command::Playback(PlaybackCmd::Play { tracks, start: 0 })));
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!((next.versions.playback, next.versions.library), (1, 0));
         snapshot = next;
 
-        // Il brano arriva e parte: il battito si arma, una pubblicazione.
+        // The track arrives and starts: the tick arms, one publish.
         run(
             &mut state,
             Input::Done(Done::Playback(PlaybackDone::Loaded {
@@ -550,7 +550,7 @@ mod tests {
         assert!(next.playback.is_playing());
         snapshot = next;
 
-        // Un battito che trova l'audio dov'è previsto non cambia la vista: niente pubblicazione.
+        // A tick that finds the audio where it is expected does not change the view: no publish.
         let effects = run(&mut state, Input::Timer(TimerKey::Playback(playback::Timer::Tick)));
         assert_eq!(ticks(&effects), 1, "il battito si riarma finché suona");
         run(
@@ -559,7 +559,7 @@ mod tests {
         );
         assert!(state.publish(&snapshot).is_none(), "la posizione non è nell'istantanea");
 
-        // Pausa: una pubblicazione, il battito si ferma; poi il core è di nuovo fermo del tutto.
+        // Pause: one publish, the tick stops; then the core is fully idle again.
         let effects = run(&mut state, Input::Command(Command::Playback(PlaybackCmd::Toggle)));
         assert!(effects.iter().any(|e| matches!(e, Effect::CancelTimer(TimerKey::Playback(_)))));
         snapshot = state.publish(&snapshot).expect("paused");
@@ -570,8 +570,8 @@ mod tests {
         assert!(state.publish(&snapshot).is_none(), "in pausa il core non pubblica");
     }
 
-    /// Prestazioni (passo 4.4): fermo, il catalogo non pubblica niente; scrivere lo stesso testo di
-    /// nuovo non cambia niente; la ricerca vera è una pubblicazione, ogni risposta una; una risposta
+    /// Performance (step 4.4): idle, the catalog publishes nothing; writing the same text again
+    /// changes nothing; the real search is one publish, each reply one; a reply
     /// superata nessuna.
     #[test]
     fn catalogue_idle_and_repeated_identical_queries_publish_nothing_and_an_answer_publishes_once() {
@@ -585,13 +585,13 @@ mod tests {
         let typed = |text: &str| Input::Command(Command::Catalog(CatalogCmd::SearchInput(text.into())));
         assert!(state.publish(&snapshot).is_none(), "idle");
 
-        // Scrivere arma l'attesa, ma non cambia la vista; lo stesso testo di nuovo, nemmeno l'attesa.
+        // Writing arms the wait, but does not change the view; the same text again, not even the wait.
         let effects = run(&mut state, typed("low"));
         assert!(effects.iter().any(|e| matches!(e, Effect::Timer { key: TimerKey::Catalog(_), .. })));
         assert!(state.publish(&snapshot).is_none(), "typing alone publishes nothing");
         assert!(run(&mut state, typed("low")).is_empty() && state.publish(&snapshot).is_none(), "same text");
 
-        // L'attesa scade: una pubblicazione, del catalogo e di ciò che ne segue (la cronologia).
+        // The wait expires: one publish, of the catalog and of what follows from it (the history).
         let effects = run(&mut state, Input::Timer(TimerKey::Catalog(catalog::Timer::Search)));
         let ticket = effects
             .iter()
@@ -607,7 +607,7 @@ mod tests {
         assert!(Arc::ptr_eq(&next.playback, &snapshot.playback));
         snapshot = next;
 
-        // Una risposta vera: una pubblicazione, e solo del catalogo. Una superata: nessuna.
+        // A real reply: one publish, and only of the catalog. A superseded one: none.
         let answer = |ticket| {
             Input::Done(Done::Catalog(CatalogDone::Search {
                 ticket,
@@ -622,13 +622,13 @@ mod tests {
         assert!(matches!(next.catalog.search.results, crate::catalog::Load::Ready(_)));
         snapshot = next;
 
-        // Lo stesso testo di nuovo e il core resta fermo del tutto.
+        // The same text again and the core stays fully idle.
         assert!(run(&mut state, typed("low")).is_empty());
         assert!(state.publish(&snapshot).is_none());
     }
 
-    /// I brani recenti della Home arrivano alla libreria con il passaggio, e la Home li mostra
-    /// insieme al loro feed nella stessa istantanea; gli artisti in vista si caricano in anticipo.
+    /// The recent tracks of the Home reach the library with the passing, and the Home shows them
+    /// with their feed in the same snapshot; the artists in view are loaded in advance.
     #[test]
     fn the_home_and_its_feed_arrive_in_one_snapshot() {
         use crate::api::{Page, Track};
@@ -671,15 +671,15 @@ mod tests {
             .count();
         assert!(prefetched > 0, "the artists on the home are loaded ahead: {effects:?}");
 
-        // Il catalogo cambia: la Home torna da caricare e la libreria butta il feed.
+        // The catalog changes: the Home has to be loaded again and the library drops the feed.
         command(&mut state, Command::Catalog(CatalogCmd::Changed));
         let after = state.publish(&next).expect("changed");
         assert!(after.catalog.home.recent.needs_load());
         assert!(after.library.feed_source.is_none() && after.library.feed.releases.is_empty());
     }
 
-    /// Un brano che il server non ha più: la riproduzione lo dice, il catalogo lo ritrova, e il nuovo
-    /// prende il posto del vecchio in coda e fra i salvati, senza che il frontend faccia niente.
+    /// A track the server no longer has: playback says so, the catalog finds it again, and the new one
+    /// takes the old one's place in the queue and among the saved, without the frontend doing anything.
     #[test]
     fn a_missing_track_is_healed_inside_the_core() {
         use std::sync::Arc;
@@ -726,7 +726,7 @@ mod tests {
             "and it starts again: {effects:?}"
         );
 
-        // Se non lo ritrova, la riproduzione resta in errore.
+        // If it does not find it again, playback stays in error.
         let mut state = CoreState::default();
         let tracks: Arc<[Track]> = vec![missing.clone()].into();
         command(&mut state, Command::Playback(PlaybackCmd::Play { tracks, start: 0 }));
@@ -751,7 +751,7 @@ mod tests {
         assert!(matches!(state.playback.view.state, crate::player::PlaybackState::Error(_)));
     }
 
-    /// I lavori sociali che gli effetti chiedono, in ordine.
+    /// The social jobs the effects ask for, in order.
     fn social_work(effects: &[Effect]) -> Vec<crate::testing::SocialWork> {
         effects
             .iter()
@@ -783,9 +783,9 @@ mod tests {
         )
     }
 
-    /// Passo 4.7, versioni dell'istantanea: un core senza accesso, anche con la riproduzione in
-    /// moto, non pubblica mai il dominio sociale; un cambio sociale vero (l'accesso che parte)
-    /// alza solo la sua versione, e la riproduzione non alza la sua.
+    /// Step 4.7, snapshot versions: a core without access, even with playback in
+    /// motion, never publishes the social domain; a real social change (the access starting)
+    /// only raises its version, and playback does not raise its own.
     #[test]
     fn the_social_domain_bumps_its_own_version_only_on_real_changes() {
         let mut state = CoreState::new(Config::default(), None, 1);
@@ -797,18 +797,18 @@ mod tests {
         );
         assert!(state.publish(&start).is_none());
 
-        // La riproduzione cambia, il sociale no: senza accesso `sync` non fa niente.
+        // Playback changes, social does not: without access `sync` does nothing.
         command(&mut state, Command::Playback(PlaybackCmd::Play { tracks: vec![track(1)].into(), start: 0 }));
         let playing = state.publish(&start).expect("la riproduzione è partita");
         assert_eq!(playing.versions.social, 0);
         assert!(Arc::ptr_eq(&playing.social, &start.social));
 
-        // Un comando sociale che non cambia niente non pubblica.
+        // A social command that changes nothing does not publish.
         command(&mut state, Command::Social(crate::command::SocialCmd::DismissError));
         command(&mut state, Command::Social(crate::command::SocialCmd::RefreshFriends));
         assert!(state.publish(&playing).is_none());
 
-        // L'accesso che parte è un cambio vero: «accesso in corso», e basta.
+        // The access starting is a real change: "sign-in in progress", and that is all.
         let effects = command(
             &mut state,
             Command::Social(crate::command::SocialCmd::SignIn {
@@ -824,8 +824,8 @@ mod tests {
         assert!(state.publish(&working).is_none(), "pubblicato una volta");
     }
 
-    /// Il passaggio fra i domini porta la riproduzione e la libreria al profilo: mentre un brano si
-    /// carica non parte nessuna presenza (BACKLOG 9), e una playlist resa pubblica parte da sola.
+    /// The passing between domains brings playback and the library to the profile: while a track
+    /// loads no presence starts (BACKLOG 9), and a playlist made public starts by itself.
     #[test]
     fn the_handoff_feeds_the_profile_from_playback_and_library() {
         let mut state = CoreState::new(Config::default(), None, 1);
@@ -862,14 +862,14 @@ mod tests {
                 tracks: vec![track(2).id]
             }]
         );
-        // Un comando che non c'entra non rimanda niente.
+        // A command that does not concern it returns nothing.
         let effects = command(&mut state, Command::library(LibraryCmd::RefreshFeed));
         assert!(social_work(&effects).is_empty());
     }
 
-    /// Passo 4.8, versioni dell'istantanea: una jam ferma non pubblica niente e non arma nessun timer
-    /// (il core non ha un timer per lei: è la stanza a svegliarlo); ogni cambio vero è una
-    /// pubblicazione sola, con la versione dei soli domini toccati; ripetere ciò che c'è già non
+    /// Step 4.8, snapshot versions: an idle jam publishes nothing and arms no timer
+    /// (the core has no timer for it: it is the room that wakes it); each real change is a
+    /// single publish, with the version of the domains touched only; repeating what is already there does not
     /// cambia nulla.
     #[test]
     fn an_idle_jam_arms_nothing_and_publishes_nothing_and_a_remote_change_publishes_once() {
@@ -885,20 +885,20 @@ mod tests {
             |effects: &[Effect]| effects.iter().filter(|e| matches!(e, Effect::Timer { .. })).count();
         let run = |state: &mut CoreState, input: Input| state.apply(input, Instant::now());
 
-        // Senza jam: uscire, o un evento di una stanza che non c'è, non cambiano niente.
+        // Without a jam: leaving, or an event from a room that does not exist, change nothing.
         let effects = run(&mut state, Input::Command(Command::Jam(JamCmd::Leave)));
         assert!(effects.is_empty());
         let effects = run(&mut state, Input::Jam(RoomEvent::Closed("Jam chiusa".into())));
         assert!(effects.is_empty() && state.publish(&start).is_none());
 
-        // Creare la stanza: una pubblicazione, della sola jam; il collegamento parte, nessun timer.
+        // Creating the room: one publish, of the jam only; the link starts, no timer.
         let effects = run(&mut state, Input::Command(Command::Jam(JamCmd::Create { name: "Luca".into() })));
         assert!(matches!(effects.as_slice(), [Effect::Jam(crate::state::jam::JamOp::Start { .. })]));
         let connecting = state.publish(&start).expect("la jam parte");
         assert_eq!(connecting.versions, DomainVersions { jam: 1, ..DomainVersions::default() });
         assert!(Arc::ptr_eq(&connecting.playback, &start.playback), "il gruppo non è nella vista");
 
-        // La stanza risponde senza stato: una pubblicazione, della sola jam; nessun invio, nessun timer.
+        // The room answers without state: one publish, of the jam only; no send, no timer.
         let members = vec![Member { id: uuid::Uuid::from_u128(77), name: "Luca".into() }];
         let joined = RoomEvent::Joined {
             code: "K7QXM3".into(),
@@ -912,14 +912,14 @@ mod tests {
         assert_eq!((open.versions.jam, open.versions.playback), (2, 0));
         assert_eq!(open.jam.code.as_deref(), Some("K7QXM3"));
 
-        // Gli stessi membri di nuovo, uno stato uguale a niente: nessuna pubblicazione e nessun effetto.
+        // The same members again, a state equal to nothing: no publish and no effect.
         let effects = run(&mut state, Input::Jam(RoomEvent::Members(members)));
         assert!(effects.is_empty() && state.publish(&open).is_none(), "la stessa lista non è un cambio");
         assert_eq!(timers(&effects), 0);
 
-        // Uno stato degli altri con la coda vuota: la coda è già vuota, niente da cambiare. Con brani
-        // già in coda, invece, è un solo giro: la riproduzione si allinea (una pubblicazione, due
-        // domini), e riceverlo di nuovo uguale non rimanda niente alla stanza.
+        // The others' state with an empty queue: the queue is already empty, nothing to change. With tracks
+        // already queued, instead, it is a single round: playback aligns (one publish, two
+        // domains), and receiving it again identical returns nothing to the room.
         let empty = Remote {
             snapshot: Shared { queue: vec![], index: 0, position_ms: 0, playing: false },
             from: "Luca".into(),
@@ -949,13 +949,13 @@ mod tests {
         assert_eq!(aligned.versions.social, queued.versions.social);
         assert!(state.publish(&aligned).is_none(), "pubblicato una volta");
 
-        // Lo stesso stato di nuovo (il battito di chi suona): alla riproduzione già allineata non
-        // cambia niente e la stanza non riceve niente; nessun timer.
+        // The same state again (the tick of whoever plays): playback already aligned changes
+        // nothing and the room receives nothing; no timer.
         let effects = run(&mut state, Input::Jam(RoomEvent::State(remote)));
         assert!(!effects.iter().any(|e| matches!(e, Effect::Jam(_) | Effect::Timer { .. })), "{effects:?}");
         assert!(state.publish(&aligned).is_none());
 
-        // Uscire: una pubblicazione, il collegamento si chiude.
+        // Leaving: one publish, the link closes.
         let effects = run(&mut state, Input::Command(Command::Jam(JamCmd::Leave)));
         assert!(matches!(effects.as_slice(), [Effect::Jam(crate::state::jam::JamOp::Leave)]));
         let left = state.publish(&aligned).expect("uscito");
@@ -963,9 +963,9 @@ mod tests {
         assert!(state.publish(&left).is_none());
     }
 
-    /// Il passaggio fra i domini porta il profilo alla jam (il nome in stanza di chi non ne scrive
-    /// uno) e la stanza al dominio sociale (gli inviti partono con il suo codice, e quello alla
-    /// propria stanza non si annuncia): il frontend non fa da tramite.
+    /// The passing between domains brings the profile to the jam (the in-room name of whoever does not write
+    /// one) and the room to the social domain (the invitations go out with its code, and the one to
+    /// one's own room is not announced): the frontend does not act as go-between.
     #[test]
     fn the_handoff_gives_the_jam_the_profile_name_and_the_social_domain_the_room() {
         use crate::command::{JamCmd, SocialCmd};
@@ -975,7 +975,7 @@ mod tests {
         let mut state = CoreState::new(Config::default(), None, 1);
         adopt(&mut state);
 
-        // Inviti senza stanza: «aspetta che la jam sia pronta».
+        // Invitations without a room: "wait until the jam is ready".
         let effects = command(&mut state, Command::Social(SocialCmd::InviteToJam(vec!["luca".into()])));
         assert!(social_work(&effects).is_empty());
         assert!(matches!(
@@ -983,18 +983,18 @@ mod tests {
             Some(social::SocialEvent::JamNotReady)
         ));
 
-        // Senza un nome scritto, in stanza ci si presenta con il nome del profilo.
+        // Without a name written, in the room one introduces oneself with the profile's name.
         let effects = command(&mut state, Command::Jam(JamCmd::Create { name: String::new() }));
         assert!(matches!(
             effects.as_slice(),
             [Effect::Jam(JamOp::Start { target: Target::Create, name, .. })] if name == "Prova"
         ));
-        // Il codice non c'è ancora: gli inviti aspettano.
+        // The code is not there yet: the invitations wait.
         let before = state.social.view.events.len();
         command(&mut state, Command::Social(SocialCmd::InviteToJam(vec!["luca".into()])));
         assert_eq!(state.social.view.events.len(), before + 1);
 
-        // La stanza dice il suo codice: gli inviti partono con quello.
+        // The room says its code: the invitations go out with that one.
         let members = vec![Member { id: uuid::Uuid::from_u128(77), name: "Prova".into() }];
         let joined =
             RoomEvent::Joined { code: "K7QXM3".into(), you: uuid::Uuid::from_u128(77), members, state: None };
@@ -1004,7 +1004,7 @@ mod tests {
             social_work(&effects),
             [crate::testing::SocialWork::InviteToJam { code: "K7QXM3".into(), handles: vec!["luca".into()] }]
         );
-        // L'invito alla propria stanza non si annuncia; uno a un'altra sì.
+        // The invitation to one's own room is not announced; one to another is.
         let invite = |code: &str| crate::api::social::JamInvite {
             code: code.into(),
             from_handle: "luca".into(),
@@ -1022,7 +1022,7 @@ mod tests {
         );
         assert_eq!(state.social.view.events.len(), announced + 1);
 
-        // Uscita: il dominio sociale dimentica la stanza (gli inviti tornano a dire «non pronta»).
+        // Leaving: the social domain forgets the room (the invitations say "not ready" again).
         command(&mut state, Command::Jam(JamCmd::Leave));
         let before = state.social.view.events.len();
         command(&mut state, Command::Social(SocialCmd::InviteToJam(vec!["luca".into()])));
@@ -1033,7 +1033,7 @@ mod tests {
         ));
     }
 
-    /// Il backend scelto nelle impostazioni arriva anche al dominio sociale.
+    /// The backend chosen in the settings reaches the social domain too.
     #[test]
     fn the_server_choice_reaches_the_social_domain() {
         let mut state = CoreState::new(Config::default(), None, 1);

@@ -1,5 +1,4 @@
-//! «Libreria»: what is yours, in one list, like the phone Library of the Iced client
-//! (`client/src/ui/phone/library.rs`). At the top the title with «Nuova playlist»; then «Brani che ti
+//! «Libreria»: what is yours, in one list, like the phone Library. At the top the title with «Nuova playlist»; then «Brani che ti
 //! piacciono» and the playlists (a click opens them; rename and delete on hover, through `Shell`'s dialog),
 //! the saved albums and the followed artists. Each section's rows flow into columns (desktop v2 §2) and the
 //! page enters with the page-enter move.

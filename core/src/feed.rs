@@ -1,6 +1,6 @@
-//! Le «uscite»: i brani recenti del catalogo raggruppati come li vede chi ascolta (un album, o un
-//! singolo), con la data di pubblicazione nel catalogo. Il backend non ha un elenco di novità né di
-//! artisti seguiti, quindi il feed si ricava qui dai brani, che hanno `created_at`.
+//! The «uscite» (releases): the catalog's recent tracks grouped as the listener sees them (an album, or a
+//! single), with the release date in the catalog. The backend has no list of new releases nor of
+//! followed artists, so the feed is derived here from the tracks, which have `created_at`.
 
 use uuid::Uuid;
 
@@ -9,34 +9,34 @@ use crate::api::{AlbumSummary, Track};
 use crate::config::taste::{self, ArtistTaste, Mix};
 use crate::config::{FollowedArtist, PlayStat};
 
-/// Uscite nel carosello in cima alla Home.
+/// Releases in the carousel at the top of the Home.
 pub const HERO_COUNT: usize = 5;
-/// Mix mostrati nella Home.
+/// Mixes shown on the Home.
 const MIX_COUNT: usize = 4;
-/// Artisti nella fila «I tuoi artisti».
+/// Artists in the row «I tuoi artisti».
 const ARTIST_COUNT: usize = 20;
 
-/// Il feed della Home, calcolato quando cambiano i dati e non a ogni frame: il dominio della
-/// libreria lo rifà quando cambiano i brani recenti, gli artisti seguiti o gli ascolti.
+/// The Home feed, computed when the data changes and not on every frame: the library domain
+/// rebuilds it when the recent tracks, the followed artists or the plays change.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Feed {
-    /// Tutte le uscite note, dalla più recente.
+    /// All known releases, from the most recent.
     pub releases: Vec<Release>,
-    /// Le più recenti con una copertina da mostrare in grande: il carosello.
+    /// The most recent ones with a cover to show large: the carousel.
     pub hero: Vec<Release>,
-    /// Le uscite degli artisti seguiti.
+    /// The releases of the followed artists.
     pub news: Vec<Release>,
     pub mixes: Vec<Mix>,
-    /// Gli artisti da mostrare in cerchio, e se sono «tuoi» (seguiti o ascoltati).
+    /// The artists to show in a circle, and whether they are "yours" (followed or listened to).
     pub artists: Vec<ArtistCard>,
     pub artists_are_yours: bool,
-    /// I più ascoltati da chi ascolta, dal primo.
+    /// The most played by the listener, from the first.
     pub top: Vec<PlayStat>,
 }
 
 impl Feed {
-    /// Costruisce il feed dai brani recenti del catalogo, dagli artisti seguiti e dagli ascolti.
-    /// `seed` tiene fermi i mix per tutta la sessione.
+    /// Builds the feed from the catalog's recent tracks, the followed artists and the plays.
+    /// `seed` keeps the mixes fixed for the whole session.
     pub fn build(tracks: &[Track], followed: &[FollowedArtist], stats: &[PlayStat], seed: u64) -> Self {
         let releases = releases(tracks);
         let mut hero: Vec<Release> = releases.iter().filter(|r| r.cover_url.is_some()).cloned().collect();
@@ -76,29 +76,29 @@ impl Feed {
     }
 }
 
-/// Un album o un singolo, con i brani che il feed ne conosce.
+/// An album or a single, with the tracks the feed knows of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
-    /// L'identificatore dell'album, o del brano se è un singolo.
+    /// The album's identifier, or the track's if it is a single.
     pub id: Uuid,
     pub is_album: bool,
     pub title: String,
     pub artist: ArtistRef,
     pub cover_url: Option<String>,
-    /// La pubblicazione più recente tra i suoi brani.
+    /// The most recent release among its tracks.
     pub created_at: String,
     pub tracks: Vec<Track>,
 }
 
 impl Release {
-    /// «Album» o «Singolo», per il testo sotto il titolo.
+    /// «Album» or «Singolo», for the text under the title.
     pub fn kind_label(&self) -> &'static str {
         if self.is_album { "Album" } else { "Singolo" }
     }
 }
 
-/// Le uscite dei brani dati, dalla più recente. I brani di uno stesso album diventano un'uscita
-/// sola; l'ordine è quello di `created_at` (testo ISO 8601, che si ordina come il tempo).
+/// The releases of the given tracks, from the most recent. The tracks of one album become a single
+/// release; the order is that of `created_at` (ISO 8601 text, which sorts like time).
 pub fn releases(tracks: &[Track]) -> Vec<Release> {
     let mut found: Vec<Release> = Vec::new();
     for track in tracks {
@@ -134,17 +134,17 @@ pub fn releases(tracks: &[Track]) -> Vec<Release> {
     found
 }
 
-/// Le uscite degli artisti seguiti, dalla più recente.
+/// The releases of the followed artists, from the most recent.
 pub fn from_followed<'a>(releases: &'a [Release], followed: &[FollowedArtist]) -> Vec<&'a Release> {
     releases.iter().filter(|r| followed.iter().any(|f| f.id == r.artist.id)).collect()
 }
 
-/// Quante uscite sono arrivate dopo l'ultima volta che si è guardato «Novità».
+/// How many releases arrived since the last time "Novità" was looked at.
 pub fn unread(news: &[&Release], seen: &str) -> usize {
     news.iter().filter(|r| r.created_at.as_str() > seen).count()
 }
 
-/// Una data ISO 8601 (`2026-05-01T10:00:00Z`) in parole brevi: «1 mag 2026».
+/// An ISO 8601 date (`2026-05-01T10:00:00Z`) in short words: "1 mag 2026".
 pub fn date_label(iso: &str) -> Option<String> {
     const MONTHS: [&str; 12] =
         ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"];
@@ -155,17 +155,17 @@ pub fn date_label(iso: &str) -> Option<String> {
     Some(format!("{day} {name} {year}"))
 }
 
-/// Un artista da mostrare in cerchio: chi è, con la sua immagine.
+/// An artist to show in a circle: who they are, with their image.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistCard {
     pub artist: ArtistRef,
     pub cover_url: Option<String>,
-    /// Brani del feed di questo artista: serve a ordinare chi ha più materiale.
+    /// Tracks of this artist in the feed: used to order who has the most material.
     pub tracks: usize,
 }
 
-/// Gli artisti presenti nei brani dati, quelli con più brani prima. L'immagine di un artista è la
-/// copertina di un suo brano.
+/// The artists present in the given tracks, those with the most tracks first. An artist's image is the
+/// cover of one of their tracks.
 pub fn artists(tracks: &[Track]) -> Vec<ArtistCard> {
     let mut found: Vec<ArtistCard> = Vec::new();
     for track in tracks {
@@ -187,7 +187,7 @@ pub fn artists(tracks: &[Track]) -> Vec<ArtistCard> {
     found
 }
 
-/// I brani di un artista da mettere per primi: i più ascoltati da chi ascolta, poi i più recenti.
+/// An artist's tracks to put first: the most played by the listener, then the most recent.
 pub fn popular(tracks: &[Track], stats: &[PlayStat], count: usize) -> Vec<Track> {
     let plays = |t: &Track| stats.iter().find(|s| s.track.id == t.id).map_or(0, |s| s.plays);
     let mut ranked: Vec<&Track> = tracks.iter().collect();
@@ -195,8 +195,8 @@ pub fn popular(tracks: &[Track], stats: &[PlayStat], count: usize) -> Vec<Track>
     ranked.into_iter().take(count).cloned().collect()
 }
 
-/// Gli artisti degli album e dei brani dati, nell'ordine in cui compaiono (le copertine degli album
-/// per prime: sono quelle più curate). Un artista compare una volta sola.
+/// The artists of the given albums and tracks, in the order they appear (the album covers
+/// first: they are the most carefully made). An artist appears only once.
 pub fn artists_from(albums: &[AlbumSummary], tracks: &[Track]) -> Vec<ArtistCard> {
     let mut found: Vec<ArtistCard> = Vec::new();
     let mut add = |artist: &ArtistRef, cover_url: Option<&String>| match found

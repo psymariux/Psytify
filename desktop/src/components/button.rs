@@ -1,9 +1,9 @@
-//! Button (primary, secondary, ghost, destructive) e la base «pressabile» con ledge dura che usano
-//! anche IconButton e il play del trasporto.
+//! Button (primary, secondary, ghost, destructive) and the "pressable" base with a hard ledge that
+//! IconButton and the transport play also use.
 //!
-//! RetroUI: il pulsante ha una ledge dura di 1 AP sotto e a destra; premuto scende di 1 AP e la
-//! ledge sparisce (istantaneo, come un tasto). L'hover alza il riempimento o schiarisce il bordo e
-//! non sposta mai nulla.
+//! RetroUI: the button has a hard 1 AP ledge below and to the right; pressed it drops 1 AP and the
+//! ledge disappears (instant, like a key). The hover raises the fill or lightens the border and
+//! never moves anything.
 
 use gpui::{
     App, Div, ElementId, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Stateful, Styled,
@@ -30,7 +30,7 @@ pub enum ButtonKind {
     Primary,
     Secondary,
     Ghost,
-    /// Solo nei dialoghi: primario con riempimento `ERROR`.
+    /// Dialogs only: primary with an `ERROR` fill.
     Destructive,
 }
 
@@ -42,11 +42,11 @@ pub struct Look {
     /// Colore di etichetta e icona.
     pub text: Option<Rgba>,
     pub ledge: Option<Rgba>,
-    /// Premuto: il corpo scende di 1 AP.
+    /// Pressed: the body drops 1 AP.
     pub shifted: bool,
 }
 
-/// Aspetto del pulsante per tipo e stato (tabella della sezione 1 delle linee guida).
+/// The button's look by kind and state (table in section 1 of the guidelines).
 pub fn button_look(kind: ButtonKind, v: Visual, disabled: bool, selected: bool, inert: bool) -> Look {
     let pressed = v.pressed && !inert;
     let hovered = v.hovered && !inert;
@@ -106,8 +106,8 @@ pub fn button_look(kind: ButtonKind, v: Visual, disabled: bool, selected: bool, 
     }
 }
 
-/// Costruisce l'elemento «pressabile»: ledge dietro, corpo a tacca che scende da premuto, contenuto,
-/// anello di focus. `size` è la misura del controllo (larghezza opzionale: senza, segue il contenuto).
+/// Builds the "pressable" element: ledge behind, notched body that drops when pressed, content,
+/// focus ring. `size` is the control's size (optional width: without it, it follows the content).
 pub fn pressable(
     wired: Wired,
     size: (Option<Pixels>, Pixels),
@@ -163,8 +163,8 @@ pub struct Button {
     min_width: Option<f32>,
     /// Larghezza fissa (i pulsanti a tutta colonna del modulo di accesso), contenuto al centro.
     width: Option<f32>,
-    /// Il marchio vettoriale di un provider di accesso, a 20 dp: l'unica eccezione alla regola dei pixel
-    /// (la direzione artistica, «Sign-in logos»). Monocromo, tinto come l'etichetta.
+    /// The vector mark of an access provider, at 20 dp: the only exception to the pixel rule
+    /// (the art direction, «Sign-in logos»). Monochrome, tinted like the label.
     mark: Option<&'static [u8]>,
     on_click: Option<OnClick>,
 }
@@ -197,7 +197,7 @@ impl Button {
         self
     }
 
-    /// Il marchio SVG monocromo di un provider prima dell'etichetta (vedi `psytify_design::brand`).
+    /// The monochrome SVG mark of a provider before the label (see `psytify_design::brand`).
     pub fn mark(mut self, svg: &'static [u8]) -> Self {
         self.mark = Some(svg);
         self
@@ -230,19 +230,19 @@ impl Button {
         self
     }
 
-    /// Altezza `CONTROL_H_LARGE` (il Play di pagina).
+    /// Height `CONTROL_H_LARGE` (the page's Play).
     pub fn large(mut self) -> Self {
         self.large = true;
         self
     }
 
-    /// Pulsante a due stati («Segui già»): solo per il secondario, con la spunta a sinistra.
+    /// Two-state button («Segui già»): only for the secondary, with the tick on the left.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
     }
 
-    /// L'etichetta lascia il posto al `loader` alla stessa larghezza; il pulsante è inerte.
+    /// The label gives way to the `loader` at the same width; the button is inert.
     pub fn loading(mut self, loading: bool) -> Self {
         self.loading = loading;
         self

@@ -1,4 +1,4 @@
-//! Coda, stato di riproduzione, orologio, seek e wrapper di rodio.
+//! Queue, playback state, clock, seek and the rodio wrapper.
 
 pub mod audio;
 pub mod clock;

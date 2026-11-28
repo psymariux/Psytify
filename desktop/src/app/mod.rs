@@ -1,19 +1,19 @@
-//! L'app desktop su GPUI: la finestra con barra del titolo lato client, barra laterale, pagina,
-//! pannello laterale (In riproduzione, Testo, Coda) e barra «in riproduzione», o al loro posto il palco
-//! (`stage_view`). Ogni pezzo è una vista (entità) che si abbona al
-//! `CoreModel` e si ridisegna solo quando cambia il suo dominio; la radice tiene la pagina corrente,
-//! il pannello aperto, gli avvisi (un solo sistema per gli eventi di tutti i domini, vedi `notices`) e la
-//! chiusura.
+//! The desktop app on GPUI: the window with a client-side title bar, sidebar, page,
+//! side panel (In riproduzione, Testo, Coda) and the «in riproduzione» bar, or the stage in their place
+//! (`stage_view`). Each piece is a view (entity) that subscribes to the
+//! `CoreModel` and redraws only when its domain changes; the root keeps the current page,
+//! the open panel, the notices (one system for the events of all domains, see `notices`) and the
+//! shutdown.
 //!
-//! Pagine (`nav::Page`, con la cronologia indietro/avanti di `nav::History`): Cerca, Libreria, «Brani che
-//! ti piacciono» e una playlist (`collection_page`), Scaricati, un album (`album_page`), un artista
-//! (`artist_page`), un album o una playlist del catalogo ufficiale o di un'altra fonte (`source_page`),
-//! la Home (`home_page`, la pagina d'avvio come nel client Iced), l'accesso e gli Amici con i profili, e la
-//! Jam (`jam_page`, l'ascolto insieme). Sopra tutto `Shell` tiene il dialogo delle playlist
-//! (`playlist_dialog`, anche la conferma per togliere un amico) e il menu «Altro» di un brano
-//! (`track_menu`), che le pagine chiedono con un `PageEvent`. Tutto ciò che si può fare passa da un
-//! comando al core: la finestra non tiene copie dello stato, solo gli `Arc` delle viste e i testi
-//! già pronti.
+//! Pages (`nav::Page`, with the back/forward history of `nav::History`): Cerca, Libreria, «Brani che
+//! ti piacciono» and a playlist (`collection_page`), Scaricati, an album (`album_page`), an artist
+//! (`artist_page`), an album or a playlist from the official catalogue or another source (`source_page`),
+//! the Home (`home_page`, the start page), sign-in and Amici with the profiles, and
+//! Jam (`jam_page`, listening together). Above everything, `Shell` holds the playlist dialog
+//! (`playlist_dialog`, also the confirmation to remove a friend) and the «Altro» menu of a track
+//! (`track_menu`), which the pages request with a `PageEvent`. Everything that can be done goes through a
+//! command to the core: the window keeps no copies of the state, only the `Arc`s of the views and the
+//! texts already ready.
 
 mod album_page;
 mod artist_page;
@@ -125,7 +125,7 @@ use crate::actions::ToggleVideoFocus;
 #[cfg(feature = "video")]
 use crate::video::stage::{StageEvent, Surface, VideoStage};
 
-/// Quanto si aspetta il salvataggio del core prima di uscire comunque.
+/// How long the window waits for the core to save before quitting anyway.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 /// The side panel's tabs (desktop v2 §5): the record, the words, the queue.
@@ -170,7 +170,7 @@ pub fn toggled(open: Option<SidePanel>, kind: SidePanel) -> Option<SidePanel> {
     if open == Some(kind) { None } else { Some(kind) }
 }
 
-/// Come mostrare il brano in corso nelle liste: lime e animato solo se suona.
+/// How to show the playing track in lists: lime and animated only while it plays.
 pub fn play_state(view: &PlaybackView) -> Option<PlayState> {
     match view.state {
         PlaybackState::Playing => Some(PlayState::Playing),
@@ -180,38 +180,38 @@ pub fn play_state(view: &PlaybackView) -> Option<PlayState> {
     }
 }
 
-/// Ciò che una pagina chiede a `Shell`: aprire un'altra pagina o un dialogo (che sta sopra tutta la
-/// finestra, non dentro la pagina), e i gesti che danno un avviso (gli avvisi li fa solo `Shell`).
+/// What a page asks of `Shell`: open another page or a dialog (which sits above the whole
+/// window, not inside the page), and the gestures that give a notice (only `Shell` shows notices).
 #[derive(Clone, Debug, PartialEq)]
 pub enum PageEvent {
     Open(Page),
     Dialog(DialogRequest),
-    /// Il menu «Altro» di un brano.
+    /// The «Altro» menu of a track.
     TrackMenu(Box<TrackMenu>),
-    /// Apre la pagina di un album o di una playlist di una fonte esterna.
+    /// Opens the page of an album or a playlist from an external source.
     OpenSource(Box<SourcePlaylist>),
-    /// Salva nella libreria la playlist esterna aperta (la si apre quando il core la pubblica).
+    /// Saves the open external playlist to the library (it is opened when the core publishes it).
     SaveSource,
-    /// Salva un album nella libreria o lo toglie.
+    /// Saves an album to the library or removes it.
     ToggleSaveAlbum(Box<SavedAlbum>),
-    /// Segue un artista o smette.
+    /// Follows an artist or stops.
     ToggleFollow(Box<FollowedArtist>),
-    /// Apre le impostazioni sulla scheda Account (il modulo del profilo).
+    /// Opens the settings on the Account tab (the profile form).
     OpenAccountSettings,
-    /// Apre il profilo di una persona (il suo nome utente).
+    /// Opens the profile of a person (their username).
     OpenProfile(String),
-    /// Apre la playlist pubblica `id` di una persona.
+    /// Opens the public playlist `id` of a person.
     OpenFriendPlaylist {
         handle: String,
         id: uuid::Uuid,
     },
-    /// Cerca questo testo (lo mette nel campo e apre Cerca).
+    /// Searches for this text (puts it in the field and opens Cerca).
     Search(gpui::SharedString),
-    /// Un avviso (gli avvisi li mostra solo `Shell`).
+    /// A notice (only `Shell` shows notices).
     Notice(Notice),
 }
 
-/// I posti dell'equalizzatore di ogni vista che lo mostra (vedi `components::playing_spot`).
+/// The equaliser spots of each view that shows it (see `components::playing_spot`).
 struct Spots {
     home: PlayingSpot,
     search: PlayingSpot,
@@ -223,41 +223,41 @@ struct Spots {
     queue: PlayingSpot,
 }
 
-/// Le schede delle pagine esterne che la cronologia può ancora riaprire: oltre, si scartano quelle che
-/// nessuna pagina della cronologia nomina.
+/// The external pages' tabs that the history can still reopen: beyond that, the ones that
+/// no page in the history names are dropped.
 const SOURCE_PAGES: usize = 64;
 
-/// Il menu «Altro» aperto.
+/// The open «Altro» menu.
 struct OpenMenu {
     menu: TrackMenu,
     level: MenuLevel,
     playlists: Vec<(uuid::Uuid, gpui::SharedString)>,
-    /// Segui già l'artista del brano (all'apertura del menu).
+    /// Already follows the track's artist (when the menu opens).
     following: bool,
-    /// Le voci di download (all'apertura del menu).
+    /// The download entries (when the menu opens).
     downloads: DownloadItems,
 }
 
-/// L'elenco delle playlist nel menu scorre oltre dieci voci.
+/// The playlist list in the menu scrolls beyond ten entries.
 const MENU_LIST_MAX_H: f32 = 10.0 * psytify_design::tokens::size::MENU_ITEM_H;
 
-/// Come aprire l'app (dalla riga di comando): una ricerca già lanciata e il pannello della coda aperto.
+/// How to open the app (from the command line): a search already launched and the queue panel open.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Launch {
     pub search: Option<String>,
     pub queue: bool,
-    /// Il pannello laterale aperto sul testo (`--lyrics`).
+    /// The side panel open on the lyrics (`--lyrics`).
     pub lyrics: bool,
     /// The stage open (`--focus`), if a track is queued.
     pub focus: bool,
     /// The side panel open on *In riproduzione* (`--now`).
     pub now: bool,
-    /// Suona il primo risultato del catalogo ufficiale appena arriva (per provare l'importazione senza
-    /// toccare niente: la riga mostra «Apro…» finché il server lavora).
+    /// Plays the first result of the official catalogue as soon as it arrives (to test the import without
+    /// touching anything: the row shows «Apro…» while the server works).
     pub play_first_official: bool,
-    /// La pagina da aprire (`--page`): per le schermate e le misure, dove non si tocca niente.
+    /// The page to open (`--page`): for screenshots and measurements, where nothing is touched.
     pub page: Option<PageArg>,
-    /// I dati sociali di prova (`--fixture`, solo con la feature `fixtures`).
+    /// The social test data (`--fixture`, only with the `fixtures` feature).
     #[cfg(feature = "fixtures")]
     pub fixture: Option<String>,
     /// The clip on in the media slot (`--video`): the panel's, or with `--focus` the stage's.
@@ -270,7 +270,7 @@ pub struct Shell {
     focus: FocusHandle,
     search: Entity<SearchField>,
     bar: Entity<PlayerBar>,
-    /// La fascia dell'aggiornamento sotto la barra del titolo, e se c'è (solo allora entra nella finestra).
+    /// The update banner under the title bar, and whether there is one (only then it enters the window).
     banner: Entity<UpdateBanner>,
     banner_shown: bool,
     queue: Entity<QueuePanel>,
@@ -290,7 +290,7 @@ pub struct Shell {
     video: Entity<VideoStage>,
     /// The clip is on in the media slot (panel or stage).
     video_on: bool,
-    /// Il core sa che qualcuno mostra il testo (`PlaybackCmd::Lyrics`).
+    /// The core knows that someone shows the lyrics (`PlaybackCmd::Lyrics`).
     lyrics_wanted: bool,
     search_page: Entity<SearchPage>,
     home_page: Entity<HomePage>,
@@ -302,55 +302,55 @@ pub struct Shell {
     profile_page: Entity<ProfilePage>,
     jam_page: Entity<JamPage>,
     library_page: Entity<LibraryPage>,
-    /// «Brani che ti piacciono» e le playlist: una vista sola che cambia raccolta.
+    /// «Brani che ti piacciono» and the playlists: one view that changes the collection.
     collection_page: Entity<CollectionPage>,
-    /// Una vista per specie di pagina d'oggetto: cambia l'album, l'artista o la scheda che mostra.
+    /// One view per kind of object page: changes the album, the artist or the tab it shows.
     album_page: Entity<AlbumPage>,
     artist_page: Entity<ArtistPage>,
     source_page: Entity<SourcePage>,
-    /// Le schede delle pagine esterne della cronologia (`Page::Source` ne tiene solo l'impronta).
+    /// The external pages' tabs of the history (`Page::Source` keeps only their fingerprint).
     sources: HashMap<SourceKey, SourcePlaylist>,
-    /// I nomi utente delle pagine di persone della cronologia (`Page::Profile` ne tiene l'impronta).
+    /// The usernames of the people's pages in the history (`Page::Profile` keeps only the fingerprint).
     people: HashMap<PersonKey, String>,
-    /// L'account nella barra del titolo, e il proprio nome utente (per aprire il proprio profilo).
+    /// The account in the title bar, and one's own username (to open one's own profile).
     account: AccountChip,
     own_handle: Option<String>,
-    /// Le richieste di amicizia arrivate: il numero sulla voce «Amici».
+    /// Incoming friend requests: the number on the «Amici» entry.
     incoming: usize,
-    /// Gli inviti alle jam arrivati: il numero sulla voce «Jam».
+    /// Incoming jam invitations: the number on the «Jam» entry.
     invites: usize,
-    /// I posti dell'equalizzatore delle viste con righe di brani: `Shell` lo dipinge sopra la vista
-    /// (BACKLOG 23), così lo scatto dello sprite non rifà la pagina in cache.
+    /// The equaliser spots of the views with track rows: `Shell` paints it over the view
+    /// (BACKLOG 23), so the sprite's frame does not redo the cached page.
     spots: Spots,
-    /// La barra del titolo e la barra laterale in cache (`chrome.rs`), con ciò che mostravano all'ultimo
-    /// confronto: si ridisegnano solo quando cambia.
+    /// The title bar and the sidebar in cache (`chrome.rs`), with what they showed at the last
+    /// comparison: they redraw only when it changes.
     title_view: Entity<Chrome>,
     sidebar_view: Entity<Chrome>,
     chrome_keys: Option<(ChromeKey, ChromeKey)>,
-    /// Il dialogo delle playlist, sopra tutto, se è aperto; con chi aveva il focus prima.
+    /// The playlist dialog, above everything, if it is open; with whoever had the focus before.
     dialog: Option<(Entity<PlaylistDialog>, Option<FocusHandle>, Subscription)>,
-    /// La playlist appena creata: si apre quando il core la pubblica.
+    /// The playlist just created: it opens when the core publishes it.
     pending_playlist: Option<uuid::Uuid>,
-    /// Il menu «Altro» aperto: il brano, il pannello e le playlist (id e nome) prese all'apertura.
+    /// The open «Altro» menu: the track, the panel and the playlists (id and name) taken on opening.
     menu: Option<OpenMenu>,
-    /// I download in coda o in corso: il numero sulla voce «Scaricati» della barra laterale.
+    /// Downloads queued or in progress: the number on the «Scaricati» entry of the sidebar.
     busy_downloads: usize,
-    /// Le uscite dei tuoi artisti non ancora viste: il numero sulla voce «Novità».
+    /// Releases from your artists not yet seen: the number on the «Novità» entry.
     unread_news: usize,
-    /// La pagina mostrata per ultima: uscendo da «Novità» ciò che c'era si considera visto.
+    /// The last page shown: leaving «Novità» counts what was there as seen.
     shown: Page,
-    /// La pagina corrente e quelle dietro e davanti (Indietro e Avanti).
+    /// The current page and the ones behind and in front of it (Indietro and Avanti).
     history: History,
     /// The side panel open, and the tab it showed last (drawn while it slides shut).
     panel: Option<SidePanel>,
     panel_last: SidePanel,
-    /// Il marchio nella barra del titolo è lime solo mentre suona.
+    /// The mark in the title bar is lime only while it plays.
     playing: bool,
-    /// L'avviso sul display e quelli che aspettano; il timer c'è solo mentre un avviso è mostrato.
+    /// The notice on the display and the ones waiting; the timer runs only while a notice is shown.
     toasts: Toasts,
-    /// L'ultimo evento di ogni dominio già mostrato (per numero d'ordine).
+    /// The last event of each domain already shown (by sequence number).
     seen: Seen,
-    /// La chiusura è partita: si aspetta che il core salvi.
+    /// Closing has started: it waits for the core to save.
     closing: bool,
     /// The UI zoom preference (`Auto` or pinned); the zoom in effect lives in `theme::zoom`.
     zoom_pref: ZoomPref,
@@ -372,7 +372,7 @@ impl Shell {
                     let core = core.clone();
                     let shell = this.clone();
                     move |text, _, cx| {
-                        // Ogni tasto va al core, che aspetta 300 ms dall'ultimo prima di cercare.
+                        // Every key goes to the core, which waits 300 ms after the last one before searching.
                         core.read(cx).catalog(CatalogCmd::SearchInput(text.to_owned()));
                         shell.update(cx, |shell, cx| shell.show(Page::Search, cx)).ok();
                     }
@@ -530,8 +530,8 @@ impl Shell {
             _subscriptions: Vec::new(),
             core: core.clone(),
         };
-        // Ogni volta che `Shell` si notifica: la barra del titolo e la barra laterale si rifanno solo se cambia
-        // ciò che mostrano, rispetto a ciò che mostrano adesso.
+        // Every time `Shell` notifies: the title bar and the sidebar redraw only if what they show
+        // changes, compared with what they show now.
         shell.chrome_keys = Some((shell.chrome_key(Part::TitleBar), shell.chrome_key(Part::Sidebar)));
         shell._subscriptions.push(cx.observe_self(|this, cx| this.sync_chrome(cx)));
         // `Auto` zoom follows the window width.
@@ -649,8 +649,8 @@ impl Shell {
             window,
             |this, _, event: &PageEvent, window, cx| this.page_event(event, window, cx),
         ));
-        // Rete di sicurezza per le uscite che non passano da `request_close` (il sistema che termina l'app):
-        // GPUI aspetta questo futuro per poco (`SHUTDOWN_TIMEOUT`), di solito basta per il salvataggio.
+        // Safety net for the quits that do not go through `request_close` (the system ending the app):
+        // GPUI waits for this future only briefly (`SHUTDOWN_TIMEOUT`), usually enough for the save.
         shell._subscriptions.push(cx.on_app_quit(|this, cx| {
             let done = this.core.update(cx, |core, _| core.begin_shutdown());
             async move {
@@ -659,8 +659,8 @@ impl Shell {
                 }
             }
         }));
-        // La Home si carica sempre, come nel client Iced: è la pagina d'avvio e da lei nasce il feed (gli altri
-        // artisti della pagina artista, BACKLOG 32), qualunque sia la pagina aperta.
+        // The Home always loads: it is the start page and the feed comes from it (the
+        // other artists of the artist page, BACKLOG 32), whatever page is open.
         core.read(cx).catalog(CatalogCmd::Ensure(psytify_core::command::Resource::Home));
         if let Some(text) = launch.search.as_deref() {
             core.read(cx).catalog(CatalogCmd::Search(text.trim().to_owned()));
@@ -700,7 +700,7 @@ impl Shell {
                 }
             }
             Some(PageArg::Profile) => {
-                // Il proprio profilo, o (con i dati di prova) quello che la vista ha aperto.
+                // One's own profile, or (with the test data) the one the view has opened.
                 let handle =
                     social.open.as_ref().map(|(handle, _)| handle.clone()).or(shell.own_handle.clone());
                 if let Some(handle) = handle {
@@ -712,7 +712,7 @@ impl Shell {
             None => {}
         }
         shell.page_shown(true, cx);
-        // I dati di prova di un aggiornamento non riuscito portano l'avviso che il core avrebbe dato.
+        // The test data of a failed update carry the notice the core would give.
         #[cfg(feature = "fixtures")]
         if let Some(notice) = launch.fixture.as_deref().and_then(crate::fixtures::notice) {
             shell.notify(notice, cx);
@@ -726,7 +726,7 @@ impl Shell {
         shell
     }
 
-    /// Cosa fare quando il core pubblica: avvisi e marchio. Le viste si aggiornano da sole.
+    /// What to do when the core publishes: notices and the mark. The views update by themselves.
     fn core_changed(
         &mut self,
         core: &Entity<CoreModel>,
@@ -760,7 +760,7 @@ impl Shell {
             && let Some(id) = self.pending_playlist
             && snapshot.library.playlists.iter().any(|playlist| playlist.id == id)
         {
-            // La playlist appena creata è nella libreria: la si apre.
+            // The playlist just created is in the library: it is opened.
             self.pending_playlist = None;
             self.show(Page::Playlist(id), cx);
         }
@@ -780,7 +780,7 @@ impl Shell {
                 self.busy_downloads = busy;
                 cx.notify();
             }
-            // La fascia si ridisegna da sé se la sua riga cambia; `Shell` solo quando compare o sparisce.
+            // The banner redraws itself if its row changes; `Shell` only when it appears or disappears.
             let line = update_line(core.read(cx).update_view(), Place::Banner);
             let shown = self.banner.update(cx, |banner, cx| banner.set(line, cx));
             if shown != self.banner_shown {
@@ -795,7 +795,7 @@ impl Shell {
             let loading = snapshot.catalog.search.results.is_loading();
             self.search.update(cx, |field, cx| field.set_loading(loading, cx));
         }
-        // Gli eventi nuovi di ogni dominio cambiato, in ordine: un solo sistema per tutti.
+        // The new events of each changed domain, in order: one system for all.
         let heard = self.seen.collect(&snapshot, changed);
         if heard.raise {
             window.activate_window();
@@ -804,13 +804,13 @@ impl Shell {
             self.notify(notice, cx);
         }
         if let Some(id) = heard.open_artist {
-            // L'artista del catalogo ufficiale chiesto dalla ricerca è sul server: si apre la sua pagina.
+            // The official catalogue's artist asked for by the search is on the server: its page opens.
             self.show(Page::Artist(id), cx);
         }
     }
 
-    /// La vista sociale è cambiata: l'account nella barra, il numero delle richieste e, ad accesso fatto,
-    /// l'uscita dalla pagina di accesso (come nel client Iced).
+    /// The social view changed: the account in the bar, the number of requests and, once signed in,
+    /// leaving the sign-in page.
     fn social_changed(&mut self, social: &SocialView, cx: &mut Context<Self>) {
         let chip = account_chip(&social.account);
         let handle = own_handle(social);
@@ -838,7 +838,7 @@ impl Shell {
         }
     }
 
-    /// Apre il profilo di `handle` (il suo nome resta in `people` finché la cronologia lo nomina).
+    /// Opens the profile of `handle` (its name stays in `people` while the history names it).
     fn open_person(&mut self, handle: &str, playlist: Option<uuid::Uuid>, cx: &mut Context<Self>) {
         let key = PersonKey::of(handle);
         self.people.insert(key, handle.to_owned());
@@ -860,8 +860,8 @@ impl Shell {
         }
     }
 
-    /// Un clic sull'account nella barra: l'accesso, o il proprio profilo (senza nome utente: gli Amici, che
-    /// chiedono di sceglierne uno).
+    /// A click on the account in the bar: sign-in, or one's own profile (without a username: Amici, which
+    /// asks to choose one).
     fn account_clicked(&mut self, cx: &mut Context<Self>) {
         match (&self.account, self.own_handle.clone()) {
             (AccountChip::SignedOut, _) => self.show(Page::SignIn, cx),
@@ -871,7 +871,7 @@ impl Shell {
         }
     }
 
-    /// Mette un avviso in coda; se il display è vuoto lo mostra subito e arma il timer.
+    /// Queues a notice; if the display is empty it shows it at once and arms the timer.
     fn notify(&mut self, notice: Notice, cx: &mut Context<Self>) {
         if self.toasts.push(notice) == Pushed::Shown {
             self.hold_toast(cx);
@@ -879,8 +879,8 @@ impl Shell {
         }
     }
 
-    /// Il timer dell'avviso sul display: `TOAST_HOLD_MS`, poi passa al prossimo o lascia il display
-    /// vuoto. Ce n'è uno solo per volta e solo mentre un avviso è mostrato.
+    /// The timer of the notice on the display: `TOAST_HOLD_MS`, then it moves to the next or leaves the
+    /// display empty. There is only one at a time, and only while a notice is shown.
     fn hold_toast(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_millis(u64::from(TOAST_HOLD_MS))).await;
@@ -894,8 +894,8 @@ impl Shell {
         .detach();
     }
 
-    /// Apre una pagina (e la mette nella cronologia). Niente se è già quella.
-    /// Una pagina che si apre chiude la vista immersiva, che la coprirebbe.
+    /// Opens a page (and puts it in the history). Nothing if it is already that one.
+    /// A page that opens closes the immersive view, which would cover it.
     fn show(&mut self, page: Page, cx: &mut Context<Self>) {
         if self.sidebar.overlay {
             // Choosing a page closes the sidebar laid over the canvas.
@@ -959,13 +959,13 @@ impl Shell {
         }
     }
 
-    /// La pagina corrente è cambiata: la vista di quella specie prende il suo oggetto (e lo chiede al core
-    /// se non c'è), e si ridisegna la radice.
+    /// The current page changed: the view of that kind takes its object (and asks the core for it
+    /// if there is none), and the root redraws.
     /// `rise`: the page enter rises (a new page), not on Back and Forward.
     fn page_shown(&mut self, rise: bool, cx: &mut Context<Self>) {
         let current = self.history.current();
         if self.shown == Page::News && current != Page::News {
-            // Come il client Iced: uscendo da «Novità» ciò che c'era si considera visto.
+            // Leaving «Novità» counts what was there as seen.
             self.core.read(cx).library(LibraryCmd::MarkNewsSeen);
         }
         self.shown = current;
@@ -1026,7 +1026,7 @@ impl Shell {
         }
     }
 
-    /// Apre la pagina di una scheda esterna; le schede che la cronologia non nomina più si scartano.
+    /// Opens the page of an external tab; the tabs the history no longer names are dropped.
     fn open_source(&mut self, playlist: SourcePlaylist, cx: &mut Context<Self>) {
         let key = SourceKey::of(playlist.source, &playlist.id);
         self.sources.insert(key, playlist);
@@ -1041,7 +1041,7 @@ impl Shell {
         }
     }
 
-    /// Una pagina chiede di aprirne un'altra o un dialogo.
+    /// A page asks to open another one or a dialog.
     fn page_event(&mut self, event: &PageEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             PageEvent::Open(Page::Search) => self.focus_search(window, cx),
@@ -1063,8 +1063,8 @@ impl Shell {
             }
             PageEvent::OpenSource(playlist) => self.open_source((**playlist).clone(), cx),
             PageEvent::SaveSource => {
-                // La playlist si apre quando il core la pubblica; se non la crea (vuota, libreria piena)
-                // l'identificatore non compare mai.
+                // The playlist opens when the core publishes it; if it does not create it (empty, library full)
+                // the identifier never appears.
                 let id = uuid::Uuid::new_v4();
                 self.pending_playlist = Some(id);
                 self.core.read(cx).external(ExternalCmd::SavePlaylist { id });
@@ -1086,7 +1086,7 @@ impl Shell {
         }
     }
 
-    /// Salva un album o lo toglie, con l'avviso del client Iced.
+    /// Saves an album or removes it, with its notice.
     fn toggle_save_album(&mut self, album: SavedAlbum, cx: &mut Context<Self>) {
         let saved =
             self.core.read(cx).snapshot().library.saved_albums.iter().any(|known| known.id == album.id);
@@ -1099,7 +1099,7 @@ impl Shell {
         self.notify(Notice::info(notice), cx);
     }
 
-    /// Segue un artista o smette, con l'avviso del client Iced.
+    /// Follows an artist or stops, with its notice.
     fn toggle_follow(&mut self, artist: FollowedArtist, cx: &mut Context<Self>) {
         let following =
             self.core.read(cx).snapshot().library.followed.iter().any(|known| known.id == artist.id);
@@ -1118,7 +1118,7 @@ impl Shell {
         }
     }
 
-    /// Una voce del menu «Altro»: il comando al core, l'avviso dove il client Iced lo dà.
+    /// An entry of the «Altro» menu: the command to the core, the notice where it is given.
     fn menu_choice(&mut self, choice: MenuChoice, window: &mut Window, cx: &mut Context<Self>) {
         let Some(open) = self.menu.as_mut() else { return };
         match choice {
@@ -1179,7 +1179,7 @@ impl Shell {
         }
     }
 
-    /// Il pannello del menu aperto.
+    /// The panel of the open menu.
     fn menu_panel(&self, open: &OpenMenu, cx: &mut Context<Self>) -> MenuPanel {
         let choose = |id: &'static str, label: &'static str, icon: &'static str, choice: MenuChoice| {
             MenuItem::new(id, label).icon(icon).on_click(
@@ -1236,7 +1236,7 @@ impl Shell {
                 panel = panel
                     .item(choose("menu-follow", follow, follow_icon, MenuChoice::ToggleFollow))
                     .item(choose("menu-copy", "Copia titolo e artista", sprite::ICON_COPY, MenuChoice::Copy));
-                // I download dopo «Copia», come nel client Iced.
+                // Downloads after «Copia».
                 if open.downloads.offer {
                     let label = download_label(open.downloads.quality);
                     panel = panel
@@ -1319,7 +1319,7 @@ impl Shell {
         cx.notify();
     }
 
-    /// Il dialogo è finito: si chiude, il focus torna dov'era e si fa ciò che dice l'esito.
+    /// The dialog is over: it closes, focus returns to where it was and what the outcome says is done.
     fn dialog_done(&mut self, event: DialogEvent, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((_, before, _)) = self.dialog.take() {
             let target = before.unwrap_or_else(|| self.focus.clone());
@@ -1334,7 +1334,7 @@ impl Shell {
             self.pending_playlist = open;
         }
         if let Some(id) = deleted {
-            // Si lascia la playlist eliminata, poi la si toglie da tutta la cronologia.
+            // Leaves the deleted playlist, then removes it from the whole history.
             if self.history.current() == Page::Playlist(id) {
                 self.show(Page::Library, cx);
             }
@@ -1342,7 +1342,7 @@ impl Shell {
         }
     }
 
-    /// I tasti della cronologia per la barra del titolo, accesi solo se c'è un passo da fare.
+    /// The history keys for the title bar, lit only when there is a step to take.
     fn history_buttons(&self, cx: &mut Context<Self>) -> HistoryButtons {
         let shell = cx.entity().downgrade();
         let back = self.history.can_back().then(|| {
@@ -1474,8 +1474,8 @@ impl Shell {
         window.focus(&handle, cx);
     }
 
-    /// Chiude la finestra dopo che il core ha scritto `config.json`. Si aspetta il salvataggio fino a
-    /// [`SHUTDOWN_GRACE`]: oltre, si esce comunque (la configurazione resta quella dell'ultimo salvataggio).
+    /// Closes the window after the core has written `config.json`. It waits for the save up to
+    /// [`SHUTDOWN_GRACE`]: beyond that, it quits anyway (the configuration stays that of the last save).
     fn request_close(&mut self, cx: &mut Context<Self>) {
         if self.closing {
             return;
@@ -1484,13 +1484,13 @@ impl Shell {
         let done = self.core.update(cx, |core, _| core.begin_shutdown());
         cx.spawn(async move |_, cx| {
             if let Some(done) = done {
-                // L'esito non cambia niente: se il salvataggio è fallito il core l'ha già detto nel log.
+                // The outcome changes nothing: if the save failed, the core has already said so in the log.
                 let _ = done.await;
             }
             cx.update(|cx| cx.quit());
         })
         .detach();
-        // Rete di sicurezza: un core che non risponde non deve tenere aperta la finestra.
+        // Safety net: a core that does not answer must not keep the window open.
         cx.spawn(async move |_, cx| {
             cx.background_executor().timer(SHUTDOWN_GRACE).await;
             cx.update(|cx| cx.quit());
@@ -1521,7 +1521,7 @@ impl Shell {
         }
     }
 
-    /// Il gestore del clic sull'account nella barra del titolo.
+    /// The handler of the click on the account in the title bar.
     fn account_handler(&self, cx: &mut Context<Self>) -> OnClose {
         let shell = cx.entity().downgrade();
         std::rc::Rc::new(move |_, cx| {
@@ -1529,7 +1529,7 @@ impl Shell {
         })
     }
 
-    /// Ciò che la barra del titolo o la barra laterale mostra (`chrome.rs`).
+    /// What the title bar or the sidebar shows (`chrome.rs`).
     fn chrome_key(&self, part: Part) -> ChromeKey {
         match part {
             Part::TitleBar => ChromeKey::TitleBar {
@@ -1548,8 +1548,8 @@ impl Shell {
         }
     }
 
-    /// `Shell` si è notificata: la barra del titolo e la barra laterale si ridisegnano se cambia ciò che
-    /// mostrano (lo scatto di uno sprite che dipinge `Shell` non le rifà).
+    /// `Shell` notified itself: the title bar and the sidebar redraw if what they show changes
+    /// (the frame of a sprite painted by `Shell` does not redo them).
     fn sync_chrome(&mut self, cx: &mut Context<Self>) {
         let keys = (self.chrome_key(Part::TitleBar), self.chrome_key(Part::Sidebar));
         let Some(before) = self.chrome_keys.replace(keys.clone()) else { return };
@@ -1561,7 +1561,7 @@ impl Shell {
         }
     }
 
-    /// Gli elementi della barra del titolo o della barra laterale, per la loro vista in cache (`Chrome`).
+    /// The elements of the title bar or the sidebar, for their cached view (`Chrome`).
     fn chrome(&mut self, part: Part, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         match part {
             Part::TitleBar => {
@@ -1588,7 +1588,7 @@ impl Shell {
         }
     }
 
-    /// L'avviso sul display, sopra a tutto (anche al videoclip).
+    /// The notice on the display, above everything (also the video).
     fn toast(&self) -> Option<gpui::Div> {
         let notice = self.toasts.current()?;
         Some(
@@ -1603,7 +1603,7 @@ impl Shell {
         )
     }
 
-    /// Il gestore da dare alla barra del titolo e al sistema per chiudere la finestra.
+    /// The handler to give to the title bar and to the system to close the window.
     pub fn close_handler(this: &Entity<Self>) -> OnClose {
         let shell = this.downgrade();
         std::rc::Rc::new(move |_, cx| {
@@ -1611,8 +1611,8 @@ impl Shell {
         })
     }
 
-    /// La barra laterale, la pagina e il pannello laterale aperto (accanto alla pagina se c'è posto,
-    /// altrimenti sopra).
+    /// The sidebar, the page and the open side panel (beside the page if there is room,
+    /// otherwise over it).
     fn body(
         &self,
         layout: SidebarLayout,
@@ -1762,7 +1762,7 @@ impl Shell {
         div().relative().flex_none().h_full().w(dp(width)).overflow_hidden().child(inner)
     }
 
-    /// Il posto dell'equalizzatore della pagina corrente, se è una pagina con righe di brani.
+    /// The equaliser spot of the current page, if it is a page with track rows.
     fn page_spot(&self) -> Option<PlayingSpot> {
         let spot = match self.history.current() {
             Page::Home => &self.spots.home,
@@ -1807,7 +1807,7 @@ impl Shell {
     }
 }
 
-/// L'account come lo mostra la barra del titolo.
+/// The account as the title bar shows it.
 fn account_chip(account: &Account) -> AccountChip {
     match account {
         Account::Unavailable => AccountChip::Hidden,
@@ -1823,31 +1823,31 @@ fn account_chip(account: &Account) -> AccountChip {
     }
 }
 
-/// Il proprio nome utente, se lo si è scelto.
+/// One's own username, if one has been chosen.
 fn own_handle(social: &SocialView) -> Option<String> {
     social.account.profile().map(|profile| profile.handle.clone())
 }
 
-/// Le richieste di amicizia arrivate.
+/// Incoming friend requests.
 fn incoming(social: &SocialView) -> usize {
     social.friends.ready().map_or(0, |friends| friends.incoming.len())
 }
 
-/// Lo stile con cui una vista a pieno riquadro entra in `.cached()`: la cache di GPUI non misura i figli,
-/// dà alla vista la misura del contenitore. La vista si ridisegna solo quando si notifica da sé, quando
-/// cambia la sua misura o quando la finestra si ridisegna per intero (`Window::refresh`: ridimensionamento,
-/// arrivo di una copertina, passaggio del mouse sui bordi); gli scatti degli sprite invalidano solo la vista
-/// che li ha dipinti (`pixel::anim`).
+/// The style with which a full-area view enters `.cached()`: GPUI's cache does not measure the children,
+/// it gives the view the container's size. The view redraws only when it notifies itself, when
+/// its size changes or when the window redraws entirely (`Window::refresh`: resize,
+/// arrival of a cover, mouse over the edges); sprite frames invalidate only the view
+/// that painted them (`pixel::anim`).
 fn fill() -> StyleRefinement {
     StyleRefinement::default().size_full()
 }
 
-/// La barra «in riproduzione» in `.cached()`: larga quanto la finestra, alta `PLAYER_BAR_H`.
+/// The «in riproduzione» bar in `.cached()`: as wide as the window, `PLAYER_BAR_H` high.
 fn bar_style() -> StyleRefinement {
     StyleRefinement::default().w_full().h(dp(PLAYER_BAR_H)).flex_none()
 }
 
-/// La riga della barra del titolo in `.cached()`: larga quanto la finestra, alta `TITLE_BAR_H`.
+/// The title bar row in `.cached()`: as wide as the window, `TITLE_BAR_H` high.
 fn title_style() -> StyleRefinement {
     StyleRefinement::default().w_full().h(dp(TITLE_BAR_H)).flex_none()
 }
@@ -1857,7 +1857,7 @@ fn sidebar_style(width: f32) -> StyleRefinement {
     StyleRefinement::default().flex_none().h_full().w(dp(width))
 }
 
-/// La fascia dell'aggiornamento in `.cached()`: larga quanto la finestra, alta `BANNER_H`.
+/// The update banner in `.cached()`: as wide as the window, `BANNER_H` high.
 fn banner_style() -> StyleRefinement {
     StyleRefinement::default().w_full().h(dp(BANNER_H)).flex_none()
 }
@@ -1897,10 +1897,10 @@ impl Render for Shell {
         }
         self.stage_moving = stage_moving;
         let stage_shown = self.stage_open && !stage_moving;
-        // Il pannello sta accanto alla pagina se c'è posto, altrimenti ci galleggia sopra.
+        // The panel sits beside the page if there is room, otherwise it floats over it.
         let docked = width >= BP_PANEL_DOCK;
-        // In cache come le pagine: si rifanno solo quando cambia ciò che mostrano (`sync_chrome`), non a ogni
-        // scatto dell'equalizzatore che `Shell` dipinge sopra le pagine (BACKLOG 23).
+        // In cache like the pages: they redraw only when what they show changes (`sync_chrome`), not at every
+        // frame of the equaliser that `Shell` paints over the pages (BACKLOG 23).
         let bar = self.title_view.clone().cached(title_style());
 
         let mut root = div()
@@ -1938,7 +1938,7 @@ impl Render for Shell {
                 }
             }))
             .on_action(cx.listener(|this, _: &GoForward, _, cx| this.go_forward(cx)))
-            // I tasti laterali del mouse, come in un browser.
+            // The mouse side buttons, as in a browser.
             .on_mouse_down(
                 MouseButton::Navigate(NavigationDirection::Back),
                 cx.listener(|this, _, _, cx| this.go_back(cx)),
@@ -1969,7 +1969,7 @@ impl Render for Shell {
             root = root.on_action(cx.listener(|this, _: &ToggleVideoFocus, _, cx| this.toggle_video(cx)));
         }
         if self.banner_shown && !stage_shown {
-            // In cache alla sua altezza: il loader del download ridisegna solo la fascia.
+            // Cached at its height: the download loader redraws only the banner.
             root = root.child(self.banner.clone().cached(banner_style())).child(Separator::horizontal());
         }
         root = if stage_shown {
@@ -1994,10 +1994,10 @@ impl Render for Shell {
             }
             root.child(below)
         };
-        // Il palco del videoclip dopo pagina, pannelli e vista immersiva: dipinge il fotogramma nel pozzo che il
-        // pannello o la vista immersiva hanno segnato in questo stesso disegno (`VideoStage::well`). Un
-        // fotogramma rifà `Shell` (la radice: GPUI la rifà a ogni disegno) e il palco; le viste in cache, il
-        // pannello e la vista immersiva compresi, si riusano (BACKLOG 41).
+        // The video stage after the page, panels and immersive view: it paints the frame in the well that the
+        // panel or the immersive view marked in this same draw (`VideoStage::well`). A
+        // frame redoes `Shell` (the root: GPUI redoes it on every draw) and the stage; the cached views, the
+        // panel and the immersive view included, are reused (BACKLOG 41).
         if self.sidebar.drag.is_some() {
             // Window-wide listeners only while the edge is dragged.
             let shell = cx.entity().downgrade();
@@ -2025,7 +2025,7 @@ impl Render for Shell {
         }
 
         if let Some(open) = &self.menu {
-            // Un clic fuori dal menu lo chiude (e non arriva a ciò che c'è sotto).
+            // A click outside the menu closes it (and does not reach what is underneath).
             let close = |this: &mut Self,
                          _: &gpui::MouseDownEvent,
                          _: &mut Window,
@@ -2040,12 +2040,12 @@ impl Render for Shell {
                     .on_mouse_down(MouseButton::Left, cx.listener(close))
                     .on_mouse_down(MouseButton::Right, cx.listener(close)),
             ));
-            // Il pannello copre il velo: un clic su una voce non arriva al velo (che chiude).
+            // The panel covers the scrim: a click on an entry does not reach the scrim (which closes).
             let panel = div().occlude().child(self.menu_panel(open, cx));
             root = root.child(popup(open.menu.at, panel));
         }
         if let Some((dialog, ..)) = &self.dialog {
-            // Il velo copre tutta la finestra; un clic sul velo chiude come «Annulla».
+            // The scrim covers the whole window; a click on the scrim closes it, like «Annulla».
             let veil = scrim().on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.dialog_done(DialogEvent::Cancelled, window, cx)),

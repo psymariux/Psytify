@@ -1,5 +1,4 @@
-//! A person's profile (`Page::Profile`), your own too (`PSYTIFY_ART_DIRECTION.md` «Profile», the Iced
-//! client's `client/src/ui/pages/profile.rs`): the head with the avatar in the pixel circle, the name in
+//! A person's profile (`Page::Profile`), your own too (`PSYTIFY_ART_DIRECTION.md` «Profile»): the head with the avatar in the pixel circle, the name in
 //! `TYPE_DISPLAY`, «@name · N amici» and the relation button (Modifica profilo, Amici, Accetta la richiesta,
 //! Richiesta inviata, Aggiungi agli amici); the «Sta ascoltando» card (a `Card` with the cover and
 //! «Ascolta»); the most played artists as a ranking (numbered rows); the recent listens as track rows
@@ -87,7 +86,7 @@ impl Section {
     }
 }
 
-/// Una riga dopo la testa, nell'ordine del client Iced.
+/// One row after the head, in display order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Presence,
@@ -95,13 +94,13 @@ enum Row {
     Artist(usize),
     Recent(usize),
     NoListens,
-    /// L'attività è solo per gli amici.
+    /// The activity is for friends only.
     Private,
     Playlist(usize),
     Mutual(usize),
 }
 
-/// Le righe del profilo. Pura.
+/// The profile's rows. Pure.
 fn plan(page: &UserPage, recent: usize) -> Vec<Row> {
     let mut rows = Vec::new();
     match &page.activity {
@@ -133,17 +132,17 @@ fn plan(page: &UserPage, recent: usize) -> Vec<Row> {
     rows
 }
 
-/// Che cosa fa il pulsante della relazione.
+/// What the relation button does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RelationClick {
-    /// Chiede l'amicizia (`true`) o ritira la richiesta (`false`) subito.
+    /// Asks for friendship (`true`) or withdraws the request (`false`) at once.
     Send(bool),
-    /// Toglie un amico, ma prima chiede conferma (decisione del proprietario: un clic solo era troppo poco).
+    /// Removes a friend, but asks for confirmation first (the owner's decision: one click was too little).
     ConfirmUnfriend,
 }
 
-/// Il pulsante della relazione nella testa: il testo, l'icona e che cosa fa. `None` per il proprio profilo
-/// (lì c'è «Modifica profilo»).
+/// The relation button in the head: the text, the icon and what it does. `None` for one's own profile
+/// (there is «Modifica profilo»).
 fn relation_action(relation: Relation) -> Option<(&'static str, Option<&'static str>, RelationClick)> {
     match relation {
         Relation::Me => None,
@@ -154,7 +153,7 @@ fn relation_action(relation: Relation) -> Option<(&'static str, Option<&'static 
     }
 }
 
-/// Cosa mostra la pagina del profilo di `handle`, dalla vista sociale.
+/// What the profile page of `handle` shows, from the social view.
 #[derive(Clone, Debug)]
 enum Shown {
     Loading,
@@ -177,7 +176,7 @@ fn shown(view: &SocialView, handle: &str) -> Shown {
     }
 }
 
-/// Lo stesso stato (per non rifare i testi): lo stesso profilo pubblicato, o lo stesso caricamento.
+/// The same state (so the texts are not redone): the same published profile, or the same load.
 fn same(a: &Shown, b: &Shown) -> bool {
     match (a, b) {
         (Shown::Ready(a), Shown::Ready(b)) => Arc::ptr_eq(a, b),
@@ -187,7 +186,7 @@ fn same(a: &Shown, b: &Shown) -> bool {
     }
 }
 
-/// I testi pronti di un profilo.
+/// A profile's ready texts.
 #[derive(Clone, Debug, Default)]
 struct Texts {
     meta: SharedString,
@@ -253,7 +252,7 @@ pub struct ProfilePage {
     core: Entity<CoreModel>,
     handle: String,
     shown: Shown,
-    /// Una richiesta di amicizia per questa persona è in volo.
+    /// A friendship request for this person is in flight.
     busy: bool,
     rows: Vec<Row>,
     texts: Texts,
@@ -321,7 +320,7 @@ impl ProfilePage {
         cx.notify();
     }
 
-    /// Prende la vista nuova; `true` se ciò che si vede è cambiato.
+    /// Takes the new view; `true` if what is shown has changed.
     fn take(&mut self, view: &SocialView) -> bool {
         let next = shown(view, &self.handle);
         let busy = view.pending.contains(&self.handle);

@@ -1,6 +1,6 @@
 //! Toggle (interruttore): binario 16 x 8 AP con bordo di 1 AP, pomello quadrato 6 x 6 AP rientrato
 //! di 1 AP. Spento: bordo `CONTROL_BORDER`, pomello `STONE` a sinistra. Acceso: bordo e pomello
-//! `LIME`, pomello a destra (la posizione dice lo stato anche senza colore).
+//! `LIME`, knob on the right (the position says the state even without colour).
 
 use gpui::{App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 use psytify_design::tokens::color::{
@@ -102,7 +102,7 @@ impl RenderOnce for Toggle {
         if let Some(description) = self.description {
             text = text.child(div().type_role(TYPE_ARTIST).text_color(col(TEXT_TERTIARY)).child(description));
         }
-        // Senza testo (il controllo di una `SettingRow`) resta solo l'interruttore, alto quanto l'area
+        // Without text (the control of a `SettingRow`) only the switch remains, as tall as the area
         // sensibile.
         let row = if bare {
             wired.element.min_h(dp(32.0)).flex().items_center().child(switch)

@@ -22,7 +22,7 @@ footprint even while it plays.
 ## Highlights
 
 - **Fast and light.** Native GPU-rendered UI ([GPUI](https://github.com/zed-industries/zed) on the desktop,
-  [Iced](https://iced.rs) on Android), no web view, no Electron.
+  Jetpack Compose on Android), no web view, no Electron.
   It idles at near-zero CPU and avoids per-frame work.
 - **Plays everything.** FLAC, WAV, MP3, Ogg Vorbis and AAC/M4A through
   [Symphonia](https://github.com/pdeljanov/Symphonia) and [rodio](https://github.com/RustAudio/rodio),
@@ -108,7 +108,6 @@ it automatically) and the system libraries below.
 ```bash
 cargo build -p psytify --release        # binary in target/release/psytify
 cargo build -p psytify --release --no-default-features   # without video clips (no GStreamer needed)
-cargo run -p psytify-iced --release     # the Iced app (the Android one) in a desktop window; PSYTIFY_PHONE=1 for the phone layout
 ```
 
 ## Configuration
@@ -160,16 +159,15 @@ opens connections to that one address: audio, video and cover art all come throu
 ## Architecture
 
 The logic lives in `psytify-core`, a UI-free actor: frontends send it commands and draw the snapshots it
-publishes. The desktop (`desktop/`, package `psytify`) draws them with GPUI; the Android app (`client/`,
-package `psytify-iced`) with Iced, in the Elm pattern: one `App` state, a `Message` for every event, a
-pure `update`, and a `view` that only reads.
+publishes. The desktop (`desktop/`, package `psytify`) draws them with GPUI; the Android app
+(`android-app/`, Kotlin and Jetpack Compose) draws them through the UniFFI bridge in `mobile/`.
 
 ```mermaid
 flowchart LR
     GPUI["desktop/ (GPUI views)"] -- commands --> CORE["core/ (domain reducers)"]
-    ICED["client/ (Iced, Android)"] -- commands --> CORE
+    KOTLIN["android-app/ (Compose, via mobile/)"] -- commands --> CORE
     CORE -- snapshots --> GPUI
-    CORE -- snapshots --> ICED
+    CORE -- snapshots --> KOTLIN
     CORE -- effects --> API["api/ (HTTP client)"]
     CORE -- effects --> PLAYER["player/ (queue, decoder, rodio)"]
     API -- signed links --> STREAM["player/stream.rs (ranged buffering)"]
@@ -180,14 +178,13 @@ flowchart LR
 | Path | What lives there |
 |---|---|
 | `desktop/` | `psytify`: the desktop on GPUI. Window, pages, pixel component kit, side panel (queue, lyrics, video), immersive view |
-| `client/src/app.rs`, `client/src/app/` | `psytify-iced`: `App`, `Message`, `update`, `subscription`; each domain's messages become core commands |
-| `client/src/ui/` | Iced components, pages, shelves, immersive view, synced lyrics, phone layout; `theme.rs` holds every color and size token |
 | `core/src/player/` | Queue (shuffle, repeat), playback state, ranged streaming buffer, Symphonia decoder |
 | `core/src/api/` | HTTP client, models, signed-URL renewal |
 | `core/src/config/` | Settings and local taste: follows, saved albums, play counts, mixes |
 | `core/` | `psytify-core`: the UI-free logic shared by the frontends (API client, playback, configuration, shared state) |
 | `design/` | `psytify-design`: design tokens and pixel art sprites as plain data, with the sprite tools and assets |
-| `android/` | Thin `cdylib` shell (NativeActivity) that starts the client with the phone layout |
+| `mobile/` | `psytify-mobile`: the UniFFI bridge between the core and the Android app (snapshots pushed to a listener, page models, media session) |
+| `android-app/` | The Android app: Kotlin and Jetpack Compose on top of the core through `mobile/` |
 | `docs/` | [Backend contract](docs/BACKEND.md), [visual style](docs/STYLE.md), [Android guide](docs/ANDROID.md), [brand kit](docs/brand/BRANDKIT.md), [design tokens and art direction](docs/design/) |
 
 ## Development
@@ -203,14 +200,13 @@ Handy switches:
 | Variable | Effect |
 |---|---|
 | `PSYTIFY_API_URL` | Backend address for this run |
-| `PSYTIFY_PHONE=1` | Open the phone layout in a desktop window |
 | `PSYTIFY_DEFAULT_API_URL` | *Compile time:* backend baked into a distribution build |
 | `PSYTIFY_DEFAULT_CLERK_ISSUER` | *Compile time:* Clerk Frontend API baked into a distribution build |
 | `PSYTIFY_DEFAULT_DISCORD_APP_ID` | *Compile time:* Discord Application ID for Rich Presence (set `discord_app_id` at run time instead) |
 
 The interface is documented in [docs/STYLE.md](docs/STYLE.md): three panels on black, the cover art
 tints the background, lime is the brand color, no glass effects. Colors and sizes come only from
-`ui/theme.rs`.
+the design tokens (`design/`, read by `desktop/src/theme.rs` and the generated `PsytifyTokens.kt`).
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — including the performance
 rules, which are part of the review.
@@ -227,9 +223,9 @@ fix, so the direction can be agreed before you invest time. Be kind: the project
 Psytify is free software under the [GNU Affero General Public License v3.0](LICENSE).
 
 The interface uses the [Inter](https://rsms.me/inter/) typeface under the
-[SIL Open Font License 1.1](client/assets/fonts/OFL.txt), and pixel text uses
+[SIL Open Font License 1.1](design/assets/fonts/Inter-OFL.txt), and pixel text uses
 [Departure Mono](https://departuremono.com) under the same license
 ([design/assets/fonts/DepartureMono-OFL.txt](design/assets/fonts/DepartureMono-OFL.txt)). Psytify is built on
-[GPUI](https://github.com/zed-industries/zed), [Iced](https://github.com/iced-rs/iced), [rodio](https://github.com/RustAudio/rodio),
+[GPUI](https://github.com/zed-industries/zed), [Jetpack Compose](https://developer.android.com/compose), [rodio](https://github.com/RustAudio/rodio),
 [Symphonia](https://github.com/pdeljanov/Symphonia), [Tokio](https://tokio.rs) and
 [reqwest](https://github.com/seanmonstar/reqwest) — thank you to their authors.

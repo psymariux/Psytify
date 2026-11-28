@@ -1,11 +1,12 @@
-//! Azioni e scorciatoie globali del desktop, condivise da galleria e app.
+//! Global desktop actions and shortcuts, shared by the gallery and the app.
 //!
-//! Tab e Maiusc+Tab scorrono i controlli (l'ordine segue la lettura), Ctrl+K porta il focus sulla
-//! ricerca, Ctrl+Q chiude, Alt+← e Alt+→ scorrono la cronologia delle pagine, Ctrl+, apre le impostazioni
-//! (come nel client Iced), Ctrl+= / Ctrl+- / Ctrl+0 the UI zoom, Ctrl+B the sidebar. I comandi di trasporto valgono nel contesto `Shell` (la radice dell'app) e,
-//! quando il tasto è un carattere (Spazio, Q, T, V, F), non mentre si scrive in un campo di testo. Q e T
-//! aprono il pannello sulla coda o sul testo, F la vista immersiva, V (con la feature `video`) la vista
-//! immersiva sul videoclip (come nel client Iced).
+//! Tab and Shift+Tab move through the controls (the order follows the reading), Ctrl+K puts the focus on the
+//! search, Ctrl+Q quits, Alt+← and Alt+→ move through the pages' history, Ctrl+, opens the settings,
+//! Ctrl+= / Ctrl+- / Ctrl+0 the UI zoom, Ctrl+B the sidebar. The transport
+//! commands work in the `Shell` context (the app's root) and,
+//! when the key is a character (Space, Q, T, V, F), not while typing in a text field. Q and T
+//! open the panel on the queue or on the lyrics, F the immersive view, V (with the `video` feature) the
+//! immersive view on the video.
 
 use gpui::{App, KeyBinding, actions};
 
@@ -34,14 +35,14 @@ actions!(
     ]
 );
 
-// V apre e chiude la vista immersiva sul videoclip (solo con la feature `video`), come nel client Iced.
+// V opens and closes the immersive view on the video (only with the `video` feature).
 #[cfg(feature = "video")]
 actions!(psytify, [ToggleVideoFocus]);
 
-/// Il contesto della radice dell'app: le scorciatoie di trasporto vivono qui.
+/// The context of the app's root: the transport shortcuts live here.
 pub const SHELL_CONTEXT: &str = "Shell";
 
-/// Scorciatoie che valgono ovunque (anche nella galleria); da registrare una volta all'avvio.
+/// Shortcuts that work everywhere (also in the gallery); to register once at start-up.
 pub fn bind_global(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("tab", FocusNext, None),
@@ -51,7 +52,7 @@ pub fn bind_global(cx: &mut App) {
     ]);
 }
 
-/// Scorciatoie di trasporto dell'app. Spazio, Q, T, V e F sono caratteri: fuori dai campi di testo.
+/// The app's transport shortcuts. Space, Q, T, V and F are characters: outside the text fields.
 pub fn bind_shell(cx: &mut App) {
     let plain = format!("{SHELL_CONTEXT} && !PsytifyTextInput");
     cx.bind_keys([

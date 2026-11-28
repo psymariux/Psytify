@@ -60,7 +60,7 @@ impl NavigationItem {
         }
     }
 
-    /// Variante piena dell'icona, usata quando la voce è selezionata.
+    /// Full variant of the icon, used when the entry is selected.
     pub fn icon_selected(mut self, icon: &'static str) -> Self {
         self.icon_selected = Some(icon);
         self
@@ -81,7 +81,7 @@ impl NavigationItem {
         self
     }
 
-    /// Rail compressa: solo icona.
+    /// Compact rail: icon only.
     pub fn rail(mut self, rail: bool) -> Self {
         self.rail = rail;
         self
@@ -178,7 +178,7 @@ impl RenderOnce for NavigationItem {
     }
 }
 
-/// Callback di selezione di una scheda (indice).
+/// Callback for selecting a tab (index).
 type OnSelect = std::rc::Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 /// Una scheda.
@@ -195,7 +195,7 @@ impl Tab {
     }
 }
 
-/// Riga di schede; `selected` è l'indice attivo. `preview` forza lo stato della scheda `preview_ix`.
+/// Row of tabs; `selected` is the active index. `preview` forces the state of the tab `preview_ix`.
 #[derive(IntoElement)]
 pub struct Tabs {
     tabs: Vec<Tab>,

@@ -1,19 +1,19 @@
-//! Gli avvisi che il core racconta alla finestra: un solo sistema per tutti i domini.
+//! The notices the core reports to the window: one system for all the domains.
 //!
-//! Ogni dominio con eventi ha un anello (`events`: gli ultimi, dal più vecchio, ognuno con un `seq` che
-//! cresce) e la riproduzione ne ha uno solo (`PlaybackView::event`, l'ultimo del turno). La finestra
-//! ricorda l'ultimo `seq` mostrato per ogni anello ([`Seen`]) e a ogni pubblicazione prende solo i
-//! nuovi, in ordine. All'avvio si parte dal più recente di ogni anello ([`Seen::at_start`]): ciò che il
-//! core ha detto prima che la finestra esistesse non si ripete.
+//! Each domain with events has a ring (`events`: the latest, from the oldest, each with a `seq` that
+//! grows), and playback has only one (`PlaybackView::event`, the last of the turn). The window
+//! remembers the last `seq` shown for each ring ([`Seen`]) and at each publication takes only the
+//! new ones, in order. At start-up it begins from the most recent of each ring ([`Seen::at_start`]): what the
+//! core said before the window existed is not repeated.
 //!
-//! I testi sono del core quando il core li dà (`message()` e `is_error()` di fonti esterne, social e
-//! jam); quelli dei download e della riproduzione stanno qui, gli stessi del client Iced. Gli avvisi
-//! mostrati sono una coda corta ([`Toasts`]): uno alla volta per `TOAST_HOLD_MS`, al massimo
-//! [`MAX_PENDING`] in attesa (il più vecchio cade), due uguali di fila contano per uno. Il timer lo
-//! tiene chi mostra, e c'è solo mentre un avviso è sul display: a coda vuota non c'è niente che giri.
+//! The texts are the core's when the core gives them (`message()` and `is_error()` of external sources, social and
+//! jam); those of the downloads and of playback are here, the same as in the earlier client. The notices
+//! shown are a short queue ([`Toasts`]): one at a time for `TOAST_HOLD_MS`, at most
+//! [`MAX_PENDING`] waiting (the oldest falls off), two equal in a row count as one. The timer is kept by
+//! whoever shows, and it exists only while a notice is on the display: with an empty queue nothing runs.
 //!
-//! Le impostazioni non hanno un anello: il loro avviso è l'errore di scrittura (`SettingsView::save_error`),
-//! mostrato una volta per ogni errore nuovo, come nel client Iced.
+//! Settings have no ring: their notice is the write error (`SettingsView::save_error`),
+//! shown once for each new error.
 
 use std::collections::VecDeque;
 
@@ -24,10 +24,10 @@ use psytify_core::snapshot::{CatalogEvent, DownloadsEvent, PlaybackEvent, Refusa
 
 use crate::core_model::Changed;
 
-/// Avvisi in attesa dietro quello mostrato: oltre, cade il più vecchio.
+/// Notices waiting behind the one shown: beyond that, the oldest falls off.
 pub const MAX_PENDING: usize = 3;
 
-/// Un avviso: il testo e se è un errore (la barra `ERROR` a sinistra del toast).
+/// A notice: the text and whether it is an error (the `ERROR` bar on the toast's left).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
     pub text: SharedString,
@@ -48,20 +48,20 @@ impl Notice {
     }
 }
 
-/// Cosa la finestra ha da fare dopo aver letto i nuovi eventi.
+/// What the window has to do after reading the new events.
 #[derive(Debug, Default, PartialEq)]
 pub struct Heard {
-    /// Gli avvisi nuovi, in ordine: prima la riproduzione, poi catalogo, fonti esterne, download,
-    /// social e jam, e dentro un dominio per `seq`.
+    /// The new notices, in order: first playback, then catalogue, external sources, downloads,
+    /// social and jam, and within a domain by `seq`.
     pub notices: Vec<Notice>,
-    /// Il sistema ha chiesto di portare la finestra in primo piano (non è un avviso).
+    /// The system asked to bring the window to the front (it is not a notice).
     pub raise: bool,
-    /// L'artista del catalogo ufficiale chiesto ora ha una pagina sul server: la si apre (l'ultimo, se
-    /// sono più d'uno).
+    /// The official catalogue's artist now asked for has a page on the server: it is opened (the last, if
+    /// there are more than one).
     pub open_artist: Option<uuid::Uuid>,
 }
 
-/// L'ultimo `seq` mostrato di ogni anello di eventi.
+/// The last `seq` shown of each event ring.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Seen {
     playback: u64,
@@ -70,12 +70,12 @@ pub struct Seen {
     downloads: u64,
     social: u64,
     jam: u64,
-    /// L'ultimo errore di scrittura delle impostazioni già mostrato.
+    /// The last settings write error already shown.
     save_error: Option<AppError>,
 }
 
 impl Seen {
-    /// Parte dal più recente di ogni anello: niente di ciò che c'è già si ripete.
+    /// Starts from the most recent of each ring: nothing of what is already there repeats.
     pub fn at_start(snapshot: &Snapshot) -> Self {
         Self {
             playback: snapshot.playback.event.as_ref().map_or(0, |raised| raised.seq),
@@ -88,8 +88,8 @@ impl Seen {
         }
     }
 
-    /// Gli eventi nuovi dei domini cambiati. Un dominio che non è cambiato non si guarda (non ha
-    /// eventi nuovi: un evento nasce con una pubblicazione del suo dominio).
+    /// The new events of the changed domains. A domain that has not changed is not looked at (it has no
+    /// new events: an event is born with a publication of its domain).
     pub fn collect(&mut self, snapshot: &Snapshot, changed: Changed) -> Heard {
         let mut heard = Heard::default();
         if changed.settings && snapshot.settings.save_error != self.save_error {
@@ -158,14 +158,14 @@ fn playback_notice(event: &PlaybackEvent) -> Option<Notice> {
         PlaybackEvent::AutoplayAdded => Some(Notice::info("Ho aggiunto altri brani alla coda.")),
         PlaybackEvent::SeekFailed => Some(Notice::error("Impossibile spostarsi in questo punto del brano.")),
         PlaybackEvent::PlayFailed(error) => Some(Notice::error(error.to_string())),
-        // Come il client Iced (`client/src/app/playback.rs`).
+        // As before the migration.
         PlaybackEvent::RadioStarted(track) => Some(Notice::info(format!("Radio di «{}»", track.title))),
         PlaybackEvent::Raise | PlaybackEvent::AlbumStarted => None,
     }
 }
 
-/// Del catalogo si dicono solo i guasti: aprire un artista e le copertine pronte sono lavoro delle
-/// pagine, non avvisi.
+/// Of the catalogue only the failures are reported: opening an artist and the ready covers are work for the
+/// pages, not notices.
 fn catalog_notice(event: &CatalogEvent) -> Option<Notice> {
     match event {
         CatalogEvent::MetaArtistFailed(error) | CatalogEvent::LibraryPageFailed(error) => {
@@ -175,7 +175,7 @@ fn catalog_notice(event: &CatalogEvent) -> Option<Notice> {
     }
 }
 
-/// Gli stessi testi del client Iced (`client/src/app/downloads.rs`).
+/// The same texts as the earlier client.
 fn downloads_notice(event: &DownloadsEvent) -> Notice {
     match event {
         DownloadsEvent::Saved(done) => Notice::info(saved_message(done)),
@@ -216,7 +216,7 @@ fn downloads_notice(event: &DownloadsEvent) -> Notice {
     }
 }
 
-/// Dove è finito il file e, se la qualità non è quella chiesta, quale è arrivata.
+/// Where the file ended up and, if the quality is not the one asked for, which one arrived.
 fn saved_message(done: &Downloaded) -> String {
     let place = done.path.display();
     match done.delivered {
@@ -239,7 +239,7 @@ fn batch_summary(done: usize, failed: usize, last_error: Option<&AppError>) -> N
     }
 }
 
-/// Perché un download non è partito.
+/// Why a download did not start.
 fn refusal_message(refusal: Refusal) -> &'static str {
     match refusal {
         Refusal::NotDownloadable => "Questo brano non si può scaricare: la licenza non lo permette",
@@ -250,17 +250,17 @@ fn refusal_message(refusal: Refusal) -> &'static str {
     }
 }
 
-/// Cosa è successo spingendo un avviso nella coda.
+/// What happened pushing a notice into the queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pushed {
-    /// Non c'era niente sul display: ora è questo, e chi mostra deve armare il timer.
+    /// There was nothing on the display: now this is it, and whoever shows must arm the timer.
     Shown,
-    /// Aspetta il suo turno (o è uguale a quello che c'è già e non conta).
+    /// Waits for its turn (or it is equal to the one already there and does not count).
     Waiting,
 }
 
-/// L'avviso sul display e quelli in attesa. Nessun tempo qui: chi mostra arma il timer quando
-/// `push` dice `Shown` e chiama `expire` alla scadenza.
+/// The notice on the display and the ones waiting. No time here: whoever shows arms the timer when
+/// `push` says `Shown` and calls `expire` at the deadline.
 #[derive(Debug, Default)]
 pub struct Toasts {
     shown: Option<Notice>,
@@ -268,7 +268,7 @@ pub struct Toasts {
 }
 
 impl Toasts {
-    /// L'avviso sul display, se c'è.
+    /// The notice on the display, if there is one.
     pub fn current(&self) -> Option<&Notice> {
         self.shown.as_ref()
     }
@@ -284,7 +284,7 @@ impl Toasts {
             self.shown = Some(notice);
             return Pushed::Shown;
         }
-        // Lo stesso avviso due volte di fila (un errore che si ripete) conta per uno.
+        // The same notice twice in a row (an error that repeats) counts as one.
         let last = self.waiting.back().or(self.shown.as_ref());
         if last == Some(&notice) {
             return Pushed::Waiting;
@@ -296,8 +296,8 @@ impl Toasts {
         Pushed::Waiting
     }
 
-    /// Il tempo dell'avviso mostrato è finito: passa al prossimo. `true` se ce n'è uno nuovo sul
-    /// display (il timer va armato di nuovo), `false` se non resta niente.
+    /// The time of the notice shown is up: it moves to the next. `true` if there is a new one on the
+    /// display (the timer must be armed again), `false` if nothing is left.
     pub fn expire(&mut self) -> bool {
         self.shown = self.waiting.pop_front();
         self.shown.is_some()
@@ -346,7 +346,7 @@ mod tests {
         let old = with_external(&[(1, ExternalEvent::NothingToPlay), (2, ExternalEvent::NothingToPlay)]);
         let mut seen = Seen::at_start(&old);
         assert!(seen.collect(&old, all()).notices.is_empty(), "niente di ciò che c'era all'avvio");
-        // Un evento nuovo si sente una volta sola.
+        // A new event is heard only once.
         let next = with_external(&[
             (1, ExternalEvent::NothingToPlay),
             (2, ExternalEvent::NothingToPlay),
@@ -450,7 +450,7 @@ mod tests {
         assert!(heard.notices[0].error && heard.notices[1].error, "riproduzione e catalogo sono errori");
         assert!(!heard.notices[2].error && !heard.notices[3].error, "download e social sono informazioni");
         assert!(heard.notices[4].error, "un codice sbagliato è un errore");
-        // Dopo la prima lettura ognuno ricorda il suo.
+        // After the first read each one remembers its own.
         assert_eq!(seen, Seen::at_start(&snapshot));
         assert!(seen.collect(&snapshot, all()).notices.is_empty());
     }
@@ -525,7 +525,7 @@ mod tests {
         assert!(!toasts.expire(), "coda finita: niente più timer");
         assert_eq!(toasts.current(), None);
         assert_eq!(toasts.waiting(), 0);
-        // Con il display vuoto il prossimo parte subito.
+        // With the display empty the next one starts at once.
         assert_eq!(toasts.push(Notice::info("quattro")), Pushed::Shown);
     }
 
@@ -537,7 +537,7 @@ mod tests {
             toasts.push(Notice::info(n.to_string()));
         }
         assert_eq!(toasts.waiting(), MAX_PENDING);
-        // Quello mostrato non cade; fra gli altri restano i più recenti.
+        // The one shown does not fall; among the others the most recent remain.
         assert_eq!(toasts.current(), Some(&Notice::info("0")));
         assert!(toasts.expire());
         assert_eq!(toasts.current(), Some(&Notice::info("3")));
@@ -552,7 +552,7 @@ mod tests {
         toasts.push(Notice::info("altro"));
         toasts.push(Notice::info("altro"));
         assert_eq!(toasts.waiting(), 1, "uguale all'ultimo in attesa");
-        // Lo stesso testo con un altro tono è un altro avviso.
+        // The same text with another tone is another notice.
         toasts.push(Notice::error("altro"));
         assert_eq!(toasts.waiting(), 2);
     }

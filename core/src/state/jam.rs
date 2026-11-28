@@ -1,29 +1,29 @@
-//! Jam: l'ascolto insieme agli amici (passo 4.8).
+//! Jam: listening together with friends (step 4.8).
 //!
-//! **Il collegamento.** La stanza è un WebSocket che tiene l'host del core (`jam::Link`, su un thread
-//! suo): il riduttore non apre la rete, chiede all'host di avviarlo, di mandargli lo stato e di
-//! chiuderlo (`Effect::Jam`, [`JamOp`]), e gli eventi della stanza entrano nel core come
-//! `Input::Jam`, aspettati dall'host insieme a tutto il resto. Non c'è nessun timer: una jam ferma
-//! non sveglia il core, e il battito da 250 ms della riproduzione (che gira solo mentre suona) è la
-//! sola cadenza che serve a rimandare la posizione ogni cinque secondi.
+//! **The link.** The room is a WebSocket that the core's host holds (`jam::Link`, on a thread of its
+//! own): the reducer does not open the network, it asks the host to start it, to send it the state and to
+//! close it (`Effect::Jam`, [`JamOp`]), and the room's events enter the core as
+//! `Input::Jam`, awaited by the host together with everything else. There is no timer: an idle jam
+//! does not wake the core, and the playback's 250 ms tick (which runs only while playing) is the
+//! only cadence needed to send the position again every five seconds.
 //!
-//! **Chi suona e chi ascolta.** Non ci sono ruoli fissi: ogni membro manda alla stanza il proprio
-//! stato quando cambia davvero (un altro brano, la coda, pausa e ripresa, un salto di posizione, il
-//! battito ogni cinque secondi mentre suona: `jam::should_send_state`) e allinea il proprio al
-//! primo stato che arriva dagli altri. Lo stato ricevuto diventa il riferimento: finché la
-//! riproduzione locale lo segue non si rimanda indietro.
+//! **Who plays and who listens.** There are no fixed roles: each member sends the room its own state
+//! when it really changes (another track, the queue, pause and resume, a position jump, the tick
+//! every five seconds while playing: `jam::should_send_state`) and aligns its own to the first state
+//! that arrives from the others. The state received becomes the reference: as long as local playback
+//! follows it, it is not sent back.
 //!
-//! **Il passaggio fra i domini.** Dopo ogni ingresso [`CoreState::handoff`](super::CoreState) chiama
-//! [`Jam::settle`] (gli stati arrivati dalla stanza, con la coda locale sotto gli occhi: i brani che
-//! mancano si chiedono al catalogo, poi `PlaybackCmd::Align`), applica a riproduzione ciò che il
-//! dominio chiede ([`Jam::take_playback`]: il gruppo, l'allineamento, la coda svuotata) e solo dopo
-//! chiama [`Jam::publish`], così lo stato mandato alla stanza è quello già allineato. Al dominio
-//! sociale il codice della stanza arriva dalla vista ([`Social::set_jam`](super::social::Social)), e
-//! il nome da mostrare in stanza viene dal profilo ([`Jam::set_profile`]): il frontend non fa da
-//! tramite.
+//! **The passing between domains.** After each input [`CoreState::handoff`](super::CoreState) calls
+//! [`Jam::settle`] (the states that arrived from the room, with the local queue in view: the missing tracks
+//! are asked of the catalog, then `PlaybackCmd::Align`), applies to playback what the domain asks
+//! ([`Jam::take_playback`]: the group, the alignment, the emptied queue) and only afterwards
+//! calls [`Jam::publish`], so the state sent to the room is the already aligned one. To the social domain
+//! the room's code arrives from the view ([`Social::set_jam`](super::social::Social)), and
+//! the name to show in the room comes from the profile ([`Jam::set_profile`]): the frontend does not act as
+//! go-between.
 //!
-//! Cambiare vista solo se qualcosa cambia davvero: gli stessi membri, un evento di una stanza che
-//! non c'è più o uno stato che non cambia nulla non pubblicano niente.
+//! Change the view only if something really changes: the same members, an event from a room that is no
+//! longer there, or a state that changes nothing publish nothing.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -40,80 +40,80 @@ use crate::jam::{self, Member, Remote, Sent, Target};
 use crate::player::PlaybackState;
 use crate::state::playback::{Align, PlaybackCmd, PlaybackView};
 
-/// Eventi tenuti nella vista: un frontend che legge a ogni pubblicazione non ne perde.
+/// Events kept in the view: a frontend that reads at each publish does not lose any.
 const EVENTS: usize = 32;
-/// Brani del catalogo chiesti insieme, per la coda condivisa che manca.
+/// Catalog tracks asked together, for the missing shared queue.
 const FETCH_PARALLEL: usize = 8;
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone)]
 pub enum JamCmd {
-    /// Crea una stanza nuova. `name` è il nome da mostrare in stanza: vuoto, si usa quello del
-    /// profilo (se c'è un accesso); al più [`jam::MAX_NAME_CHARS`] caratteri.
+    /// Creates a new room. `name` is the name to show in the room: empty, the profile's one is used
+    /// (if there is a sign-in); at most [`jam::MAX_NAME_CHARS`] characters.
     Create { name: String },
-    /// Entra in una stanza con il suo codice ([`jam::CODE_LEN`] lettere o cifre).
+    /// Joins a room with its code ([`jam::CODE_LEN`] letters or digits).
     Join { code: String, name: String },
-    /// Esce dalla jam: la stanza libera il posto e avvisa gli altri.
+    /// Leaves the jam: the room frees the place and tells the others.
     Leave,
 }
 
-/// Dove si è con la jam.
+/// Where one is with the jam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JamPhase {
-    /// Nessuna jam.
+    /// No jam.
     #[default]
     Idle,
-    /// Il collegamento è partito e la stanza non ha ancora risposto.
+    /// The link has started and the room has not answered yet.
     Connecting,
-    /// Si è in stanza: ha detto il suo codice e chi c'è.
+    /// In the room: it has said its code and who is there.
     Open,
 }
 
-/// Ciò che i frontend vedono del dominio.
+/// What the frontends see of the domain.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct JamView {
     pub phase: JamPhase,
-    /// Il codice da condividere, appena la stanza lo dice.
+    /// The code to share, as soon as the room says it.
     pub code: Option<String>,
-    /// L'identità di questo client in stanza.
+    /// This client's identity in the room.
     pub you: Option<Uuid>,
     pub members: Arc<[Member]>,
-    /// Gli ultimi eventi, dal più vecchio: un frontend mostra quelli con `seq` nuovo, in ordine.
+    /// The latest events, from the oldest: a frontend shows those with a new `seq`, in order.
     pub events: Arc<VecDeque<JamRaised>>,
 }
 
 impl JamView {
-    /// Una jam c'è: in connessione o aperta.
+    /// A jam exists: connecting or open.
     pub fn is_active(&self) -> bool {
         self.phase != JamPhase::Idle
     }
 }
 
-/// Qualcosa da dire all'utente della jam, con i testi di sempre.
+/// Something to tell the user of the jam, with the usual texts.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JamEvent {
-    /// Si è entrati nella stanza con questo codice.
+    /// You have joined the room with this code.
     Joined(String),
-    /// Si è usciti.
+    /// You have left.
     Left,
-    /// Una jam c'è già: se ne esce prima.
+    /// A jam already exists: leave it first.
     AlreadyIn,
-    /// Il codice non ha [`jam::CODE_LEN`] lettere o cifre.
+    /// The code does not have [`jam::CODE_LEN`] letters or digits.
     BadCode,
-    /// Un altro ha cambiato brano (non scatta per lo stato che arriva con l'ingresso).
+    /// Someone else changed track (it does not fire for the state that arrives with the entry).
     TrackChanged { from: String },
-    /// I brani della coda condivisa non si sono caricati.
+    /// The shared queue's tracks did not load.
     TracksFailed(AppError),
-    /// Il catalogo non ha alcuni brani della coda condivisa.
+    /// The catalog does not have some of the shared queue's tracks.
     TracksMissing,
-    /// La stanza ha rifiutato un messaggio; il collegamento resta aperto.
+    /// The room refused a message; the link stays open.
     Rejected(String),
-    /// Il collegamento si è chiuso (il testo è già pronto).
+    /// The link has closed (the text is already ready).
     Closed(String),
 }
 
 impl JamEvent {
-    /// Il testo da mostrare.
+    /// The text to show.
     pub fn message(&self) -> String {
         match self {
             Self::Joined(code) => format!("Sei nella jam {code}"),
@@ -127,7 +127,7 @@ impl JamEvent {
         }
     }
 
-    /// L'avviso è un errore, non un'informazione.
+    /// The notice is an error, not information.
     pub fn is_error(&self) -> bool {
         matches!(
             self,
@@ -136,79 +136,79 @@ impl JamEvent {
     }
 }
 
-/// Un [`JamEvent`] con il suo numero d'ordine, che cresce a ogni evento.
+/// A [`JamEvent`] with its sequence number, which grows with each event.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JamRaised {
     pub seq: u64,
     pub event: JamEvent,
 }
 
-/// Ciò che l'host fa con il collegamento alla stanza, che tiene lui sul proprio thread.
+/// What the host does with the room link, which it holds on its own thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JamOp {
-    /// Avvia il collegamento: crea la stanza o entra in quella del codice. Un collegamento che c'era
-    /// si chiude.
+    /// Starts the link: creates the room or joins the one of the code. A link that was there
+    /// closes.
     Start { base: String, target: Target, name: String },
-    /// Manda alla stanza lo stato locale.
+    /// Sends the local state to the room.
     Send(jam::Snapshot),
-    /// Chiude il collegamento (se c'è): la stanza libera il posto.
+    /// Closes the link (if there is one): the room frees the place.
     Leave,
 }
 
-/// I lavori asincroni del dominio (rete), che l'host esegue sul runtime.
+/// The domain's async jobs (network), which the host runs on the runtime.
 #[derive(Debug)]
 pub(crate) enum Job {
-    /// I brani del catalogo che la coda condivisa ha e quella locale no, per la richiesta `ticket`.
+    /// The catalog tracks that the shared queue has and the local one does not, for the request `ticket`.
     Tracks { api: Result<ApiClient, AppError>, ids: Vec<Uuid>, ticket: u64 },
 }
 
-/// L'esito di un [`Job`], che torna al dominio.
+/// The outcome of a [`Job`], which goes back to the domain.
 #[derive(Debug)]
 pub(crate) enum Done {
     Tracks { ticket: u64, result: Result<Vec<Track>, AppError> },
 }
 
-/// Qualcosa arrivato dalla stanza, che aspetta il passaggio fra i domini per leggere la coda locale.
+/// Something that arrived from the room, which waits for the passing between domains to read the local queue.
 #[derive(Debug)]
 enum Arrived {
-    /// Uno stato del gruppo. `first` è quello che la stanza manda all'ingresso: non è «un altro ha
-    /// cambiato brano».
+    /// A state of the group. `first` is the one the room sends at entry: it is not "someone else
+    /// changed track".
     State { remote: Remote, first: bool },
-    /// I brani chiesti per `remote` sono arrivati (o no).
+    /// The tracks asked for `remote` have arrived (or not).
     Tracks { remote: Remote, result: Result<Vec<Track>, AppError> },
 }
 
-/// I brani che si aspettano dal catalogo, e lo stato del gruppo a cui servono.
+/// The tracks expected from the catalog, and the group's state they are needed for.
 #[derive(Debug)]
 struct Fetching {
     ticket: u64,
     remote: Remote,
 }
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug)]
 pub(crate) struct Jam {
     pub(crate) view: Arc<JamView>,
-    /// Il backend scelto nelle impostazioni e il client che ne viene (i brani della coda).
+    /// The backend chosen in the settings and the client that comes from it (the tracks of the queue).
     server: Option<String>,
     api: Result<ApiClient, AppError>,
-    /// Il nome del profilo, se c'è un accesso: il nome in stanza di chi non ne scrive uno.
+    /// The profile's name, if there is a sign-in: the in-room name of whoever does not write one.
     profile: Option<String>,
-    /// La stanza ha detto il suo stato, o non ne ha: solo allora si manda il proprio.
+    /// The room has said its state, or has none: only then is one's own sent.
     synced: bool,
-    /// Ultimo stato scambiato con la stanza: il riferimento per decidere se rimandare.
+    /// Last state exchanged with the room: the reference to decide whether to send again.
     last_sent: Option<Sent>,
-    /// Stati e brani arrivati, in ordine, da trattare al prossimo passaggio.
+    /// States and tracks arrived, in order, to be handled at the next passing.
     arrived: VecDeque<Arrived>,
-    /// Brani della coda condivisa in arrivo: nel frattempo non si manda niente.
+    /// Shared queue tracks arriving: meanwhile nothing is sent.
     fetching: Option<Fetching>,
     tickets: u64,
-    /// Ciò che si chiede alla riproduzione al prossimo passaggio.
+    /// What is asked of playback at the next passing.
     to_playback: Vec<PlaybackCmd>,
-    /// Il core si chiude: niente più stati alla stanza (la riproduzione si ferma, e non deve
-    /// fermare anche gli altri).
+    /// The core closes: no more states to the room (playback stops, and must not
+    /// stop the others too).
     closing: bool,
-    /// Il numero dell'ultimo evento.
+    /// The number of the last event.
     events: u64,
 }
 
@@ -219,7 +219,7 @@ impl Default for Jam {
 }
 
 impl Jam {
-    /// Il dominio con il backend scelto nelle impostazioni.
+    /// The domain with the backend chosen in the settings.
     pub(crate) fn new(server: Option<String>) -> Self {
         Self {
             view: Arc::default(),
@@ -241,13 +241,13 @@ impl Jam {
         Arc::make_mut(&mut self.view)
     }
 
-    /// Il codice della stanza in cui si è, se la stanza l'ha detto: lo legge il dominio sociale.
+    /// The code of the room one is in, if the room has said it: the social domain reads it.
     pub(crate) fn code(&self) -> Option<&str> {
         self.view.code.as_deref()
     }
 
-    /// Il backend scelto nelle impostazioni è cambiato: il client dei brani si rifà. Una jam in
-    /// corso resta sul server con cui è partita.
+    /// The backend chosen in the settings has changed: the tracks' client is made again. A jam in
+    /// progress stays on the server it started with.
     pub(crate) fn set_server(&mut self, server: &Option<String>) {
         if self.server != *server {
             self.server.clone_from(server);
@@ -255,14 +255,14 @@ impl Jam {
         }
     }
 
-    /// Il nome del profilo (se c'è un accesso): si copia solo quando cambia.
+    /// The profile's name (if there is a sign-in): it is copied only when it changes.
     pub(crate) fn set_profile(&mut self, name: Option<&str>) {
         if self.profile.as_deref() != name {
             self.profile = name.map(str::to_owned);
         }
     }
 
-    /// Il core si chiude: da qui la jam non manda più niente.
+    /// The core closes: from here the jam sends nothing more.
     pub(crate) fn close(&mut self) {
         self.closing = true;
     }
@@ -277,7 +277,7 @@ impl Jam {
         }
     }
 
-    // ---------- Comandi ----------
+    // ---------- Commands ----------
 
     pub(crate) fn apply(&mut self, command: JamCmd, _now: Instant, effects: &mut Vec<Effect>) {
         match command {
@@ -285,7 +285,7 @@ impl Jam {
             JamCmd::Join { code, name } => self.start(Target::Join(code), &name, effects),
             JamCmd::Leave => {
                 if self.view.is_active() {
-                    // Chiudere il collegamento basta: la stanza libera il posto e avvisa gli altri.
+                    // Closing the link is enough: the room frees the place and tells the others.
                     self.reset();
                     effects.push(Effect::Jam(JamOp::Leave));
                     self.to_playback.push(PlaybackCmd::Group(false));
@@ -295,8 +295,8 @@ impl Jam {
         }
     }
 
-    /// Avvia una jam: crea una stanza o entra in una esistente. Il collegamento gira su un thread
-    /// proprio, quindi la richiesta torna subito; la stanza risponde con un evento.
+    /// Starts a jam: creates a room or joins an existing one. The link runs on a thread of its
+    /// own, so the request returns at once; the room answers with an event.
     fn start(&mut self, target: Target, name: &str, effects: &mut Vec<Effect>) {
         if self.view.is_active() {
             self.raise(JamEvent::AlreadyIn);
@@ -308,7 +308,7 @@ impl Jam {
             self.raise(JamEvent::BadCode);
             return;
         }
-        // Senza un nome scelto per la stanza, con un profilo ci si presenta con il proprio.
+        // Without a name chosen for the room, with a profile one introduces oneself with one's own.
         let typed = name.trim();
         let name = match &self.profile {
             Some(profile) if typed.is_empty() => profile.as_str(),
@@ -317,7 +317,7 @@ impl Jam {
         let name: String = name.chars().take(jam::MAX_NAME_CHARS).collect();
         self.reset();
         self.view_mut().phase = JamPhase::Connecting;
-        // La coda è del gruppo: la riproduzione automatica non aggiunge nulla da sola.
+        // The queue belongs to the group: automatic playback adds nothing by itself.
         self.to_playback.push(PlaybackCmd::Group(true));
         effects.push(Effect::Jam(JamOp::Start {
             base: config::api_url(self.server.as_deref()),
@@ -326,7 +326,7 @@ impl Jam {
         }));
     }
 
-    /// Dimentica la stanza: la vista torna a «nessuna jam» (gli eventi restano) e ogni attesa cade.
+    /// Forgets the room: the view goes back to "no jam" (the events stay) and every wait falls.
     fn reset(&mut self) {
         if self.view.is_active() || self.view.code.is_some() || !self.view.members.is_empty() {
             let view = self.view_mut();
@@ -341,10 +341,10 @@ impl Jam {
         self.fetching = None;
     }
 
-    // ---------- La stanza ----------
+    // ---------- The room ----------
 
-    /// Un evento del collegamento. Uno che arriva a jam finita (il collegamento chiuso da noi) si
-    /// butta.
+    /// An event from the link. One that arrives after the jam has ended (the link closed by us) is
+    /// thrown away.
     pub(crate) fn event(&mut self, event: jam::Event) {
         if !self.view.is_active() {
             return;
@@ -359,7 +359,7 @@ impl Jam {
                 self.raise(JamEvent::Joined(code));
                 match state {
                     Some(remote) => self.arrived.push_back(Arrived::State { remote, first: true }),
-                    // Stanza nuova: il primo stato è il proprio.
+                    // New room: the first state is one's own.
                     None => self.synced = true,
                 }
             }
@@ -381,7 +381,7 @@ impl Jam {
     pub(crate) fn done(&mut self, done: Done, _now: Instant, _effects: &mut Vec<Effect>) {
         match done {
             Done::Tracks { ticket, result } => {
-                // Una risposta superata (un altro stato è arrivato, o si è usciti) si butta.
+                // A superseded reply (another state has arrived, or one has left) is thrown away.
                 let Some(fetching) = self.fetching.take_if(|fetching| fetching.ticket == ticket) else {
                     return;
                 };
@@ -390,16 +390,16 @@ impl Jam {
         }
     }
 
-    /// Il numero dell'ultima richiesta di brani, per i test che consegnano un esito a mano.
+    /// The number of the last request of tracks, for the tests that hand over an outcome by hand.
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn fetch_ticket(&self) -> Option<u64> {
         self.fetching.as_ref().map(|fetching| fetching.ticket)
     }
 
-    // ---------- Il passaggio fra i domini ----------
+    // ---------- The passing between domains ----------
 
-    /// Tratta ciò che è arrivato dalla stanza, leggendo la coda locale: i brani che mancano si
-    /// chiedono al catalogo, poi la riproduzione si allinea al gruppo (`take_playback`).
+    /// Handles what has arrived from the room, reading the local queue: the missing tracks are
+    /// asked of the catalog, then playback aligns to the group (`take_playback`).
     pub(crate) fn settle(&mut self, playback: &PlaybackView, now: Instant, effects: &mut Vec<Effect>) {
         while let Some(arrived) = self.arrived.pop_front() {
             if self.closing || !self.view.is_active() {
@@ -416,7 +416,7 @@ impl Jam {
         }
     }
 
-    /// Lo stato del gruppo diventa quello locale: si chiedono i brani che mancano, poi si allinea.
+    /// The group's state becomes the local one: the missing tracks are asked, then it aligns.
     fn remote_state(
         &mut self,
         remote: Remote,
@@ -426,9 +426,9 @@ impl Jam {
         effects: &mut Vec<Effect>,
     ) {
         self.synced = true;
-        // Lo stato ricevuto è il riferimento: non va rispedito come se fosse locale.
+        // The state received is the reference: it must not be sent back as if it were local.
         self.last_sent = Some(Sent { snapshot: remote.snapshot.clone(), at: now });
-        // Uno stato nuovo supera i brani che si aspettavano per il vecchio.
+        // A new state supersedes the tracks that were expected for the old one.
         self.fetching = None;
         let snapshot = &remote.snapshot;
         if snapshot.queue.is_empty() {
@@ -457,17 +457,17 @@ impl Jam {
         })));
     }
 
-    /// Allinea la riproduzione al gruppo: la coda nell'ordine del gruppo (con i brani già in coda e
-    /// quelli arrivati dal catalogo; lo shuffle si spegne, l'ordine lo decide chi suona per primo),
-    /// poi lo stesso brano alla stessa posizione, oppure si cambia brano. Il resto, compreso il
-    /// salto alla posizione condivisa quando l'audio del brano è pronto, lo fa la riproduzione.
+    /// Aligns playback to the group: the queue in the group's order (with the tracks already queued and
+    /// those arrived from the catalog; shuffle turns off, the order is decided by whoever plays first),
+    /// then the same track at the same position, or the track changes. The rest, including the
+    /// jump to the shared position when the track's audio is ready, is done by playback.
     fn adopt(&mut self, remote: &Remote, fetched: &[Track], playback: &PlaybackView) {
         let snapshot = &remote.snapshot;
         let same = playback.queue.entries().map(|(_, track)| track.id).eq(snapshot.queue.iter().copied());
         let tracks = if same {
             None
         } else {
-            // I brani già in coda vincono su quelli arrivati: è la stessa copia che il gruppo ha.
+            // The tracks already queued win over those arrived: it is the same copy the group has.
             let mut by_id: HashMap<Uuid, &Track> = HashMap::new();
             for track in playback.queue.entries().map(|(_, track)| track).chain(fetched) {
                 by_id.entry(track.id).or_insert(track);
@@ -488,17 +488,16 @@ impl Jam {
         })));
     }
 
-    /// Ciò che il dominio chiede alla riproduzione (il gruppo, l'allineamento, la coda svuotata): lo
-    /// applica il passaggio fra i domini, nello stesso giro.
+    /// What the domain asks of playback (the group, the alignment, the emptied queue): the passing between
+    /// domains applies it, in the same round.
     pub(crate) fn take_playback(&mut self) -> Vec<PlaybackCmd> {
         std::mem::take(&mut self.to_playback)
     }
 
-    /// Manda alla stanza lo stato locale, se è cambiato o se è tempo di rimandare la posizione. Non
-    /// si manda nulla mentre il gruppo non ha ancora detto il suo stato, né mentre un brano arrivato
-    /// dal gruppo è in caricamento: altrimenti si sovrascriverebbe la stanza con dati vecchi. Fuori
-    /// da una jam costa un confronto; dentro, la coda si confronta senza copiarla e lo stato si
-    /// costruisce solo quando parte.
+    /// Sends the room the local state, if it has changed or if it is time to send the position again. Nothing
+    /// is sent while the group has not yet said its state, nor while a track arrived from the group is
+    /// loading: otherwise the room would be overwritten with old data. Outside a jam it costs a comparison;
+    /// inside, the queue is compared without copying it, and the state is built only when it leaves.
     pub(crate) fn publish(&mut self, playback: &PlaybackView, now: Instant, effects: &mut Vec<Effect>) {
         if self.closing || !self.view.is_active() || !self.synced || self.fetching.is_some() {
             return;
@@ -507,7 +506,7 @@ impl Jam {
             return;
         }
         let Some(index) = playback.queue.position() else { return };
-        // Una coda più lunga di quella che il server accetta non si condivide.
+        // A queue longer than the server accepts is not shared.
         if playback.queue.len() > jam::MAX_QUEUE {
             return;
         }
@@ -524,8 +523,8 @@ impl Jam {
 }
 
 impl Job {
-    /// Esegue il lavoro: i brani del catalogo, pochi alla volta. L'ordine non conta, il dominio
-    /// riallinea per id.
+    /// Runs the job: the catalog's tracks, a few at a time. The order does not matter: the domain
+    /// realigns by id.
     pub(crate) async fn run(self) -> Done {
         match self {
             Self::Tracks { api, ids, ticket } => {
@@ -544,7 +543,7 @@ impl Job {
         }
     }
 
-    /// Se il lavoro va perso, il dominio non resta ad aspettare: fallisce come senza rete.
+    /// If the job is lost, the domain does not keep waiting: it fails as without network.
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::Tracks { ticket, .. } => Done::Tracks { ticket: *ticket, result: Err(AppError::Network) },
@@ -594,18 +593,18 @@ mod tests {
         }
     }
 
-    /// Il core intero (stesso passaggio fra i domini di quello vero) con il tempo in mano al test e
-    /// l'audio finto: ogni `Play` parte, e il battito scocca a mano.
+    /// The whole core (the same passing between domains as the real one) with the time in the test's hands and
+    /// the fake audio: each `Play` starts, and the tick is fired by hand.
     struct Rig {
         state: CoreState,
         now: Instant,
-        /// Ciò che la jam ha chiesto all'host, dall'ultima lettura.
+        /// What the jam has asked of the host, since the last reading.
         ops: Vec<JamOp>,
-        /// I brani chiesti al catalogo: (numero della richiesta, id).
+        /// The tracks asked of the catalog: (request number, id).
         fetches: Vec<(u64, Vec<Uuid>)>,
-        /// I caricamenti chiesti: (brano, generazione).
+        /// The loads asked: (track, generation).
         loads: Vec<(Uuid, u64)>,
-        /// I timer armati in tutto, a parte il battito e il salvataggio delle impostazioni.
+        /// The timers armed in all, apart from the tick and the settings' save.
         other_timers: usize,
         ticking: bool,
         audio: Vec<AudioOp>,
@@ -625,7 +624,7 @@ mod tests {
             }
         }
 
-        /// Dà l'ingresso e rimette in giro ciò che l'audio risponderebbe, come fa l'host.
+        /// Gives the input and puts back in motion what the audio would answer, as the host does.
         fn feed(&mut self, input: Input) {
             let mut pending = VecDeque::from([input]);
             while let Some(input) = pending.pop_front() {
@@ -648,7 +647,7 @@ mod tests {
                         }
                         Effect::Timer { key: TimerKey::Playback(Timer::Tick), .. } => self.ticking = true,
                         Effect::CancelTimer(TimerKey::Playback(Timer::Tick)) => self.ticking = false,
-                        // Il salvataggio ritardato di `config.json` non è della jam.
+                        // The delayed save of `config.json` is not the jam's.
                         Effect::Timer { key: TimerKey::Settings(_), .. } => {}
                         Effect::Timer { .. } => self.other_timers += 1,
                         _ => {}
@@ -681,7 +680,7 @@ mod tests {
             self.view().events.iter().map(|raised| raised.event.clone()).collect()
         }
 
-        /// Gli stati mandati alla stanza dall'ultima lettura.
+        /// The states sent to the room since the last reading.
         fn sent(&mut self) -> Vec<Shared> {
             std::mem::take(&mut self.ops)
                 .into_iter()
@@ -700,7 +699,7 @@ mod tests {
             jam::millis(self.state.playback.view.position(self.now))
         }
 
-        /// I brani suonano dal primo: caricati, partiti.
+        /// The tracks play from the first: loaded, started.
         fn play(&mut self, queue: &[u128]) {
             let tracks: Vec<Track> = queue.iter().map(|n| track(*n)).collect();
             self.playback(PlaybackCmd::Play { tracks: tracks.into(), start: 0 });
@@ -708,7 +707,7 @@ mod tests {
             assert!(self.state.playback.view.is_playing(), "{:?}", self.state.playback.view.state);
         }
 
-        /// Il server manda l'ultimo brano chiesto.
+        /// The server sends the last track asked for.
         fn load_arrives(&mut self) {
             let (_, generation) = self.loads.pop().expect("un caricamento chiesto");
             self.loads.clear();
@@ -719,7 +718,7 @@ mod tests {
             })));
         }
 
-        /// Un battito della riproduzione: l'audio ha raggiunto `heard` dall'inizio del brano.
+        /// A tick of playback: the audio has reached `heard` from the start of the track.
         fn beat(&mut self, heard: Duration) {
             self.elapse(TICK);
             assert!(self.ticking, "il battito deve essere armato");
@@ -731,7 +730,7 @@ mod tests {
             }));
         }
 
-        /// Battiti da `from` a `until`, uno ogni 250 ms, come fa un brano che suona.
+        /// Ticks from `from` to `until`, one every 250 ms, as a track playing does.
         fn listen(&mut self, from: Duration, until: Duration) {
             let mut at = from;
             while at < until {
@@ -744,7 +743,7 @@ mod tests {
             self.feed(Input::Done(AnyDone::Jam(Done::Tracks { ticket, result })));
         }
 
-        /// Una jam aperta in una stanza nuova (senza stato), con `queue` che suona.
+        /// An open jam in a new room (with no state), with `queue` playing.
         fn open_room(queue: &[u128]) -> Self {
             let mut rig = Self::new();
             rig.play(queue);
@@ -754,7 +753,7 @@ mod tests {
         }
     }
 
-    // ---------- Comandi ----------
+    // ---------- Commands ----------
 
     #[test]
     fn creating_a_jam_asks_the_host_for_a_room_and_puts_playback_in_the_group() {
@@ -831,7 +830,7 @@ mod tests {
         assert_eq!(name_of(&ops).chars().count(), jam::MAX_NAME_CHARS);
     }
 
-    // ---------- Ingresso ----------
+    // ---------- Entry ----------
 
     #[test]
     fn the_room_answers_with_its_code_and_members() {
@@ -848,8 +847,8 @@ mod tests {
         assert!(!JamEvent::Joined("K7QXM3".into()).is_error());
     }
 
-    /// BACKLOG 10: chi entra in una jam già avviata vede «Sei nella jam CODE», e lo stato che la
-    /// stanza manda all'ingresso non è «un altro ha cambiato brano»: l'avviso non lo sostituisce.
+    /// BACKLOG 10: whoever joins an already started jam sees "Sei nella jam CODE", and the state that the
+    /// room sends at entry is not "someone else changed track": the notice does not replace it.
     #[test]
     fn a_late_joiner_keeps_the_you_are_in_the_jam_notice() {
         let mut rig = Rig::new();
@@ -869,15 +868,15 @@ mod tests {
         rig.jam(JamCmd::Join { code: "K7QXM3".into(), name: String::new() });
         rig.event(joined("K7QXM3", Some(remote("Luca", &[1, 2], 1, 12_000, true))));
 
-        // I brani del gruppo mancano: si chiedono al catalogo (una volta sola) e alla stanza non si
-        // manda niente.
+        // The group's tracks are missing: they are asked of the catalog (once) and nothing is sent to the room.
+        // meanwhile.
         assert_eq!(rig.fetches.len(), 1);
         assert_eq!(rig.fetches[0].1, [id(1), id(2)]);
         assert!(rig.sent().is_empty());
         assert!(rig.state.jam.fetch_ticket().is_some());
 
-        // Arrivati in un ordine qualsiasi, la coda prende quella del gruppo e parte il brano
-        // condiviso. Mentre si carica, la stanza non riceve nulla.
+        // Arrived in any order, the queue takes the group's and the shared track starts. While it loads, the room
+        // receives nothing.
         let ticket = rig.fetches[0].0;
         rig.answer(ticket, Ok(vec![track(2), track(1)]));
         assert_eq!(rig.queue_ids(), [id(1), id(2)]);
@@ -886,7 +885,7 @@ mod tests {
         assert!(rig.sent().is_empty(), "un brano del gruppo in caricamento non si annuncia");
         assert!(rig.state.jam.fetch_ticket().is_none());
 
-        // L'audio pronto parte dalla posizione del gruppo, non da capo, e non si rimanda indietro.
+        // The audio ready starts from the group's position, not from the beginning, and nothing is sent back.
         rig.load_arrives();
         assert!(rig.state.playback.view.is_playing());
         assert_eq!(rig.position_ms(), 12_000);
@@ -908,7 +907,7 @@ mod tests {
         assert_eq!(rig.position_ms(), 12_000);
         assert!(rig.sent().is_empty());
 
-        // Il primo cambio locale, invece, si annuncia: la ripresa, alla posizione condivisa.
+        // The first local change, instead, is announced: the resume, at the shared position.
         rig.playback(PlaybackCmd::Toggle);
         let sent = rig.sent();
         assert_eq!(sent.len(), 1, "{sent:?}");
@@ -933,7 +932,7 @@ mod tests {
         let mut rig = Rig::new();
         rig.play(&[1, 2]);
         rig.jam(JamCmd::Join { code: "K7QXM3".into(), name: String::new() });
-        // Il gruppo ha 3 e 1 (2 non c'è, e 3 compare due volte): si chiede il solo 3, una volta.
+        // The group has 3 and 1 (2 is not there, and 3 appears twice): only 3 is asked, once.
         rig.event(joined("K7QXM3", Some(remote("Luca", &[3, 1, 3], 0, 0, true))));
         assert_eq!(rig.fetches.len(), 1);
         assert_eq!(rig.fetches[0].1, [id(3)]);
@@ -952,7 +951,7 @@ mod tests {
         let second = rig.fetches[1].0;
         assert_ne!(first, second);
 
-        // La risposta del vecchio stato è superata: la coda non cambia e il resto aspetta.
+        // The reply to the old state is superseded: the queue does not change and the rest waits.
         rig.answer(first, Ok(vec![track(1), track(2)]));
         assert!(rig.queue_ids().is_empty());
         assert!(rig.state.jam.fetch_ticket().is_some(), "si aspetta ancora il secondo");
@@ -990,7 +989,7 @@ mod tests {
             "Brani della jam non caricati: Server non raggiungibile. Controlla la connessione."
         );
 
-        // Il catalogo manda solo uno dei due: la coda resta com'è, e lo si dice.
+        // The catalog sends only one of the two: the queue stays as it is, and it is said.
         rig.event(jam::Event::State(remote("Luca", &[1, 2], 0, 0, true)));
         rig.answer(rig.fetches[1].0, Ok(vec![track(1)]));
         assert!(rig.queue_ids().is_empty());
@@ -1047,7 +1046,7 @@ mod tests {
         assert_eq!(rig.view().phase, JamPhase::Open, "il collegamento resta aperto");
     }
 
-    // ---------- Uscita ----------
+    // ---------- Exit ----------
 
     #[test]
     fn leaving_closes_the_link_leaves_the_group_and_a_late_event_is_ignored() {
@@ -1061,7 +1060,7 @@ mod tests {
         assert_eq!(JamEvent::Left.message(), "Sei uscito dalla jam");
         assert!(!rig.state.playback.grouped(), "fuori dal gruppo l'autoplay torna");
 
-        // Ciò che il collegamento aveva ancora in canna non riapre niente.
+        // Whatever the link still had in hand reopens nothing.
         let events = rig.events().len();
         rig.event(jam::Event::State(remote("Luca", &[1], 0, 0, true)));
         rig.event(jam::Event::Closed("Jam chiusa".into()));
@@ -1069,7 +1068,7 @@ mod tests {
         assert!(!rig.view().is_active());
         assert_eq!(rig.events().len(), events);
         assert!(rig.ops.is_empty() && rig.fetches.is_empty());
-        // Uscire di nuovo non fa niente.
+        // Leaving again does nothing.
         rig.jam(JamCmd::Leave);
         assert!(rig.ops.is_empty());
         assert_eq!(rig.events().len(), events);
@@ -1088,7 +1087,7 @@ mod tests {
         assert!(!rig.state.playback.grouped());
         assert!(rig.ops.is_empty(), "il collegamento è già finito: non c'è altro da chiudere");
 
-        // Si può ripartire da capo.
+        // It can start again from scratch.
         rig.jam(JamCmd::Create { name: String::new() });
         assert!(matches!(rig.ops.as_slice(), [JamOp::Start { .. }]));
     }
@@ -1103,22 +1102,22 @@ mod tests {
         assert_eq!(rig.events(), [JamEvent::Closed("Il server non risponde".into())]);
     }
 
-    // ---------- Quando si manda lo stato ----------
+    // ---------- When the state is sent ----------
 
-    /// Fermo, una jam non manda nulla e non arma nessun timer; ogni cambio vero è un invio solo
-    /// (e mai mentre il brano si carica), e il battito ogni cinque secondi mentre suona.
+    /// Idle, a jam sends nothing and arms no timer; each real change is a single send
+    /// (and never while the track loads), and the tick every five seconds while playing.
     #[test]
     fn the_local_state_is_sent_on_real_transitions_and_on_a_five_second_heartbeat() {
         let mut rig = Rig::open_room(&[1, 2]);
-        // Entrati in una stanza nuova con la coda che suona: il primo stato è il proprio.
+        // Entered a new room with the queue playing: the first state is one's own.
         let first = rig.sent();
         assert_eq!(first, [shared(&[1, 2], 0, 0, true)]);
         assert_eq!(rig.other_timers, 0, "la jam non arma nessun timer");
 
-        // Quattro secondi di ascolto: nessun invio (la posizione segue l'orologio).
+        // Four seconds of listening: no send (the position follows the clock).
         rig.listen(Duration::ZERO, secs(4));
         assert!(rig.sent().is_empty());
-        // Al quinto secondo, il battito.
+        // At the fifth second, the tick.
         rig.listen(secs(4), secs(5));
         let beat = rig.sent();
         assert_eq!(beat.len(), 1);
@@ -1126,7 +1125,7 @@ mod tests {
         rig.listen(secs(5), secs(9));
         assert!(rig.sent().is_empty());
 
-        // Pausa: un invio solo. In pausa, nient'altro: il core non ha più battito.
+        // Pause: a single send. While paused, nothing else: the core no longer has a tick.
         rig.playback(PlaybackCmd::Toggle);
         let paused = rig.sent();
         assert_eq!(paused.len(), 1);
@@ -1136,7 +1135,7 @@ mod tests {
         rig.playback(PlaybackCmd::Volume(0.5));
         assert!(rig.sent().is_empty(), "un minuto di pausa non rimanda niente");
 
-        // Un salto in pausa si manda; la ripresa anche.
+        // A jump while paused is sent; the resume too.
         rig.playback(PlaybackCmd::SeekTo(secs(100)));
         let jumped = rig.sent();
         assert_eq!(jumped.len(), 1);
@@ -1170,7 +1169,7 @@ mod tests {
         assert_eq!(sent[0].queue, [id(1), id(2)]);
 
         let many: Vec<Track> = (1..=jam::MAX_QUEUE as u128 + 1).map(track).collect();
-        // Dal sesto: il primo era l'ultimo suonato e si riascolta dal buffer, senza caricamento.
+        // From the sixth: the first was the last one played and is listened to again from the buffer, with no loading.
         rig.playback(PlaybackCmd::Play { tracks: many.into(), start: 5 });
         rig.load_arrives();
         assert!(rig.sent().is_empty(), "più di {} brani non si condividono", jam::MAX_QUEUE);
@@ -1194,8 +1193,8 @@ mod tests {
         assert_eq!(empty.sent().len(), 1, "la prima coda parte appena c'è");
     }
 
-    /// Chiudere il core ferma la riproduzione, e a quel punto la stanza non deve sentire «in
-    /// pausa»: sarebbe un modo di fermare l'ascolto degli altri.
+    /// Closing the core stops playback, and at that point the room must not hear "in pausa": it would be a way
+    /// of stopping the others' listening.
     #[test]
     fn closing_the_core_does_not_tell_the_room_that_playback_stopped() {
         let mut rig = Rig::open_room(&[1]);
@@ -1211,18 +1210,18 @@ mod tests {
         let mut rig = Rig::open_room(&[1, 2]);
         rig.sent();
         rig.listen(Duration::ZERO, secs(1));
-        // Il gruppo è a 31 s sullo stesso brano: ci si sposta e non si rimanda lo stesso stato.
+        // The group is at 31 s on the same track: one moves and the same state is not sent back.
         rig.event(jam::Event::State(remote("Luca", &[1, 2], 0, 31_000, true)));
         assert!(rig.sent().is_empty());
         assert_eq!(rig.position_ms(), 31_000);
-        // Un salto locale lontano si annuncia.
+        // A far local jump is announced.
         rig.playback(PlaybackCmd::SeekTo(secs(90)));
         let sent = rig.sent();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].position_ms, 90_000);
     }
 
-    // ---------- Vista ----------
+    // ---------- View ----------
 
     #[test]
     fn events_keep_the_last_32_with_growing_numbers() {

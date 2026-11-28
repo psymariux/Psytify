@@ -1,5 +1,5 @@
 //! A profile, the person's own included, as the GPUI page (`desktop/src/app/profile_page.rs`) in the
-//! Iced phone order: the avatar in the pixel circle, the name, `@handle` and the friends, and the
+//! Phone order: the avatar in the pixel circle, the name, `@handle` and the friends, and the
 //! relation button (Aggiungi agli amici, Accetta la richiesta, Richiesta inviata to withdraw it, or
 //! Amici, which removes the friend after a confirmation); «Sta ascoltando»; the most played artists
 //! (they open); the recent listens (they play); the public playlists (they open as collection

@@ -1,15 +1,14 @@
-//! L'aggiornamento dell'app: la fascia sotto la barra del titolo (come `client/src/ui/update_banner.rs`
-//! del client Iced) e i testi che condivide con la riga «Aggiornamento» delle Impostazioni.
+//! The app update: the banner under the title bar and the texts it shares with the «Aggiornamento» line of the Settings.
 //!
-//! [`update_line`] è l'unica funzione che dice, dalla vista del core (`UpdateView`), che cosa scrivere e
-//! quale controllo mettere: per la fascia (`Place::Banner`, solo se il core dice che c'è qualcosa da
-//! mostrare: un'offerta non chiusa, il download o il file pronto) e per le Impostazioni (`Place::Settings`,
-//! sempre, anche l'ultimo controllo con «Controlla ora»). I testi sono quelli del client Iced.
+//! [`update_line`] is the only function that says, from the core's view (`UpdateView`), what to write and
+//! which control to put: for the banner (`Place::Banner`, only if the core says there is something to
+//! show: an offer not closed, the download or the file ready) and for the Settings (`Place::Settings`,
+//! always, even the last check with «Controlla ora»). The texts are shared by both lines.
 //!
-//! La fascia è una vista a sé in `.cached()` alla sua altezza fissa: `Shell` la mette nella finestra solo
-//! mentre c'è qualcosa da dire, e il loader del download (uno sprite animato) ridisegna solo lei, mai le
-//! pagine. Nascosta non costa niente: nessun timer, nessun disegno, solo il confronto della riga quando la
-//! vista dei download cambia. Monocroma: nessun lime (un aggiornamento non è uno stato della riproduzione).
+//! The banner is a view of its own in `.cached()` at its fixed height: `Shell` puts it in the window only
+//! while there is something to say, and the download loader (an animated sprite) redraws only it, never the
+//! pages. Hidden it costs nothing: no timer, no drawing, only the comparison of the line when the
+//! downloads view changes. Monochrome: no lime (an update is not a playback state).
 
 use gpui::{
     ClickEvent, Context, Entity, IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
@@ -29,35 +28,35 @@ use crate::core_model::CoreModel;
 use crate::pixel::PixelSprite;
 use crate::theme::{TypeStyle, col, dp};
 
-/// L'altezza della fascia: quella della barra del titolo, sopra cui sta.
+/// The banner's height: that of the title bar, above which it sits.
 pub const BANNER_H: f32 = TITLE_BAR_H;
 
-/// Dove si mostra l'aggiornamento.
+/// Where the update is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Place {
-    /// La fascia sotto la barra del titolo.
+    /// The banner under the title bar.
     Banner,
-    /// La riga «Aggiornamento» delle Impostazioni.
+    /// The «Aggiornamento» line of the Settings.
     Settings,
 }
 
-/// Che cosa sta a destra del testo.
+/// What sits on the right of the text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpdateControl {
-    /// «Scarica» (primario): `DownloadsCmd::DownloadUpdate`.
+    /// «Scarica» (primary): `DownloadsCmd::DownloadUpdate`.
     Download,
-    /// Il download del pacchetto è in corso: la barra a dieci passi del kit con i punti percentuali del
-    /// core, o il loader finché il server non ha detto la lunghezza (BACKLOG 38).
+    /// The package download is in progress: the kit's ten-step bar with the core's percentage
+    /// points, or the loader until the server has said the length (BACKLOG 38).
     Steps(Option<u8>),
-    /// «Apri cartella» (secondario) sul pacchetto pronto: `DownloadsCmd::RevealUpdate`, che apre la sua
-    /// cartella nel gestore di file per installarlo a mano (BACKLOG 39).
+    /// «Apri cartella» (secondary) on the package ready: `DownloadsCmd::RevealUpdate`, which opens its
+    /// folder in the file manager to install it by hand (BACKLOG 39).
     Reveal,
-    /// «Controlla ora» (`DownloadsCmd::CheckUpdate(Manual)`), che gira mentre il controllo è in corso.
+    /// «Controlla ora» (`DownloadsCmd::CheckUpdate(Manual)`), which runs while the check is in progress.
     Check { checking: bool },
 }
 
-/// La riga dell'aggiornamento: il testo, il controllo e se si può chiudere (`DownloadsCmd::DismissUpdate`,
-/// solo dove il core fa qualcosa: un'offerta, che torna con la prossima release, o il file pronto).
+/// The update line: the text, the control and whether it can be closed (`DownloadsCmd::DismissUpdate`,
+/// only where the core does something: an offer, which comes back with the next release, or the file ready).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateLine {
     pub text: String,
@@ -65,8 +64,8 @@ pub struct UpdateLine {
     pub closable: bool,
 }
 
-/// La riga dell'aggiornamento per `place`. Per la fascia `None` se non c'è niente da mostrare; per le
-/// Impostazioni sempre una riga. Pura.
+/// The update line for `place`. For the banner `None` if there is nothing to show; for the
+/// Settings always a line. Pure.
 pub fn update_line(view: &UpdateView, place: Place) -> Option<UpdateLine> {
     let state = match place {
         Place::Banner => Some(view.banner()?),
@@ -107,13 +106,13 @@ pub fn update_line(view: &UpdateView, place: Place) -> Option<UpdateLine> {
     Some(UpdateLine { text, control, closable })
 }
 
-/// La fascia: icona, testo, «Scarica» o il loader, e la chiusura.
+/// The banner: icon, text, «Scarica» or the loader, and the close.
 pub struct UpdateBanner {
     core: Entity<CoreModel>,
     line: Option<Shown>,
 }
 
-/// La riga già pronta per il disegno.
+/// The line already ready for drawing.
 #[derive(Clone, Debug, PartialEq)]
 struct Shown {
     text: SharedString,
@@ -126,8 +125,8 @@ impl UpdateBanner {
         Self { core, line: None }
     }
 
-    /// La riga nuova (da `Shell`, quando la vista dei download cambia): si ridisegna solo se è un'altra.
-    /// Dice se la fascia è da mostrare.
+    /// The new line (from `Shell`, when the downloads view changes): it redraws only if it is another one.
+    /// Says whether the banner is to be shown.
     pub fn set(&mut self, line: Option<UpdateLine>, cx: &mut Context<Self>) -> bool {
         let shown =
             line.map(|line| Shown { text: line.text.into(), control: line.control, closable: line.closable });

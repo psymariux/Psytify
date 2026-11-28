@@ -1,7 +1,7 @@
-// Questi test affermano proprietà di costanti di proposito: il lint «assertions_on_constants» non si applica.
+// These tests deliberately assert properties of constants: the «assertions_on_constants» lint does not apply.
 #![allow(clippy::assertions_on_constants)]
 
-//! Controlli di coerenza dei token fra loro e con il documento `PSYTIFY_DESIGN_TOKENS.md`.
+//! Consistency checks of the tokens with each other and with the document `PSYTIFY_DESIGN_TOKENS.md`.
 
 use std::collections::HashSet;
 
@@ -50,7 +50,7 @@ fn hex_values_match_the_doc_and_the_sprite_manifest() {
         assert_eq!(*name, doc_name);
         assert_eq!(color.hex(), hex, "{name}");
     }
-    // `design/assets/pixel/manifest.toml` ripete gli stessi dodici valori: devono restare uguali.
+    // `design/assets/pixel/manifest.toml` repeats the same twelve values: they must stay equal.
     let manifest = include_str!("../assets/pixel/manifest.toml");
     for (name, color) in PALETTE {
         let line = format!("{} = \"#{:06x}\"", name.to_lowercase(), color.hex());
@@ -64,7 +64,7 @@ fn hex_values_match_the_doc_and_the_sprite_manifest() {
 
 #[test]
 fn the_palette_is_slightly_warm() {
-    // Tutti i grigi: R - B fra 2 e 14 (tranne nero e bianco puri, e i due colori d'accento).
+    // All the greys: R - B between 2 and 14 (except pure black and white, and the two accent colours).
     for (name, c) in &PALETTE[1..9] {
         let warmth = i32::from(c.r()) - i32::from(c.b());
         assert!((2..=14).contains(&warmth), "{name}: {warmth}");
@@ -127,7 +127,7 @@ fn aliases_point_where_the_doc_says() {
 
 #[test]
 fn text_tiers_and_interactive_roles_are_told_apart() {
-    // Dove il documento dice che due ruoli differiscono, i valori differiscono.
+    // Where the document says that two roles differ, the values differ.
     let tiers = [TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TEXT_DISABLED];
     assert_eq!(tiers.iter().collect::<HashSet<_>>().len(), 4);
     assert_ne!(CONTROL_BORDER, CONTROL_BORDER_HOVER);
@@ -286,7 +286,7 @@ fn type_scale_matches_the_doc() {
     assert_eq!((TYPE_LABEL.family, TYPE_LABEL.size), (FAMILY_PIXEL, 11.0));
     assert!(TYPE_NUMERIC_PIXEL.slashed_zero && !TYPE_NUMERIC.slashed_zero);
     assert_eq!(TYPE_LABEL.case, TextCase::Upper);
-    // The Iced pixel face: 11 / 14 AP.
+    // The pixel face: 11 / 14 AP.
     assert_eq!((PIXEL_SIZE, PIXEL_LINE), (11.0 * 2.0, 14.0 * 2.0));
     assert_eq!((PIXEL_SIZE_AP, PIXEL_LINE_AP), (11, 14));
 }
@@ -340,7 +340,7 @@ fn motion_tokens_match_the_doc() {
     );
     assert_eq!(SPRITE_FRAME_MIN_MS, 80);
     assert_eq!((STAGGER_MS, STAGGER_MAX_STEPS, ENTER_RISE_AP, STEP_FRAMES), (40, 6, 4, 3));
-    // reduce_motion: durate della UI a 0, il tick del progresso no.
+    // reduce_motion: UI durations at 0, the progress tick is not.
     assert_eq!(MOTION_BASE.effective_ms(true), 0);
     assert_eq!(MOTION_BASE.effective_ms(false), 160);
     assert_eq!(PROGRESS_TICK_MS, 250);

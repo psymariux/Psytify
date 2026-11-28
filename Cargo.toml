@@ -1,7 +1,5 @@
 [workspace]
-members = ["client", "core", "design", "desktop", "mobile", "mobile/gen"]
-# Android is a separate workspace: it uses a patched copy of iced_winit (see android/vendor).
-exclude = ["android"]
+members = ["core", "design", "desktop", "mobile", "mobile/gen"]
 resolver = "2"
 
 [workspace.package]

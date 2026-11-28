@@ -1,30 +1,29 @@
-//! Download dei brani e aggiornamenti dell'app (passo 4.6).
+//! Downloads of tracks and app updates (step 4.6).
 //!
-//! Il dominio tiene la coda dei download: ogni brano chiesto è un [`Item`] che passa da in coda a in
-//! preparazione (il server sta scegliendo o ricodificando il file) a in scaricamento; finito bene
-//! esce dalla coda, finito male resta come fallito, con l'errore, per riprovare. «Scarica tutto»
-//! mette i suoi brani nella stessa coda e ne scarica due alla volta ([`BATCH_PARALLEL`]); un solo
-//! brano chiesto a mano parte subito, come prima, anche se un lotto è in corso. Ogni download è un
-//! lavoro ([`Job::Track`]) che scrive in un file temporaneo unico e lo pubblica a fine corsa
-//! (`api::transfer`): un annullamento lo ferma e ne toglie il temporaneo.
+//! The domain keeps the download queue: each requested track is an [`Item`] that goes from queued to
+//! preparing (the server is choosing or re-encoding the file) to downloading; if it ends well it leaves
+//! the queue, if it ends badly it stays as failed, with the error, to retry. "Scarica tutto"
+//! puts its tracks in the same queue and downloads two at a time ([`BATCH_PARALLEL`]); a single
+//! track requested by hand starts at once, as before, even if a batch is in progress. Each download is a
+//! job ([`Job::Track`]) that writes to a unique temporary file and publishes it at the end of the run
+//! (`api::transfer`): a cancellation stops it and removes the temporary file.
 //!
-//! L'avanzamento non passa dal riduttore a ogni blocco: il lavoro conta i byte in un [`Progress`]
-//! condiviso e un timer del core ([`Timer::Progress`], ogni 250 ms) lo legge. Il timer è armato solo
-//! finché un download è in corso, e la vista cambia solo quando cambia un punto percentuale (o, senza
-//! la lunghezza del file, ogni 256 KiB): fermi, o fra due punti, il core non pubblica niente.
+//! Progress does not pass through the reducer at each block: the job counts the bytes in a shared
+//! [`Progress`] and a core timer ([`Timer::Progress`], every 250 ms) reads it. The timer is armed only
+//! while a download is in progress, and the view changes only when a percentage point changes (or, without
+//! the file's length, every 256 KiB): idle, or between two points, the core publishes nothing.
 //!
-//! Ogni brano salvato entra nell'indice dei brani sul dispositivo (`offline.rs`: percorso, formato,
-//! peso e SHA-256 calcolato mentre il file si scriveva), scritto in `config.json` con le altre
-//! impostazioni. All'avvio un controllo veloce (esiste ed è del peso giusto) segna i file che non lo
-//! sono ([`Lost`]): mai li cancella né li toglie dall'indice, e il brano si ascolta dalla rete. La
-//! riproduzione riceve la mappa dei file a posto ([`Downloads::local`]) e suona da lì; se un file
-//! non si apre lo segnala e il dominio lo segna perso. «Rimuovi» toglie la voce subito e il file
-//! solo se pesa ancora quanto l'indice dice (un file cambiato fuori dall'app non si cancella).
+//! Each saved track enters the index of tracks on the device (`offline.rs`: path, format,
+//! weight and SHA-256 computed while the file was being written), written to `config.json` with the other
+//! settings. At startup a quick check (it exists and has the right weight) marks the files that are not
+//! ([`Lost`]): it never deletes them nor removes them from the index, and the track plays from the network. The
+//! playback receives the map of the files in order ([`Downloads::local`]) and plays from there; if a file
+//! does not open it reports it and the domain marks it lost. "Rimuovi" removes the entry at once and the file
+//! only if it still weighs what the index says (a file changed outside the app is not deleted).
 //!
-//! Il dominio controlla anche gli aggiornamenti dell'app (all'avvio, ogni sei ore con un timer del
-//! core e a richiesta) e ne scarica il pacchetto nella cartella degli aggiornamenti. Ciò che il
-//! frontend deve dire all'utente (brano salvato, lotto finito, release nuova) è un evento con il suo
-//! numero d'ordine, come nel catalogo.
+//! The domain also checks the app's updates (at startup, every six hours with a core timer and on request)
+//! and downloads the package into the updates folder. What the frontend must tell the user (saved track, batch
+//! finished, new release) is an event with its sequence number, as in the catalog.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -41,89 +40,89 @@ use crate::error::AppError;
 use crate::offline::{self, LocalFile, Lost, LostReason, SavedTrack};
 use crate::shared::Shared;
 
-/// Quanti brani di «Scarica tutto» scaricano insieme: abbastanza per tenere occupata la rete, pochi
-/// per non soffocare il telefono.
+/// How many "Scarica tutto" tracks download together: enough to keep the network busy, few
+/// so as not to choke the phone.
 pub const BATCH_PARALLEL: usize = 2;
-/// Ogni quanto si legge l'avanzamento dei download in corso.
+/// How often the progress of downloads in progress is read.
 pub const PROGRESS_EVERY: Duration = Duration::from_millis(250);
-/// Brani in coda o in corso, al massimo: «Scarica tutto» su una libreria enorme non riempie la
-/// memoria, e oltre il limite l'utente lo ripete a coda scesa.
+/// Tracks queued or in progress, at most: "Scarica tutto" on a huge library does not fill
+/// memory, and beyond the limit the user repeats it when the queue has gone down.
 pub const MAX_QUEUED: usize = 500;
-/// Download falliti che restano nella coda, per riprovarli: oltre, esce il più vecchio.
+/// Failed downloads kept in the queue, to retry them: beyond that, the oldest goes out.
 pub const MAX_FAILED: usize = 20;
-/// Senza la lunghezza del file, l'avanzamento cambia ogni tanti byte.
+/// Without the file's length, the progress changes every so many bytes.
 const UNKNOWN_STEP: u64 = 256 * 1024;
-/// Eventi tenuti nella vista: un frontend che legge a ogni pubblicazione non ne perde.
+/// Events kept in the view: a frontend that reads at each publish does not lose any.
 const EVENTS: usize = 32;
-/// Ogni quanto un'app rimasta aperta richiede l'ultima release. Una richiesta ogni sei ore: il
-/// backend tiene la lista in cache per quindici minuti e GitHub non vede nulla.
+/// How often an app left open asks for the latest release. One request every six hours: the
+/// backend keeps the list in cache for fifteen minutes and GitHub sees nothing.
 pub const UPDATE_POLL: Duration = Duration::from_secs(6 * 60 * 60);
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone)]
 pub enum DownloadsCmd {
-    /// Scarica il brano nella qualità scelta nelle impostazioni, subito.
+    /// Downloads the track in the quality chosen in the settings, at once.
     Download(Box<Track>),
-    /// Scarica il brano in questa qualità, subito.
+    /// Downloads the track in this quality, at once.
     DownloadAs(Box<Track>, DownloadQuality),
-    /// «Scarica tutto»: i brani che si possono scaricare entrano in coda, due alla volta.
+    /// "Scarica tutto": the tracks that can be downloaded enter the queue, two at a time.
     DownloadAll(Arc<[Track]>),
-    /// Toglie dalla coda un brano in attesa, ferma uno in corso (il suo file temporaneo sparisce),
-    /// o toglie dall'elenco uno fallito.
+    /// Removes from the queue a track waiting, stops one in progress (its temporary file disappears),
+    /// or removes one failed from the list.
     Cancel(Uuid),
-    /// Riprova un download fallito.
+    /// Retries a failed download.
     Retry(Uuid),
-    /// Cambia la qualità dei download.
+    /// Changes the download quality.
     SetQuality(DownloadQuality),
-    /// Toglie un brano dal dispositivo: la voce dell'indice sparisce subito, il file se è ancora
-    /// quello scaricato.
+    /// Removes a track from the device: the index entry disappears at once, the file if it is still
+    /// the downloaded one.
     Remove(Uuid),
-    /// Controlla a fondo i file scaricati (esistenza, peso e SHA-256): quelli che non sono a posto si
-    /// segnano, quelli tornati a posto si liberano. All'avvio il core fa solo il controllo veloce.
+    /// Checks the downloaded files thoroughly (existence, weight and SHA-256): those that are not in order
+    /// are marked, those back in order are freed. At startup the core only does the quick check.
     Verify,
-    /// Apre la cartella dei download nel gestore di file del sistema.
+    /// Opens the downloads folder in the system file manager.
     OpenFolder,
-    /// Chiede al backend l'ultima release.
+    /// Asks the backend for the latest release.
     CheckUpdate(UpdateCheck),
-    /// Scarica il pacchetto dell'aggiornamento offerto.
+    /// Downloads the offered update's package.
     DownloadUpdate,
-    /// Chiude il banner dell'aggiornamento: torna da solo con la prossima release.
+    /// Closes the update banner: it comes back by itself with the next release.
     DismissUpdate,
-    /// Apre nel gestore di file la cartella del pacchetto scaricato, per installarlo a mano
-    /// (BACKLOG 39). Solo con un pacchetto pronto; non su Android, dove l'installazione la chiede il
-    /// sistema. Installarlo e riavviare dall'app non si fa: è una decisione del proprietario (firma,
-    /// permessi, file bloccati su Windows).
+    /// Opens the folder of the downloaded package in the file manager, to install it by hand
+    /// (BACKLOG 39). Only with a package ready; not on Android, where the installation is asked by the
+    /// system. Installing it and restarting from the app is not done: it is a decision of the owner (signature,
+    /// permissions, files locked on Windows).
     RevealUpdate,
 }
 
-/// Chi ha chiesto il controllo: cambia cosa si dice quando non c'è nulla di nuovo.
+/// Whoever asked for the check: it changes what is said when there is nothing new.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateCheck {
-    /// All'avvio.
+    /// At startup.
     Startup,
-    /// Il timer, ad app aperta da ore.
+    /// The timer, with the app open for hours.
     Poll,
-    /// «Controlla ora» in Impostazioni: risponde sempre, anche «sei aggiornato» o un errore.
+    /// "Controlla ora" in Settings: it always answers, even "sei aggiornato" or an error.
     Manual,
 }
 
-/// Com'è andato l'ultimo controllo, per la riga in Impostazioni.
+/// How the last check went, for the line in Settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum UpdateStatus {
     #[default]
     Idle,
     Checking,
-    /// La release più recente è questa.
+    /// The most recent release is this one.
     Current,
     Failed,
 }
 
-/// L'aggiornamento proposto, e a che punto è.
+/// The update offered, and how far it has got.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateState {
     Offered(Offer),
-    /// Il pacchetto di questa release si sta scaricando: `received` byte su `total`, se il server ha
-    /// detto la lunghezza. Cambia al massimo una volta per punto percentuale (BACKLOG 38).
+    /// This release's package is downloading: `received` bytes out of `total`, if the server has
+    /// said the length. It changes at most once per percentage point (BACKLOG 38).
     Downloading {
         tag: String,
         received: u64,
@@ -133,7 +132,7 @@ pub enum UpdateState {
 }
 
 impl UpdateState {
-    /// L'avanzamento del pacchetto in punti percentuali, se si scarica e se ne sa la lunghezza.
+    /// The package's progress in percentage points, if it is downloading and its length is known.
     pub fn percent(&self) -> Option<u8> {
         match self {
             Self::Downloading { received, total: Some(total), .. } => Some(percent_of(*received, *total)),
@@ -142,17 +141,17 @@ impl UpdateState {
     }
 }
 
-/// L'aggiornamento visto da fuori.
+/// The update seen from outside.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UpdateView {
     pub state: Option<UpdateState>,
     pub status: UpdateStatus,
-    /// La release di cui l'utente ha chiuso il banner.
+    /// The release whose banner the user has closed.
     dismissed: Option<String>,
 }
 
 impl UpdateView {
-    /// Il banner da mostrare, se c'è: un'offerta non chiusa, il download o il file pronto.
+    /// The banner to show, if there is one: an offer not closed, the download or the file ready.
     pub fn banner(&self) -> Option<&UpdateState> {
         match self.state.as_ref()? {
             UpdateState::Offered(offer) if self.dismissed.as_deref() == Some(offer.tag.as_str()) => None,
@@ -160,43 +159,43 @@ impl UpdateView {
         }
     }
 
-    /// Un download del pacchetto è in corso o già fatto: un controllo non lo tocca.
+    /// A package download is in progress or already done: a check does not touch it.
     fn busy(&self) -> bool {
         matches!(self.state, Some(UpdateState::Downloading { .. } | UpdateState::Downloaded(_)))
     }
 }
 
-/// A che punto è un brano della coda.
+/// How far a track in the queue has got.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ItemState {
-    /// Aspetta il suo turno (solo i brani di «Scarica tutto»).
+    /// Waits for its turn (only the "Scarica tutto" tracks).
     Queued,
-    /// Il server sta preparando il file (scelta della versione, ricodifica): i byte non sono ancora
-    /// cominciati.
+    /// The server is preparing the file (choosing the version, re-encoding): the bytes have not
+    /// started yet.
     Preparing,
-    /// I byte arrivano; `total` è la lunghezza annunciata, se il server l'ha detta.
+    /// The bytes arrive; `total` is the announced length, if the server said it.
     Downloading { received: u64, total: Option<u64> },
-    /// Non è riuscito: l'errore, e «Riprova».
+    /// Did not succeed: the error, and "Riprova".
     Failed(AppError),
 }
 
-/// Un brano nella coda dei download.
+/// A track in the downloads queue.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     pub track: Arc<Track>,
     pub quality: DownloadQuality,
     pub state: ItemState,
-    /// Viene da «Scarica tutto»: lo riassume l'avviso finale del lotto, non uno per brano.
+    /// It comes from "Scarica tutto": the batch's final notice summarises it, not one per track.
     pub batched: bool,
 }
 
 impl Item {
-    /// Il brano è in coda o in corso: non fallito.
+    /// The track is queued or in progress: not failed.
     pub fn is_busy(&self) -> bool {
         !matches!(self.state, ItemState::Failed(_))
     }
 
-    /// L'avanzamento in punti percentuali, se si sa la lunghezza del file.
+    /// The progress in percentage points, if the file's length is known.
     pub fn percent(&self) -> Option<u8> {
         match self.state {
             ItemState::Downloading { received, total: Some(total) } => Some(percent_of(received, total)),
@@ -212,7 +211,7 @@ fn percent_of(received: u64, total: u64) -> u8 {
     (u128::from(received.min(total)) * 100 / u128::from(total)) as u8
 }
 
-/// Un «Scarica tutto» in corso: quanti brani aveva, quanti sono arrivati e quanti no.
+/// A "Scarica tutto" in progress: how many tracks it had, how many arrived and how many not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Batch {
     pub total: usize,
@@ -220,187 +219,187 @@ pub struct Batch {
     pub failed: usize,
 }
 
-/// Perché un comando di download non ha fatto niente.
+/// Why a download command did nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
-    /// Questo brano non si può scaricare: la licenza non lo permette.
+    /// This track cannot be downloaded: the licence does not allow it.
     NotDownloadable,
-    /// Nessuno dei brani si può scaricare.
+    /// None of the tracks can be downloaded.
     NoneDownloadable,
-    /// I brani sono già in coda o in corso.
+    /// The tracks are already queued or in progress.
     AlreadyQueued,
-    /// La coda è piena ([`MAX_QUEUED`]).
+    /// The queue is full ([`MAX_QUEUED`]).
     QueueFull,
-    /// Il brano è già sul dispositivo e il suo file è a posto: per rifarlo si rimuove prima.
+    /// The track is already on the device and its file is in order: to do it again, remove it first.
     AlreadySaved,
 }
 
-/// Qualcosa che il frontend deve far sapere o fare.
+/// Something the frontend must make known or do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DownloadsEvent {
-    /// Un brano chiesto da solo è stato salvato.
+    /// A track requested on its own has been saved.
     Saved(Downloaded),
-    /// Un brano chiesto da solo non è stato salvato.
+    /// A track requested on its own was not saved.
     Failed {
         id: Uuid,
         error: AppError,
     },
-    /// L'ultimo brano di «Scarica tutto» è finito; `last_error` è l'ultimo errore, se qualcuno è
-    /// fallito.
+    /// The last track of "Scarica tutto" has finished; `last_error` is the last error, if any
+    /// failed.
     BatchFinished {
         done: usize,
         failed: usize,
         last_error: Option<AppError>,
     },
     Refused(Refusal),
-    /// Una release nuova da offrire. `notify` dice di avvisare anche fuori dall'app (sul telefono):
-    /// solo dal controllo periodico e una volta per release.
+    /// A new release to offer. `notify` says to warn even outside the app (on the phone):
+    /// only from the periodic check and once per release.
     UpdateOffered {
         tag: String,
         notify: bool,
     },
-    /// Il controllo a mano non ha trovato niente di nuovo.
+    /// The manual check found nothing new.
     UpToDate,
-    /// Il controllo a mano non è riuscito.
+    /// The manual check failed.
     UpdateCheckFailed(AppError),
-    /// Il controllo a mano non è partito: il backend non è raggiungibile.
+    /// The manual check did not start: the backend cannot be reached.
     Unreachable,
-    /// Il pacchetto dell'aggiornamento è scaricato.
+    /// The update package has been downloaded.
     UpdateSaved(PathBuf),
-    /// Il pacchetto dell'aggiornamento non è arrivato.
+    /// The update package did not arrive.
     UpdateFailed(AppError),
-    /// Un brano è stato tolto dal dispositivo. `kept_file`: il file non pesava più quanto l'indice
-    /// ricordava (l'hanno cambiato fuori dall'app) e non è stato cancellato.
+    /// A track has been removed from the device. `kept_file`: the file no longer weighed what the index
+    /// remembered (it was changed outside the app) and was not deleted.
     Removed {
         title: String,
         kept_file: bool,
     },
-    /// Il file di un brano tolto dall'indice non si è potuto cancellare.
+    /// The file of a track removed from the index could not be deleted.
     RemoveFailed {
         title: String,
         error: AppError,
     },
-    /// Il controllo a fondo dei file è finito: quanti brani, e quanti non sono a posto.
+    /// The thorough check of the files has finished: how many tracks, and how many are not in order.
     Verified {
         checked: usize,
         lost: usize,
     },
-    /// La cartella dei download non si è aperta.
+    /// The downloads folder did not open.
     FolderNotOpened,
-    /// La cartella del pacchetto dell'aggiornamento non si è aperta.
+    /// The update package's folder did not open.
     UpdateFolderNotOpened,
 }
 
-/// Un [`DownloadsEvent`] con il suo numero d'ordine, che cresce a ogni evento.
+/// A [`DownloadsEvent`] with its sequence number, which grows with each event.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DownloadsRaised {
     pub seq: u64,
     pub event: DownloadsEvent,
 }
 
-/// Ciò che i frontend vedono del dominio.
+/// What the frontends see of the domain.
 #[derive(Debug, Clone, Default)]
 pub struct DownloadsView {
-    /// La qualità dei download scelta nelle impostazioni.
+    /// The download quality chosen in the settings.
     pub quality: DownloadQuality,
-    /// La coda: in attesa, in corso e falliti, nell'ordine in cui sono stati chiesti.
+    /// The queue: waiting, in progress and failed, in the order they were requested.
     pub items: Shared<Item>,
-    /// Il «Scarica tutto» in corso, se c'è.
+    /// The "Scarica tutto" in progress, if there is one.
     pub batch: Option<Batch>,
     pub update: UpdateView,
-    /// I brani sul dispositivo, il più recente in testa. Non ha un limite: è la raccolta dell'utente,
-    /// non una cache.
+    /// The tracks on the device, the most recent at the top. It has no limit: it is the user's collection,
+    /// not a cache.
     pub saved: Shared<SavedTrack>,
-    /// Gli id dei brani sul dispositivo, per chiedere «è scaricato?» riga per riga senza scorrere
-    /// l'indice.
+    /// The ids of the tracks on the device, to ask "is it downloaded?" row by row without scanning
+    /// the index.
     pub saved_ids: Arc<HashSet<Uuid>>,
-    /// I brani il cui file non è più a posto (mancante o cambiato): restano nell'indice, si
-    /// ascoltano dalla rete.
+    /// The tracks whose file is no longer in order (missing or changed): they stay in the index, and are
+    /// listened to from the network.
     pub lost: Shared<Lost>,
-    /// Byte occupati dai file dell'indice.
+    /// Bytes taken up by the index's files.
     pub used_bytes: u64,
-    /// Un controllo a fondo dei file è in corso.
+    /// A thorough check of the files is in progress.
     pub verifying: bool,
-    /// La cartella dove arrivano i download.
+    /// The folder where the downloads arrive.
     pub folder: PathBuf,
-    /// Gli ultimi eventi, dal più vecchio: un frontend mostra quelli con `seq` nuovo, in ordine. Se
-    /// ne scorda al massimo [`EVENTS`] fra una lettura e l'altra, cioè mai.
+    /// The latest events, from the oldest: a frontend shows those with a new `seq`, in order. If it
+    /// forgets at most [`EVENTS`] between one read and the next, that is, never.
     pub events: Arc<VecDeque<DownloadsRaised>>,
 }
 
 impl DownloadsView {
-    /// Il brano nella coda, in qualunque stato.
+    /// The track in the queue, in whatever state.
     pub fn item(&self, id: Uuid) -> Option<&Item> {
         self.items.iter().find(|item| item.track.id == id)
     }
 
-    /// Il brano è in coda o in corso (non fallito).
+    /// The track is queued or in progress (not failed).
     pub fn is_busy(&self, id: Uuid) -> bool {
         self.item(id).is_some_and(Item::is_busy)
     }
 
-    /// Quanti brani di «Scarica tutto» sono finiti e quanti erano in tutto.
+    /// How many "Scarica tutto" tracks have finished and how many there were in all.
     pub fn batch_progress(&self) -> Option<(usize, usize)> {
         self.batch.map(|batch| (batch.done + batch.failed, batch.total))
     }
 
-    /// Quanti brani sono in coda o in corso.
+    /// How many tracks are queued or in progress.
     pub fn busy_count(&self) -> usize {
         self.items.iter().filter(|item| item.is_busy()).count()
     }
 
-    /// Il brano è nell'indice dei brani sul dispositivo (anche se il suo file non è a posto).
+    /// The track is in the index of tracks on the device (even if its file is not in order).
     pub fn is_saved(&self, id: Uuid) -> bool {
         self.saved_ids.contains(&id)
     }
 
-    /// La voce dell'indice del brano.
+    /// The track's index entry.
     pub fn saved_track(&self, id: Uuid) -> Option<&SavedTrack> {
         self.is_saved(id).then(|| self.saved.iter().find(|saved| saved.track.id == id)).flatten()
     }
 
-    /// Perché il file del brano non è a posto, se non lo è.
+    /// Why the track's file is not in order, if it is not.
     pub fn lost_reason(&self, id: Uuid) -> Option<LostReason> {
         self.lost.iter().find(|lost| lost.id == id).map(|lost| lost.reason)
     }
 
-    /// Il brano suona senza rete: è sul dispositivo e il suo file è a posto (per quanto si sa).
+    /// The track plays without network: it is on the device and its file is in order (as far as is known).
     pub fn is_offline_ready(&self, id: Uuid) -> bool {
         self.is_saved(id) && self.lost_reason(id).is_none()
     }
 }
 
-/// Le cartelle dove il dominio scrive.
+/// The folders where the domain writes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Dirs {
-    /// I brani scaricati.
+    /// The downloaded tracks.
     pub(crate) downloads: PathBuf,
-    /// I pacchetti degli aggiornamenti.
+    /// The update packages.
     pub(crate) updates: PathBuf,
 }
 
 impl Default for Dirs {
-    /// Cartelle sotto la temporanea: un riduttore di prova non scrive mai (i lavori si eseguono solo
-    /// nell'host, che le imposta da sé).
+    /// Folders under the temporary one: a test reducer never writes (the jobs run only
+    /// in the host, which sets them itself).
     fn default() -> Self {
         let base = std::env::temp_dir();
         Self { downloads: base.join("psytify-downloads"), updates: base.join("psytify-updates") }
     }
 }
 
-/// I timer del dominio.
+/// The domain's timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Timer {
-    /// Ogni [`PROGRESS_EVERY`], finché un download è in corso: si legge l'avanzamento.
+    /// Every [`PROGRESS_EVERY`], while a download is in progress: the progress is read.
     Progress,
-    /// Ogni [`UPDATE_POLL`]: si controlla se c'è una release nuova.
+    /// Every [`UPDATE_POLL`]: it checks whether there is a new release.
     UpdatePoll,
 }
 
-/// I lavori asincroni del dominio (rete, file), che l'host esegue sul runtime.
+/// The domain's async jobs (network, files), which the host runs on the runtime.
 #[derive(Debug)]
 pub(crate) enum Job {
-    /// Scarica un brano; `ticket` lo distingue da un download precedente dello stesso brano.
+    /// Downloads a track; `ticket` tells it apart from an earlier download of the same track.
     Track {
         id: Uuid,
         ticket: u64,
@@ -411,23 +410,23 @@ pub(crate) enum Job {
         progress: Arc<Progress>,
         cancel: Cancel,
     },
-    /// Toglie dal disco un file che nessuno vuole più (un download finito mentre lo si annullava).
+    /// Removes from disk a file nobody wants any more (a download finished while it was being cancelled).
     Discard(PathBuf),
-    /// Legge l'ultima release.
+    /// Reads the latest release.
     CheckUpdate { api: Result<ApiClient, AppError>, kind: UpdateCheck, build: Option<&'static str> },
-    /// Scarica il pacchetto dell'aggiornamento.
+    /// Downloads the update package.
     DownloadUpdate { api: Result<ApiClient, AppError>, offer: Offer, dir: PathBuf, progress: Arc<Progress> },
-    /// Controlla i file dell'indice (`deep`: anche il contenuto).
+    /// Checks the index's files (`deep`: the content too).
     Verify { entries: Vec<(Uuid, LocalFile, String)>, deep: bool },
-    /// Toglie dal disco il file di un brano tolto dall'indice, se pesa ancora `size`.
+    /// Removes from disk the file of a track removed from the index, if it still weighs `size`.
     Remove { path: PathBuf, size: u64, title: String },
-    /// Apre la cartella dei download nel gestore di file.
+    /// Opens the downloads folder in the file manager.
     OpenFolder(PathBuf),
-    /// Apre nel gestore di file la cartella del pacchetto dell'aggiornamento.
+    /// Opens the update package's folder in the file manager.
     RevealUpdate(PathBuf),
 }
 
-/// L'esito di un [`Job`], che torna al dominio.
+/// The outcome of a [`Job`], which goes back to the domain.
 #[derive(Debug)]
 pub(crate) enum Done {
     Track {
@@ -446,7 +445,7 @@ pub(crate) enum Done {
         checked: usize,
         lost: Vec<Lost>,
     },
-    /// `Ok(true)`: il file è rimasto dov'era perché non è più quello scaricato.
+    /// `Ok(true)`: the file stayed where it was because it is no longer the downloaded one.
     Removed {
         title: String,
         result: Result<bool, AppError>,
@@ -455,8 +454,8 @@ pub(crate) enum Done {
     UpdateRevealed(bool),
 }
 
-/// Un download che il core sta eseguendo: il numero che lo distingue, e come leggerne l'avanzamento
-/// e fermarlo.
+/// A download the core is running: the number that tells it apart, and how to read its progress
+/// and stop it.
 #[derive(Debug)]
 struct Slot {
     ticket: u64,
@@ -464,35 +463,35 @@ struct Slot {
     cancel: Cancel,
 }
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug)]
 pub(crate) struct Downloads {
     pub(crate) view: Arc<DownloadsView>,
     api: Result<ApiClient, AppError>,
     server: Option<String>,
     dirs: Dirs,
-    /// La release di questa copia: senza, una compilazione locale non controlla da sola.
+    /// This copy's release: without it, a local build does not check by itself.
     build: Option<&'static str>,
-    /// I download in corso.
+    /// The downloads in progress.
     slots: HashMap<Uuid, Slot>,
-    /// L'avanzamento del pacchetto dell'aggiornamento, finché si scarica: lo legge lo stesso timer dei
+    /// The update package's progress, while it downloads: the same timer as the tracks reads it.
     /// brani.
     update_progress: Option<Arc<Progress>>,
-    /// Il numero del prossimo download.
+    /// The number of the next download.
     tickets: u64,
-    /// Il numero dell'ultimo evento.
+    /// The number of the last event.
     events: u64,
-    /// Il timer dell'avanzamento è armato.
+    /// The progress timer is armed.
     ticking: bool,
-    /// L'ultimo errore del lotto in corso, per l'avviso finale.
+    /// The last error of the batch in progress, for the final notice.
     batch_error: Option<AppError>,
-    /// La release di cui si è già avvisato fuori dall'app.
+    /// The release already warned about outside the app.
     notified: Option<String>,
-    /// La qualità o l'indice sono cambiati e le impostazioni non l'hanno ancora
+    /// The quality or the index has changed and the settings have not yet taken it
     /// ([`Downloads::take_persist`]).
     persist: bool,
-    /// I file da cui la riproduzione può suonare: i brani dell'indice il cui file non è segnato
-    /// perso. Si rifà a ogni cambio dell'indice; chi riceve confronta il puntatore.
+    /// The files playback can play from: the index's tracks whose file is not marked
+    /// lost. It is made again at each change of the index; whoever receives it compares the pointer.
     local: Arc<HashMap<Uuid, LocalFile>>,
 }
 
@@ -503,8 +502,8 @@ impl Default for Downloads {
 }
 
 impl Downloads {
-    /// Il dominio con la qualità letta da `config.json`, il backend scelto nelle impostazioni e le
-    /// cartelle decise dall'host.
+    /// The domain with the quality read from `config.json`, the backend chosen in the settings and the
+    /// folders decided by the host.
     pub(crate) fn new(fields: &DownloadsFields, server: Option<String>, dirs: Dirs) -> Self {
         let view = DownloadsView {
             quality: fields.download_quality,
@@ -532,7 +531,7 @@ impl Downloads {
         this
     }
 
-    /// Le cartelle decise dall'host.
+    /// The folders decided by the host.
     pub(crate) fn set_dirs(&mut self, dirs: Dirs) {
         if self.view.folder != dirs.downloads {
             self.view_mut().folder.clone_from(&dirs.downloads);
@@ -540,7 +539,7 @@ impl Downloads {
         self.dirs = dirs;
     }
 
-    /// La release che questa copia dice di essere (per i test).
+    /// The release this copy says it is (for the tests).
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn with_build(mut self, build: Option<&'static str>) -> Self {
         self.build = build;
@@ -565,19 +564,19 @@ impl Downloads {
         }
     }
 
-    // ---------- Passaggio fra i domini ----------
+    // ---------- Passing between domains ----------
 
-    /// I campi che il dominio possiede, per le impostazioni.
+    /// The fields the domain owns, for the settings.
     pub(crate) fn fields(&self) -> DownloadsFields {
         DownloadsFields { download_quality: self.view.quality, downloaded: self.view.saved.clone() }
     }
 
-    /// I file da cui suonare, per la riproduzione.
+    /// The files to play from, for playback.
     pub(crate) fn local(&self) -> &Arc<HashMap<Uuid, LocalFile>> {
         &self.local
     }
 
-    /// La riproduzione non ha potuto aprire questi file: si segnano persi (restano nell'indice).
+    /// Playback could not open these files: they are marked lost (they stay in the index).
     pub(crate) fn files_lost(&mut self, found: Vec<(Uuid, LostReason)>) {
         let fresh: Vec<Lost> = found
             .into_iter()
@@ -591,8 +590,8 @@ impl Downloads {
         self.reindex();
     }
 
-    /// L'indice o i file persi sono cambiati: si rifanno i dati che ne derivano (gli id, lo spazio
-    /// occupato, la mappa per la riproduzione).
+    /// The index or the lost files have changed: the data that derives from them is made again (the ids, the space
+    /// taken, the map for playback).
     fn reindex(&mut self) {
         let ids: HashSet<Uuid> = self.view.saved.iter().map(|saved| saved.track.id).collect();
         let used = self.view.saved.iter().map(|saved| saved.size).sum();
@@ -609,12 +608,12 @@ impl Downloads {
         self.local = Arc::new(local);
     }
 
-    /// Le impostazioni devono scrivere i campi del dominio: lo dice una volta per cambiamento.
+    /// The settings must write the domain's fields: it says so once per change.
     pub(crate) fn take_persist(&mut self) -> bool {
         std::mem::take(&mut self.persist)
     }
 
-    /// Il backend scelto nelle impostazioni è cambiato: il client HTTP si rifà.
+    /// The backend chosen in the settings has changed: the HTTP client is made again.
     pub(crate) fn set_server(&mut self, server: &Option<String>) {
         if self.server == *server {
             return;
@@ -623,10 +622,10 @@ impl Downloads {
         self.api = ApiClient::new(&config::api_url(server.as_deref()));
     }
 
-    /// Il core è appena partito: una copia con la sua release controlla se ce n'è una nuova, e poi
-    /// ogni sei ore.
+    /// The core has just started: a copy with its release checks whether there is a new one, and then
+    /// every six hours.
     pub(crate) fn start(&mut self, effects: &mut Vec<Effect>) {
-        // Un controllo veloce dei file scaricati: una `stat` per brano, fuori dal riduttore.
+        // A quick check of the downloaded files: one `stat` per track, outside the reducer.
         self.verify(false, effects);
         if self.build.is_some() {
             self.check_update(UpdateCheck::Startup, effects);
@@ -634,19 +633,19 @@ impl Downloads {
         }
     }
 
-    /// Il numero del download in corso di `id` (per i test).
+    /// The number of the download in progress for `id` (for the tests).
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn ticket(&self, id: Uuid) -> Option<u64> {
         self.slots.get(&id).map(|slot| slot.ticket)
     }
 
-    /// L'avanzamento condiviso del download in corso di `id` (per i test).
+    /// The shared progress of the download in progress for `id` (for the tests).
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn progress_of(&self, id: Uuid) -> Option<Arc<Progress>> {
         self.slots.get(&id).map(|slot| Arc::clone(&slot.progress))
     }
 
-    // ---------- Comandi ----------
+    // ---------- Commands ----------
 
     pub(crate) fn apply(&mut self, command: DownloadsCmd, _now: Instant, effects: &mut Vec<Effect>) {
         match command {
@@ -674,11 +673,11 @@ impl Downloads {
         }
     }
 
-    /// Un brano chiesto da solo: parte subito, anche se un lotto è in corso. Se è già in coda o in
-    /// corso non fa niente; se era fallito, ricomincia.
+    /// A track requested on its own: it starts at once, even if a batch is in progress. If it is
+    /// already in the queue or in progress it does nothing; if it had failed, it starts again.
     fn download_one(&mut self, track: Track, quality: DownloadQuality, effects: &mut Vec<Effect>) {
-        // Il controllo sta qui: il player del telefono mostra il tasto anche per i brani che non si
-        // possono scaricare, e dice perché.
+        // The check is here: the phone's player shows the button also for the tracks that cannot be
+        // downloaded, and says why.
         if !track.downloadable {
             self.raise(DownloadsEvent::Refused(Refusal::NotDownloadable));
             return;
@@ -705,7 +704,7 @@ impl Downloads {
         self.launch(id, effects);
     }
 
-    /// «Scarica tutto»: i brani che si possono scaricare e non sono già in coda entrano in fondo.
+    /// "Scarica tutto": the tracks that can be downloaded and are not already queued enter at the end.
     fn download_all(&mut self, tracks: &[Track], effects: &mut Vec<Effect>) {
         if !tracks.iter().any(|track| track.downloadable) {
             self.raise(DownloadsEvent::Refused(Refusal::NoneDownloadable));
@@ -749,15 +748,15 @@ impl Downloads {
         self.pump(effects);
     }
 
-    /// Toglie dall'elenco un download fallito dello stesso brano, per rimetterlo in coda.
+    /// Removes from the list a failed download of the same track, to put it back in the queue.
     fn forget_failed(&mut self, id: Uuid) {
         if self.view.item(id).is_some_and(|item| !item.is_busy()) {
             self.view_mut().items.make_mut().retain(|item| item.track.id != id);
         }
     }
 
-    /// Fa partire i prossimi brani del lotto fino a [`BATCH_PARALLEL`] insieme; finiti tutti, un solo
-    /// evento riassume com'è andata.
+    /// Starts the next tracks of the batch, up to [`BATCH_PARALLEL`] together; when all are finished, a single
+    /// event summarises how it went.
     fn pump(&mut self, effects: &mut Vec<Effect>) {
         let mut active = self.slots.keys().filter(|id| self.is_batched(**id)).count();
         while active < BATCH_PARALLEL {
@@ -775,7 +774,7 @@ impl Downloads {
         if let Some(batch) = self.view.batch.filter(|_| !batch_busy) {
             let last_error = self.batch_error.take();
             self.view_mut().batch = None;
-            // Un lotto annullato per intero non ha niente da riassumere.
+            // A batch cancelled entirely has nothing to summarise.
             if batch.total > 0 {
                 self.raise(DownloadsEvent::BatchFinished {
                     done: batch.done,
@@ -790,7 +789,7 @@ impl Downloads {
         self.view.item(id).is_some_and(|item| item.batched)
     }
 
-    /// Fa partire il lavoro del brano `id`, che è già nella coda come in attesa.
+    /// Starts the job of the track `id`, which is already in the queue as waiting.
     fn launch(&mut self, id: Uuid, effects: &mut Vec<Effect>) {
         let Some(item) = self.view.item(id) else { return };
         let (track, quality) = (Arc::clone(&item.track), item.quality);
@@ -812,7 +811,7 @@ impl Downloads {
         self.start_ticking(effects);
     }
 
-    /// Arma il timer dell'avanzamento, se non lo è già.
+    /// Arms the progress timer, if it is not already.
     fn start_ticking(&mut self, effects: &mut Vec<Effect>) {
         if !self.ticking {
             self.ticking = true;
@@ -820,7 +819,7 @@ impl Downloads {
         }
     }
 
-    /// Qualcosa si scarica: un brano o il pacchetto dell'aggiornamento.
+    /// Something is downloading: a track or the update package.
     fn downloading(&self) -> bool {
         !self.slots.is_empty() || self.update_progress.is_some()
     }
@@ -888,8 +887,8 @@ impl Downloads {
         }
     }
 
-    /// Legge l'avanzamento dei download in corso e cambia la vista solo dove un punto percentuale
-    /// (o 256 KiB, senza la lunghezza) è passato.
+    /// Reads the progress of the downloads in progress and changes the view only where a percentage point
+    /// (or 256 KiB, without the length) has passed.
     fn read_progress(&mut self) {
         let changes: Vec<(Uuid, ItemState)> = self
             .slots
@@ -910,7 +909,7 @@ impl Downloads {
         for (id, state) in changes {
             self.set_state(id, state);
         }
-        // Il pacchetto dell'aggiornamento: come un brano, una pubblicazione per punto percentuale.
+        // The update package: like a track, one publish per percentage point.
         if let (Some(progress), Some(UpdateState::Downloading { tag, received, total })) =
             (&self.update_progress, &self.view.update.state)
             && progress.started()
@@ -924,7 +923,7 @@ impl Downloads {
         }
     }
 
-    // ---------- Esiti ----------
+    // ---------- Outcomes ----------
 
     pub(crate) fn done(&mut self, done: Done, _now: Instant, effects: &mut Vec<Effect>) {
         match done {
@@ -957,8 +956,8 @@ impl Downloads {
         result: Result<Downloaded, AppError>,
         effects: &mut Vec<Effect>,
     ) {
-        // Un esito di un download annullato (o rifatto da capo): il suo file, se è arrivato, non lo
-        // vuole nessuno.
+        // The outcome of a download cancelled (or redone from scratch): its file, if it arrived, nobody
+        // wants it.
         if self.slots.get(&id).is_none_or(|slot| slot.ticket != ticket) {
             if let Ok(saved) = result {
                 Self::run(effects, Job::Discard(saved.path));
@@ -999,7 +998,7 @@ impl Downloads {
         self.pump(effects);
     }
 
-    /// Tiene al massimo [`MAX_FAILED`] download falliti: oltre, esce il più vecchio.
+    /// Keeps at most [`MAX_FAILED`] failed downloads: beyond that, the oldest goes out.
     fn trim_failed(&mut self) {
         let failed = self.view.items.iter().filter(|item| !item.is_busy()).count();
         if failed <= MAX_FAILED {
@@ -1015,10 +1014,10 @@ impl Downloads {
         });
     }
 
-    // ---------- Indice dei brani sul dispositivo ----------
+    // ---------- Index of tracks on the device ----------
 
-    /// Un brano scaricato entra in testa all'indice, al posto di una voce vecchia dello stesso brano
-    /// (un file perso e riscaricato).
+    /// A downloaded track enters the head of the index, in place of an old entry of the same track
+    /// (a lost file downloaded again).
     fn add_saved(&mut self, track: &Track, saved: &Downloaded) {
         let entry = SavedTrack {
             track: track.clone(),
@@ -1039,7 +1038,7 @@ impl Downloads {
         self.reindex();
     }
 
-    /// Toglie un brano dal dispositivo: la voce sparisce subito, il file lo toglie un lavoro.
+    /// Removes a track from the device: the entry disappears at once, the file is removed by a job.
     fn remove(&mut self, id: Uuid, effects: &mut Vec<Effect>) {
         let Some(saved) = self.view.saved_track(id).cloned() else { return };
         let view = self.view_mut();
@@ -1055,8 +1054,8 @@ impl Downloads {
         );
     }
 
-    /// Controlla i file dell'indice fuori dal riduttore. `deep` legge anche il contenuto: lo chiede
-    /// l'utente; all'avvio basta il controllo veloce.
+    /// Checks the index's files outside the reducer. `deep` reads the content too: the user asks for it;
+    /// at startup the quick check is enough.
     fn verify(&mut self, deep: bool, effects: &mut Vec<Effect>) {
         if self.view.verifying || self.view.saved.is_empty() {
             return;
@@ -1073,12 +1072,12 @@ impl Downloads {
         Self::run(effects, Job::Verify { entries, deep });
     }
 
-    /// Il controllo è tornato: i file non a posto si segnano (e quelli tornati a posto si liberano).
+    /// The check has come back: the files not in order are marked (and those back in order are freed).
     fn verified(&mut self, deep: bool, checked: usize, mut lost: Vec<Lost>) {
-        // Una voce tolta mentre si controllava non c'entra più.
+        // An entry removed while it was being checked no longer matters.
         lost.retain(|entry| self.view.is_saved(entry.id));
-        // Un file segnato perso dopo l'ultimo giro (la riproduzione non l'ha aperto) resta tale, se il
-        // controllo veloce non lo vede: non c'è prova che sia tornato a posto senza leggerlo.
+        // A file marked lost after the last round (playback did not open it) stays so, if the
+        // quick check does not see it: there is no proof it is back in order without reading it.
         if !deep {
             for known in self.view.lost.iter() {
                 if !lost.iter().any(|entry| entry.id == known.id) {
@@ -1099,10 +1098,10 @@ impl Downloads {
         }
     }
 
-    // ---------- Aggiornamenti ----------
+    // ---------- Updates ----------
 
-    /// Chiede al backend l'ultima release. Una compilazione locale (senza tag) non controlla da
-    /// sola, perché non saprebbe cosa confrontare; a richiesta sì, e offre l'ultima release.
+    /// Asks the backend for the latest release. A local build (without a tag) does not check by
+    /// itself, because it would not know what to compare; on request yes, and it offers the latest release.
     fn check_update(&mut self, kind: UpdateCheck, effects: &mut Vec<Effect>) {
         if self.build.is_none() && kind != UpdateCheck::Manual {
             return;
@@ -1126,10 +1125,10 @@ impl Downloads {
         }
     }
 
-    /// Il controllo è tornato: un'offerta nuova compare nel banner e in un avviso; senza offerta si
-    /// resta com'eravamo, e a chi ha chiesto a mano si dice come stanno le cose.
+    /// The check has come back: a new offer appears in the banner and in a notice; without an offer it
+    /// stays as it was, and whoever asked by hand is told how things stand.
     fn update_checked(&mut self, kind: UpdateCheck, result: Result<Option<Offer>, AppError>) {
-        // Un download in corso o già fatto non si tocca.
+        // A download in progress or already done is not touched.
         let busy = self.view.update.busy();
         match result {
             Ok(Some(offer)) => {
@@ -1143,8 +1142,8 @@ impl Downloads {
                 update.state = Some(UpdateState::Offered(offer));
                 if fresh {
                     update.dismissed = None;
-                    // L'avviso fuori dall'app serve a chi non guarda l'app: solo dal timer, quando
-                    // l'app è rimasta aperta (o in sottofondo) per ore, e una volta per release.
+                    // The notice outside the app is for whoever does not look at the app: only from the timer, when
+                    // the app has stayed open (or in the background) for hours, and once per release.
                     let notify = kind == UpdateCheck::Poll && self.notified.as_deref() != Some(tag.as_str());
                     if notify {
                         self.notified = Some(tag.clone());
@@ -1170,7 +1169,7 @@ impl Downloads {
         }
     }
 
-    /// Scarica il pacchetto dell'offerta, se c'è.
+    /// Downloads the offer's package, if there is one.
     fn download_update(&mut self, effects: &mut Vec<Effect>) {
         let (Some(UpdateState::Offered(offer)), Ok(_)) = (&self.view.update.state, &self.api) else {
             return;
@@ -1202,8 +1201,8 @@ impl Downloads {
         }
     }
 
-    /// La cartella del pacchetto pronto, nel gestore di file: quella del file (la cartella degli
-    /// aggiornamenti, se il percorso non ne ha una). Senza un pacchetto pronto non fa niente.
+    /// The folder of the ready package, in the file manager: that of the file (the updates folder,
+    /// if the path has none). Without a ready package it does nothing.
     fn reveal_update(&mut self, effects: &mut Vec<Effect>) {
         let Some(UpdateState::Downloaded(path)) = &self.view.update.state else { return };
         let dir = path
@@ -1213,7 +1212,7 @@ impl Downloads {
         Self::run(effects, Job::RevealUpdate(dir));
     }
 
-    /// Il banner si può chiudere: torna da solo con la prossima release.
+    /// The banner can be closed: it comes back by itself with the next release.
     fn dismiss_update(&mut self) {
         match &self.view.update.state {
             Some(UpdateState::Offered(offer)) => {
@@ -1228,8 +1227,8 @@ impl Downloads {
     }
 }
 
-/// L'avanzamento è cambiato abbastanza da pubblicarlo: lo stato è un altro, o un punto percentuale
-/// (senza lunghezza, 256 KiB) è passato.
+/// The progress has changed enough to publish it: the state is another one, or a percentage point
+/// (without a length, 256 KiB) has passed.
 fn moved(old: &ItemState, new: &ItemState) -> bool {
     match (old, new) {
         (
@@ -1240,8 +1239,8 @@ fn moved(old: &ItemState, new: &ItemState) -> bool {
     }
 }
 
-/// Fra due letture di byte ricevuti e lunghezza: la lunghezza è un'altra, o è passato un punto
-/// percentuale (senza lunghezza, 256 KiB).
+/// Between two readings of bytes received and the length: the length is another one, or a
+/// percentage point has passed (without a length, 256 KiB).
 fn bytes_moved(before: (u64, Option<u64>), now: (u64, Option<u64>)) -> bool {
     match (before, now) {
         ((before, Some(a)), (now, Some(b))) => a != b || percent_of(before, a) != percent_of(now, b),
@@ -1264,7 +1263,7 @@ impl Job {
                     () = cancel.cancelled() => Err(AppError::Cancelled),
                     result = download => result,
                 };
-                // Annullato un istante dopo la fine: il file è già al suo posto, e non lo si vuole.
+                // Cancelled an instant after the end: the file is already in its place, and it is not wanted.
                 let result = match result {
                     Ok(saved) if cancel.is_cancelled() => {
                         let _ = tokio::fs::remove_file(&saved.path).await;
@@ -1294,7 +1293,7 @@ impl Job {
             }
             Self::Verify { entries, deep } => {
                 let checked = entries.len();
-                // Legge il disco (e, a fondo, ogni file): fuori dal runtime.
+                // Reads the disk (and, thoroughly, every file): outside the runtime.
                 let lost = tokio::task::spawn_blocking(move || offline::verify(&entries, deep))
                     .await
                     .unwrap_or_default();
@@ -1305,14 +1304,14 @@ impl Job {
                 Done::Removed { title, result }
             }
             Self::OpenFolder(dir) => Done::FolderOpened(open_folder(dir).await),
-            // La cartella c'è già (il pacchetto ci sta): se nel frattempo è sparita, si ricrea vuota e
-            // si apre lo stesso, come quella dei download.
+            // The folder is already there (the package is in it): if it has gone meanwhile, it is
+            // recreated empty and opened all the same, as the downloads one is.
             Self::RevealUpdate(dir) => Done::UpdateRevealed(open_folder(dir).await),
         }
     }
 
-    /// Se il lavoro va perso, l'esito è un errore di rete: un download non resta «in corso» per
-    /// sempre, e il controllo degli aggiornamenti non resta «in corso».
+    /// If the job is lost, the outcome is a network error: a download does not stay "in progress" for
+    /// ever, and the update check does not stay "in progress".
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::Track { id, ticket, .. } => {
@@ -1323,7 +1322,7 @@ impl Job {
                 Done::UpdateChecked { kind: *kind, result: Err(AppError::Network) }
             }
             Self::DownloadUpdate { .. } => Done::UpdateDownloaded(Err(AppError::Network)),
-            // Un controllo perso non segna niente: nessuna prova, nessun file perso.
+            // A lost check marks nothing: no proof, no lost file.
             Self::Verify { entries, deep } => {
                 Done::Verified { deep: *deep, checked: entries.len(), lost: Vec::new() }
             }
@@ -1336,8 +1335,8 @@ impl Job {
     }
 }
 
-/// Apre `dir` nel gestore di file del sistema (`platform::open_path`, mai su Android), creandola se
-/// manca. Dice se si è aperta.
+/// Opens `dir` in the system file manager (`platform::open_path`, never on Android), creating it if it
+/// is missing. Says whether it opened.
 async fn open_folder(dir: PathBuf) -> bool {
     match tokio::fs::create_dir_all(&dir).await {
         Ok(()) => {
@@ -1347,9 +1346,9 @@ async fn open_folder(dir: PathBuf) -> bool {
     }
 }
 
-/// Toglie dal disco il file di un brano tolto dall'indice, ma solo se è ancora quello scaricato (stesso
-/// peso): un file cambiato fuori dall'app non è nostro e resta. `Ok(true)`: è rimasto; un file che non
-/// c'è più è già com'era voluto.
+/// Removes from disk the file of a track removed from the index, but only if it is still the downloaded one (same
+/// weight): a file changed outside the app is not ours and stays. `Ok(true)`: it stayed; a file that
+/// is no longer there is already as wanted.
 async fn remove_saved(path: &std::path::Path, size: u64) -> Result<bool, AppError> {
     let io = |err: std::io::Error| AppError::Io(err.to_string());
     match tokio::fs::metadata(path).await {
@@ -1395,10 +1394,10 @@ mod tests {
         Offer { tag: tag.into(), asset: Asset { name: format!("psytify-{tag}.bin"), size: 1 } }
     }
 
-    /// Il dominio da solo, con un orologio finto e senza release (una compilazione locale).
-    /// BACKLOG 38: il pacchetto dell'aggiornamento ha il suo avanzamento, letto dallo stesso timer da
-    /// 250 ms dei brani (armato solo mentre si scarica) e pubblicato una volta per punto percentuale;
-    /// a fine corsa il timer si spegne e un'altra scadenza non pubblica niente.
+    /// The domain alone, with a fake clock and no release (a local build).
+    /// BACKLOG 38: the update package has its progress, read by the same 250 ms timer as the tracks (armed only
+    /// while downloading) and published once per percentage point; at the end of the run the timer turns off and
+    /// another expiry publishes nothing.
     #[test]
     fn the_update_package_progress_is_read_on_the_timer_and_published_per_whole_percent() {
         let mut state = CoreState::default();
@@ -1428,7 +1427,7 @@ mod tests {
             Some(UpdateState::Downloading { tag: "v2".into(), received: 0, total: None })
         );
 
-        // Il server non ha ancora risposto: la lettura non cambia niente.
+        // The server has not answered yet: the reading changes nothing.
         now += PROGRESS_EVERY;
         let effects = send(&mut state, Input::Timer(TimerKey::Downloads(Timer::Progress)), now);
         assert_eq!(timers(&effects), [(Timer::Progress, Some(PROGRESS_EVERY))], "si riarma mentre scarica");
@@ -1458,8 +1457,8 @@ mod tests {
         assert!(state.publish(&finished).is_none());
     }
 
-    /// Un brano e il pacchetto si scaricano insieme: il timer resta finché uno dei due è in corso, e
-    /// senza la lunghezza il pacchetto avanza ogni 256 KiB.
+    /// A track and the package download together: the timer stays until one of the two is in progress, and
+    /// without the length the package advances every 256 KiB.
     #[test]
     fn the_progress_timer_waits_for_both_a_track_and_the_update_package() {
         let mut rig = Rig::with_build("v1");
@@ -1528,7 +1527,7 @@ mod tests {
             effects
         }
 
-        /// Il download in corso del brano `n` finisce con `result`.
+        /// The download in progress of track `n` ends with `result`.
         fn finish(&mut self, n: u128, result: Result<Downloaded, AppError>) -> Vec<Effect> {
             let ticket = self.downloads.ticket(id(n)).expect("a running download");
             self.done(Done::Track { id: id(n), ticket, result })
@@ -1538,7 +1537,7 @@ mod tests {
             Arc::clone(&self.downloads.view)
         }
 
-        /// I brani in coda o in corso, in ordine.
+        /// The tracks queued or in progress, in order.
         fn busy(&self) -> Vec<Uuid> {
             let mut ids: Vec<Uuid> =
                 self.view().items.iter().filter(|item| item.is_busy()).map(|item| item.track.id).collect();
@@ -1546,7 +1545,7 @@ mod tests {
             ids
         }
 
-        /// I brani il cui lavoro è partito, in ordine.
+        /// The tracks whose job has started, in order.
         fn running(&self) -> Vec<Uuid> {
             let mut ids: Vec<Uuid> = self.downloads.slots.keys().copied().collect();
             ids.sort();
@@ -1579,10 +1578,10 @@ mod tests {
             .collect()
     }
 
-    // ---------- Coda e lotti ----------
+    // ---------- Queue and batches ----------
 
-    /// `download_all_runs_two_at_a_time_and_reports_once` (era nel client): «Scarica tutto» scarica
-    /// due brani alla volta, quello che non si può scaricare non conta, e un solo evento riassume.
+    /// `download_all_runs_two_at_a_time_and_reports_once` (it was in the client): "Scarica tutto" downloads
+    /// two tracks at a time, the one that cannot be downloaded does not count, and a single event summarises.
     #[test]
     fn download_all_runs_two_at_a_time_and_reports_once() {
         let mut rig = Rig::new();
@@ -1603,7 +1602,7 @@ mod tests {
         assert_eq!((rig.view().batch_progress(), rig.running()), (Some((3, 4)), vec![id(4)]));
         assert!(rig.events().is_empty(), "nessun avviso brano per brano");
 
-        // Un solo evento alla fine, con l'ultimo errore.
+        // A single event at the end, with the last error.
         let last = rig.finish(4, Ok(saved(4)));
         assert_eq!((rig.view().batch_progress(), rig.running()), (None, Vec::new()));
         assert_eq!(
@@ -1611,7 +1610,7 @@ mod tests {
             [DownloadsEvent::BatchFinished { done: 3, failed: 1, last_error: Some(AppError::Network) }]
         );
         assert_eq!(timers(&last), [(Timer::Progress, None)], "fermo, il timer dell'avanzamento si spegne");
-        // Il brano fallito resta nell'elenco per riprovare, e non conta come in corso.
+        // The failed track stays in the list to retry, and does not count as in progress.
         assert!(matches!(rig.view().item(id(2)).map(|item| &item.state), Some(ItemState::Failed(_))));
         assert!(!rig.view().is_busy(id(2)));
     }
@@ -1664,17 +1663,17 @@ mod tests {
         );
         assert!(rig.view().items.is_empty() && rig.view().batch.is_none());
 
-        // Già in corso: né un secondo lavoro né un avviso.
+        // Already in progress: neither a second job nor a notice.
         assert_eq!(jobs(rig.cmd(DownloadsCmd::Download(Box::new(track(2))))).len(), 1);
         assert!(jobs(rig.cmd(DownloadsCmd::Download(Box::new(track(2))))).is_empty());
         assert_eq!(rig.events().len(), 2);
-        // «Scarica tutto» di brani già in corso e senza un lotto: lo dice.
+        // "Scarica tutto" of tracks already in progress and with no batch: it says so.
         assert!(jobs(rig.cmd(DownloadsCmd::DownloadAll(Arc::from(vec![track(2)])))).is_empty());
         assert_eq!(rig.events().last(), Some(&DownloadsEvent::Refused(Refusal::AlreadyQueued)));
         assert!(rig.view().batch.is_none());
     }
 
-    /// Una seconda «Scarica tutto» aggiunge al lotto in corso solo i brani nuovi.
+    /// A second "Scarica tutto" adds only the new tracks to the batch in progress.
     #[test]
     fn a_second_download_all_extends_the_running_batch() {
         let mut rig = Rig::new();
@@ -1697,7 +1696,7 @@ mod tests {
         assert_eq!(rig.events().last(), Some(&DownloadsEvent::Refused(Refusal::QueueFull)));
     }
 
-    // ---------- Annullo, errori, nuovo tentativo ----------
+    // ---------- Cancel, errors, retry ----------
 
     #[test]
     fn a_cancelled_download_is_stopped_removed_and_its_late_file_discarded() {
@@ -1716,11 +1715,11 @@ mod tests {
         assert_eq!(jobs(effects).len(), 1, "il posto libero va al brano successivo");
         assert_eq!(rig.running(), [id(2), id(3)]);
 
-        // Il lavoro era già alla fine: il suo file non lo vuole nessuno.
+        // The job was already at the end: nobody wants its file.
         let late = rig.done(Done::Track { id: id(1), ticket, result: Ok(saved(1)) });
         assert!(matches!(jobs(late).as_slice(), [Job::Discard(path)] if path == &PathBuf::from("1.flac")));
         assert!(rig.events().is_empty());
-        // Un esito di errore dello stesso lavoro non fa niente.
+        // An error outcome of the same job does nothing.
         assert!(rig.done(Done::Track { id: id(1), ticket, result: Err(AppError::Cancelled) }).is_empty());
     }
 
@@ -1767,7 +1766,7 @@ mod tests {
         assert!(rig.view().is_busy(id(1)));
         rig.finish(1, Ok(saved(1)));
         assert!(rig.view().items.is_empty());
-        // Riprovare ciò che non è fallito non fa niente.
+        // Retrying what has not failed does nothing.
         assert!(rig.cmd(DownloadsCmd::Retry(id(1))).is_empty());
     }
 
@@ -1795,7 +1794,7 @@ mod tests {
         assert!(matches!(rig.events().as_slice(), [DownloadsEvent::Failed { error: AppError::Network, .. }]));
     }
 
-    // ---------- Avanzamento ----------
+    // ---------- Progress ----------
 
     #[test]
     fn progress_is_read_on_the_timer_and_published_per_whole_percent() {
@@ -1806,7 +1805,7 @@ mod tests {
         let state = |rig: &Rig| rig.view().item(id(1)).unwrap().state.clone();
         assert_eq!(state(&rig), ItemState::Preparing);
 
-        // Il server prepara ancora: niente cambia, ma il timer resta armato.
+        // The server is still preparing: nothing changes, but the timer stays armed.
         let first = rig.view();
         assert_eq!(timers(&rig.fire(Timer::Progress)), [(Timer::Progress, Some(PROGRESS_EVERY))]);
         assert!(Arc::ptr_eq(&first, &rig.downloads.view), "nessuna pubblicazione");
@@ -1815,7 +1814,7 @@ mod tests {
         rig.fire(Timer::Progress);
         assert_eq!(state(&rig), ItemState::Downloading { received: 0, total: Some(1000) });
         let at_zero = rig.view();
-        // Fra due punti percentuali la vista non si muove.
+        // Between two percentage points the view does not move.
         progress.set(9, Some(1000));
         rig.fire(Timer::Progress);
         assert!(Arc::ptr_eq(&at_zero, &rig.downloads.view), "0,9%: sempre lo 0%");
@@ -1842,8 +1841,8 @@ mod tests {
         assert_eq!(rig.view().item(id(1)).unwrap().percent(), None);
     }
 
-    /// Prestazioni: fermo il core non pubblica; un download pubblica solo quando qualcosa si vede
-    /// (il suo inizio, un punto percentuale, la fine), e a fine corsa il timer si spegne.
+    /// Performance: idle, the core does not publish; a download publishes only when something is seen
+    /// (its start, a percentage point, the end), and at the end of the run the timer turns off.
     #[test]
     fn idle_publishes_nothing_progress_is_throttled_and_done_publishes_once() {
         let mut state = CoreState::default();
@@ -1853,14 +1852,14 @@ mod tests {
         let send = |state: &mut CoreState, input: Input, now: Instant| state.apply(input, now);
         let command = |cmd| Input::Command(Command::Downloads(cmd));
 
-        // I comandi che non cambiano niente (un brano senza licenza è un evento: questo no).
+        // Commands that change nothing (a track without a licence is an event: this is not).
         send(&mut state, command(DownloadsCmd::Cancel(id(404))), now);
         send(&mut state, command(DownloadsCmd::Retry(id(404))), now);
         send(&mut state, command(DownloadsCmd::DismissUpdate), now);
         send(&mut state, command(DownloadsCmd::SetQuality(DownloadQuality::default())), now);
         assert!(state.publish(&start).is_none(), "commands that change nothing");
 
-        // Il brano parte: una pubblicazione, solo del dominio dei download.
+        // The track starts: one publish, only of the downloads domain.
         let effects = send(&mut state, command(DownloadsCmd::Download(Box::new(track(1)))), now);
         assert!(effects.iter().any(|e| matches!(e, Effect::Timer { key: TimerKey::Downloads(_), .. })));
         let started = state.publish(&start).expect("the download appears");
@@ -1870,8 +1869,8 @@ mod tests {
         let progress = state.downloads.progress_of(id(1)).unwrap();
         let mut last = started;
         let mut published = 0;
-        // 100 letture del timer mentre arrivano i byte da 0 a 100 %, in passi da un punto: ogni lettura
-        // pubblica una volta; con passi da un decimo di punto, una lettura su dieci.
+        // 100 readings of the timer while the bytes arrive from 0 to 100%, in steps of a point: each reading
+        // publishes once; with steps of a tenth of a point, one reading in ten.
         for step in 1..=1000u64 {
             progress.set(step, Some(1000));
             now += PROGRESS_EVERY;
@@ -1888,7 +1887,7 @@ mod tests {
         }
         assert_eq!(published, 101, "lo 0 % (inizio dei byte) e poi un punto alla volta, mai di più");
 
-        // La fine: una sola pubblicazione (il brano esce dalla coda, nasce l'evento), e il timer si spegne.
+        // The end: a single publish (the track leaves the queue, the event is born), and the timer turns off.
         let ticket = state.downloads.ticket(id(1)).unwrap();
         let effects = send(
             &mut state,
@@ -1900,7 +1899,7 @@ mod tests {
         assert!(finished.downloads.items.is_empty());
         assert!(matches!(finished.downloads.events.back().map(|e| &e.event), Some(DownloadsEvent::Saved(_))));
         assert!(state.publish(&finished).is_none(), "done publishes once");
-        // Fermo di nuovo: il timer scaduto per sbaglio non pubblica né si riarma.
+        // Idle again: the timer that expired by mistake publishes nothing and does not re-arm.
         let effects = send(&mut state, Input::Timer(TimerKey::Downloads(Timer::Progress)), now);
         assert!(effects.is_empty());
         assert!(state.publish(&finished).is_none());
@@ -1913,7 +1912,7 @@ mod tests {
         state.apply(command(DownloadsCmd::SetQuality(DownloadQuality::Low)), Instant::now());
         assert_eq!(state.settings.view.config.download_quality, DownloadQuality::Low);
         assert_eq!(state.downloads.view.quality, DownloadQuality::Low);
-        // Il frontend che manda ancora `Store` non cambia la qualità che il dominio possiede.
+        // The frontend that still sends `Store` does not change the quality the domain owns.
         let stale =
             crate::config::CoreConfig { download_quality: DownloadQuality::High, ..Default::default() };
         state.apply(
@@ -1923,7 +1922,7 @@ mod tests {
         assert_eq!(state.settings.view.config.download_quality, DownloadQuality::Low);
     }
 
-    // ---------- Aggiornamenti ----------
+    // ---------- Updates ----------
 
     #[test]
     fn a_local_build_checks_nothing_by_itself_but_a_release_checks_at_start_and_every_six_hours() {
@@ -1973,7 +1972,7 @@ mod tests {
             "dal timer, una release nuova avvisa anche fuori dall'app"
         );
 
-        // Una release già annunciata fuori dall'app non si annuncia due volte.
+        // A release already announced outside the app is not announced twice.
         rig.done(Done::UpdateChecked { kind: UpdateCheck::Poll, result: Ok(None) });
         rig.done(Done::UpdateChecked { kind: UpdateCheck::Poll, result: Ok(Some(offer("v3"))) });
         assert_eq!(
@@ -2034,7 +2033,7 @@ mod tests {
             rig.events().last(),
             Some(&DownloadsEvent::UpdateSaved(PathBuf::from("/dati/updates/psytify-v2.bin")))
         );
-        // Il file pronto si chiude con il banner.
+        // The ready file is closed with the banner.
         rig.cmd(DownloadsCmd::DismissUpdate);
         assert!(rig.view().update.state.is_none());
 
@@ -2058,9 +2057,9 @@ mod tests {
         assert_eq!(view.events.front().map(|e| e.seq), Some(11));
     }
 
-    // ---------- Brani sul dispositivo ----------
+    // ---------- Tracks on the device ----------
 
-    /// Un'indice con i brani `ns`, come lo legge `config.json` all'avvio.
+    /// An index with the tracks `ns`, as `config.json` reads it at startup.
     fn rig_with_saved(ns: &[u128]) -> Rig {
         let entries: Vec<SavedTrack> = ns
             .iter()
@@ -2104,7 +2103,7 @@ mod tests {
         assert_eq!(rig.downloads.local().len(), 2);
         assert_eq!(rig.downloads.local()[&id(1)], LocalFile { path: PathBuf::from("1.flac"), size: 4096 });
 
-        // Le impostazioni ricevono l'indice, una volta; e un core nuovo lo rilegge uguale.
+        // The settings receive the index, once; and a new core rereads it the same.
         assert!(rig.downloads.take_persist());
         assert!(!rig.downloads.take_persist());
         let restarted = Downloads::new(&rig.downloads.fields(), None, Dirs::default());
@@ -2119,7 +2118,7 @@ mod tests {
         assert!(jobs(rig.cmd(DownloadsCmd::Download(Box::new(track(1))))).is_empty());
         assert_eq!(rig.events(), [DownloadsEvent::Refused(Refusal::AlreadySaved)]);
 
-        // «Scarica tutto» salta i brani già sul dispositivo, e se non resta niente lo dice.
+        // "Scarica tutto" skips the tracks already on the device, and if nothing remains it says so.
         let batch: Arc<[Track]> = Arc::from(vec![track(1), track(3)]);
         assert_eq!(jobs(rig.cmd(DownloadsCmd::DownloadAll(batch))).len(), 1);
         assert_eq!(rig.busy(), [id(3)]);
@@ -2128,7 +2127,7 @@ mod tests {
         assert!(jobs(rig.cmd(DownloadsCmd::DownloadAll(only_saved))).is_empty());
         assert_eq!(rig.events().last(), Some(&DownloadsEvent::Refused(Refusal::AlreadySaved)));
 
-        // Un file perso si riscarica: la voce vecchia lascia il posto alla nuova.
+        // A lost file is downloaded again: the old entry gives way to the new one.
         rig.downloads.files_lost(vec![(id(1), LostReason::Missing)]);
         assert_eq!(jobs(rig.cmd(DownloadsCmd::Download(Box::new(track(1))))).len(), 1);
         rig.finish(1, Ok(Downloaded { path: PathBuf::from("1 (1).flac"), ..saved(1) }));
@@ -2169,7 +2168,7 @@ mod tests {
         assert!(rig.events().is_empty());
         assert!(!rig.downloads.take_persist(), "un file perso non si scrive: si ricontrolla a ogni avvio");
 
-        // Senza brani sul dispositivo non c'è niente da controllare.
+        // Without tracks on the device there is nothing to check.
         let mut empty = Rig::new();
         let mut effects = Vec::new();
         empty.downloads.start(&mut effects);
@@ -2193,7 +2192,7 @@ mod tests {
         assert_eq!(rig.view().lost_reason(id(1)), Some(LostReason::Changed));
         assert_eq!(rig.events(), [DownloadsEvent::Verified { checked: 2, lost: 1 }]);
 
-        // Il file è tornato: il controllo a fondo lo libera, il veloce no.
+        // The file is back: the thorough check frees it, the quick one does not.
         rig.done(Done::Verified { deep: false, checked: 2, lost: Vec::new() });
         assert_eq!(rig.view().lost_reason(id(1)), Some(LostReason::Changed));
         rig.cmd(DownloadsCmd::Verify);
@@ -2250,9 +2249,9 @@ mod tests {
         );
     }
 
-    /// BACKLOG 39: «Apri cartella» del pacchetto pronto apre la sua cartella con un lavoro; senza un
-    /// pacchetto pronto (offerto, in download, chiuso) non fa niente, e un'apertura fallita è un evento
-    /// suo, non quello della cartella dei download.
+    /// BACKLOG 39: "Apri cartella" of the ready package opens its folder with a job; without a
+    /// ready package (offered, downloading, closed) it does nothing, and a failed opening is an event
+    /// of its own, not that of the downloads folder.
     #[test]
     fn the_downloaded_update_folder_opens_only_when_a_package_is_ready() {
         let mut rig = Rig::with_build("v1");
@@ -2275,7 +2274,7 @@ mod tests {
         assert_eq!(rig.events().last(), Some(&DownloadsEvent::UpdateFolderNotOpened));
         assert!(matches!(rig.view().update.state, Some(UpdateState::Downloaded(_))), "il pacchetto resta");
 
-        // Un percorso senza cartella: quella degli aggiornamenti.
+        // A path with no folder: that of the updates.
         rig.downloads.view_mut().update.state =
             Some(UpdateState::Downloaded(PathBuf::from("psytify-v2.bin")));
         let updates = rig.downloads.dirs.updates.clone();
@@ -2298,7 +2297,7 @@ mod tests {
         assert_eq!(rig.events(), [DownloadsEvent::FolderNotOpened]);
     }
 
-    /// Una cartella nuova per il test, con un file di `size` byte.
+    /// A new folder for the test, with a file of `size` bytes.
     fn file_of(size: usize) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("psytify-remove-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2307,7 +2306,7 @@ mod tests {
         (dir, path)
     }
 
-    /// `BACKLOG` 3, la parte della rimozione: si cancella solo il file che l'indice descrive.
+    /// `BACKLOG` 3, the removal part: only the file the index describes is deleted.
     #[tokio::test]
     async fn remove_deletes_the_saved_file_but_never_one_that_changed() {
         let (dir, path) = file_of(100);
@@ -2336,8 +2335,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Il core intero: il brano scaricato esce dalla coda, entra nell'indice e le impostazioni lo
-    /// scrivono (`config.json`); chi manda ancora `Store` non lo cancella.
+    /// The whole core: the downloaded track leaves the queue, enters the index and the settings
+    /// write it (`config.json`); whoever still sends `Store` does not delete it.
     #[test]
     fn the_index_is_written_to_the_settings_and_a_stale_store_does_not_erase_it() {
         let mut state = CoreState::new(crate::config::Config::default(), None, 1);

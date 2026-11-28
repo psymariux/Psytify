@@ -1,35 +1,34 @@
-//! Testi e filtri comuni alle pagine sociali (accesso, Amici, profilo, Impostazioni): che cosa ascolta una
-//! persona, quanti amici ha, che caratteri accetta un nome utente. Logica pura, come nel client Iced
-//! (`client/src/app/social.rs` e `client/src/ui/pages/friends.rs`).
+//! Texts and filters shared by the social pages (sign-in, Amici, profile, Settings): what a person is
+//! listening to, how many friends they have, which characters a username accepts. Pure logic.
 
 use gpui::SharedString;
 use psytify_core::api::social::NowPlaying;
 
 use crate::components::person_row::Status;
 
-/// Il nome utente più lungo (come il server).
+/// The longest username (as the server).
 pub const HANDLE_MAX: usize = 30;
-/// Il nome più lungo che si mostra agli altri.
+/// The longest name shown to others.
 pub const NAME_MAX: usize = 64;
-/// Email, nome utente o email per l'accesso: oltre non è un indirizzo.
+/// Email, username or email for sign-in: beyond that it is not an address.
 pub const TEXT_MAX: usize = 256;
 
-/// Il filtro del nome utente: lettere e cifre ASCII e `_`, in minuscolo.
+/// The username filter: ASCII letters and digits and `_`, in lower case.
 pub fn handle_chars(text: &str) -> String {
     text.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').map(|c| c.to_ascii_lowercase()).collect()
 }
 
-/// Il filtro di un testo su una riga: niente caratteri di controllo (a capo, tabulazioni incollate).
+/// The filter of a one-line text: no control characters (line breaks, pasted tabs).
 pub fn line_chars(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
 }
 
-/// Il filtro di un codice via email: solo cifre.
+/// The filter of an email code: digits only.
 pub fn code_chars(text: &str) -> String {
     text.chars().filter(char::is_ascii_digit).collect()
 }
 
-/// «Sta ascoltando Titolo · Artista» con il punto dal vivo; in pausa «In pausa: …» senza punto.
+/// «Sta ascoltando Titolo · Artista» with the live dot; paused «In pausa: …» without the dot.
 pub fn listening(now: &NowPlaying) -> Status {
     let track = format!("{} · {}", now.track.title, now.track.artist.name);
     if now.paused {
@@ -39,7 +38,7 @@ pub fn listening(now: &NowPlaying) -> Status {
     }
 }
 
-/// Lo stato di una persona nelle righe: il brano se ascolta, altrimenti `@nome`.
+/// A person's state in the rows: the track if they listen, otherwise `@nome`.
 pub fn status(handle: &str, now: Option<&NowPlaying>) -> Status {
     now.map_or_else(|| Status::Plain(at(handle)), listening)
 }

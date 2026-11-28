@@ -1,9 +1,9 @@
-//! Jam: ascolto condiviso con altre persone, fino a 8 per stanza. Il collegamento parla con la stanza
-//! su WebSocket da un thread proprio, così né l'interfaccia né il core aspettano la rete: i comandi
-//! (lo stato locale da inviare) e gli eventi (lo stato della stanza) passano per due canali. Lo tiene
-//! l'host del core (passo 4.8), che aspetta gli eventi insieme a tutto il resto: una jam ferma non
-//! sveglia nessuno e non ha bisogno di un battito. La logica (ruoli, allineamento, quando mandare lo
-//! stato) sta in `state/jam.rs`. Il server non trasporta audio: ogni client risolve i propri URL firmati.
+//! Jam: listening together with other people, up to 8 per room. The link talks to the room
+//! over WebSocket from a thread of its own, so neither the interface nor the core waits for the network: commands
+//! (the local state to send) and events (the room's state) pass through two channels. The core's host
+//! holds it (step 4.8), and waits for the events together with everything else: an idle jam
+//! wakes nobody and needs no tick. The logic (roles, alignment, when to send the
+//! state) is in `state/jam.rs`. The server carries no audio: each client resolves its own signed URLs.
 
 use std::thread;
 use std::time::{Duration, Instant};
@@ -17,23 +17,23 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use uuid::Uuid;
 
-/// Brani nella coda condivisa: il server rifiuta una coda più lunga.
+/// Tracks in the shared queue: the server rejects a longer queue.
 pub const MAX_QUEUE: usize = 500;
-/// Persone per stanza: la schermata lo mostra, il server lo fa rispettare.
+/// People per room: the screen shows it, the server enforces it.
 pub const MAX_MEMBERS: usize = 8;
-/// Lunghezza del codice di una stanza.
+/// Length of a room's code.
 pub const CODE_LEN: usize = 6;
-/// Lunghezza massima del nome in stanza, come sul server.
+/// Maximum length of the in-room name, as on the server.
 pub const MAX_NAME_CHARS: usize = 24;
-/// Scarto oltre il quale un ascoltatore salta alla posizione del gruppo. Sotto, è rete e orologio.
+/// Drift beyond which a listener jumps to the group's position. Below it, it is network and clock.
 const DRIFT_MS: u64 = 1500;
-/// Ogni quanto chi suona rimanda la propria posizione, per correggere lo scarto nel tempo.
+/// How often the one playing sends back their position, to correct the drift over time.
 const HEARTBEAT: Duration = Duration::from_secs(5);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const UNREACHABLE: &str = "Il server non risponde";
 pub(crate) const LOST: &str = "Connessione persa";
 
-/// Stato di riproduzione condiviso: la coda in ordine di ascolto, il brano corrente e la posizione.
+/// Shared playback state: the queue in listening order, the current track and the position.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub queue: Vec<Uuid>,
@@ -42,7 +42,7 @@ pub struct Snapshot {
     pub playing: bool,
 }
 
-/// Ultimo stato inviato e quando, per decidere se rimandarlo.
+/// Last state sent and when, to decide whether to send it again.
 #[derive(Debug, Clone)]
 pub struct Sent {
     pub snapshot: Snapshot,
@@ -55,15 +55,15 @@ pub struct Member {
     pub name: String,
 }
 
-/// Messaggi che il client manda alla stanza.
+/// Messages the client sends to the room.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Outgoing<'a> {
     State(&'a Snapshot),
 }
 
-/// Uno stato della stanza, con chi l'ha mandato. Il tempo del server non serve al client: la
-/// posizione si confronta con quella locale nel momento in cui arriva.
+/// A room state, with who sent it. The server's time is not needed by the client: the
+/// position is compared with the local one at the moment it arrives.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Remote {
     #[serde(flatten)]
@@ -71,7 +71,7 @@ pub struct Remote {
     pub from: String,
 }
 
-/// Messaggi che la stanza manda al client. I campi sconosciuti si ignorano.
+/// Messages the room sends to the client. Unknown fields are ignored.
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Incoming {
@@ -81,10 +81,10 @@ enum Incoming {
     Error { code: String },
 }
 
-/// Ciò che l'app deve sapere della stanza.
+/// What the app must know about the room.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    /// Entrati nella stanza: il codice da condividere, l'identità in stanza e l'ultimo stato.
+    /// Joined the room: the code to share, the identity in the room and the last state.
     Joined {
         code: String,
         you: Uuid,
@@ -93,21 +93,21 @@ pub enum Event {
     },
     Members(Vec<Member>),
     State(Remote),
-    /// Il server ha rifiutato un messaggio; la connessione resta aperta.
+    /// The server rejected a message; the connection stays open.
     Rejected(String),
-    /// La connessione è chiusa. Il testo è già pronto per l'utente.
+    /// The connection is closed. The text is already ready for the user.
     Closed(String),
 }
 
-/// Cosa fare all'avvio: creare una stanza nuova o entrare in una esistente.
+/// What to do at startup: create a new room or join an existing one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
     Create,
     Join(String),
 }
 
-/// Collegamento con la stanza: si invia lo stato locale e si legge quello del gruppo. Quando il
-/// `Link` viene chiuso, il thread chiude il socket e il server libera il posto.
+/// Link to the room: the local state is sent and the group's is read. When the
+/// `Link` is closed, the thread closes the socket and the server frees the place.
 pub struct Link {
     commands: mpsc::UnboundedSender<Snapshot>,
     pub events: mpsc::UnboundedReceiver<Event>,
@@ -129,14 +129,14 @@ impl Link {
         Self { commands, events }
     }
 
-    /// Invia lo stato locale alla stanza. Se il thread è già terminato, il comando si perde: la
-    /// chiusura arriva comunque come `Event::Closed`.
+    /// Sends the local state to the room. If the thread has already ended, the command is lost; the
+    /// closing still arrives as `Event::Closed`.
     pub fn send(&self, snapshot: Snapshot) {
         let _ = self.commands.send(snapshot);
     }
 }
 
-/// Vita della connessione. Restituisce il motivo della chiusura.
+/// Life of the connection. Returns the reason for closing.
 async fn run(
     base: &str,
     target: Target,
@@ -163,7 +163,7 @@ async fn run(
     loop {
         tokio::select! {
             outgoing = commands.recv() => {
-                // Senza comandi l'app ha chiuso il collegamento: si esce e il socket cade con noi.
+                // With no commands the app has closed the link: we exit and the socket goes down with us.
                 let Some(snapshot) = outgoing else { return "Jam chiusa".into() };
                 let Ok(text) = serde_json::to_string(&Outgoing::State(&snapshot)) else { continue };
                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -198,7 +198,7 @@ async fn create_room(base: &str) -> Result<String, String> {
     Ok(created.code)
 }
 
-/// `http(s)://host/v1/jam/{code}/ws?name=...`, con lo schema WebSocket corrispondente.
+/// `http(s)://host/v1/jam/{code}/ws?name=...`, with the matching WebSocket scheme.
 fn socket_url(base: &str, code: &str, name: &str) -> Result<Url, String> {
     if code.is_empty() || !code.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return Err("Il codice non è valido".into());
@@ -211,7 +211,7 @@ fn socket_url(base: &str, code: &str, name: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-/// Il motivo del rifiuto alla connessione, in parole per l'utente.
+/// The reason for refusing the connection, in words for the user.
 fn refused(err: &WsError) -> String {
     match err {
         WsError::Http(response) => match response.status().as_u16() {
@@ -224,7 +224,7 @@ fn refused(err: &WsError) -> String {
 }
 
 fn forward(text: &str, code: &str, events: &mpsc::UnboundedSender<Event>) {
-    // Un messaggio che non si capisce si ignora: la stanza può aggiungere campi nuovi.
+    // A message that is not understood is ignored: the room may add new fields.
     let Ok(message) = serde_json::from_str::<Incoming>(text) else { return };
     let event = match message {
         Incoming::Welcome { you, members, state } => {
@@ -245,16 +245,16 @@ fn rejection(code: &str) -> String {
     }
 }
 
-/// Decide se mandare lo stato adesso. Sì se è cambiato il contenuto o la riproduzione, se la
-/// posizione non è quella prevista (un salto), o se chi suona non ha rimandato la posizione da un
-/// po'. Durante la riproduzione la posizione prevista avanza con il tempo trascorso.
+/// Decides whether to send the state now. Yes if the content or the playback has changed, if the
+/// position is not the expected one (a jump), or if the one playing has not sent the position back for a
+/// while. While playing, the expected position advances with the time elapsed.
 pub fn should_send(last: Option<&Sent>, now: &Snapshot, at: Instant) -> bool {
     should_send_state(last, now.queue.iter().copied(), now.index, now.position_ms, now.playing, at)
 }
 
-/// Come [`should_send`], ma con lo stato locale ancora sciolto: la coda come flusso di id, così il
-/// confronto non costruisce un `Vec` a ogni ingresso del core (una jam in ascolto ne vede quattro al
-/// secondo) e lo stato si costruisce solo quando va davvero mandato.
+/// As [`should_send`], but with the local state still loose: the queue as a stream of ids, so the
+/// comparison does not build a `Vec` at each entry of the core (a jam listening sees four of them a
+/// second) and the state is built only when it really has to be sent.
 pub fn should_send_state(
     last: Option<&Sent>,
     queue: impl Iterator<Item = Uuid>,
@@ -277,13 +277,13 @@ pub fn should_send_state(
     }
 }
 
-/// Il codice di una stanza: [`CODE_LEN`] lettere o cifre. Il server rifiuta tutto il resto, e un
-/// codice sbagliato non deve arrivare nemmeno all'indirizzo del socket.
+/// A room's code: [`CODE_LEN`] letters or digits. The server rejects everything else, and a
+/// wrong code must not even reach the socket's address.
 pub fn valid_code(code: &str) -> bool {
     code.len() == CODE_LEN && code.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
-/// La posizione del gruppo è lontana da quella locale: conviene saltare.
+/// The group's position is far from the local one: it is worth jumping.
 pub fn drifted(local_ms: u64, remote_ms: u64) -> bool {
     local_ms.abs_diff(remote_ms) > DRIFT_MS
 }
@@ -447,8 +447,8 @@ mod tests {
         timeout(Duration::from_secs(5), events.recv()).await.expect("event in time").expect("link open")
     }
 
-    /// Prova dal vivo contro un backend acceso: stanza, ospite, stato condiviso, ottavo posto e nono
-    /// rifiutato. Si lancia con `PSYTIFY_LIVE_API=http://127.0.0.1:8080 cargo test jam_live -- --ignored`.
+    /// Live test against a running backend: room, guest, shared state, eighth place and ninth
+    /// refused. Launched with `PSYTIFY_LIVE_API=http://127.0.0.1:8080 cargo test jam_live -- --ignored`.
     #[tokio::test]
     #[ignore = "needs a running backend: set PSYTIFY_LIVE_API"]
     async fn a_room_is_shared_live() {

@@ -1,12 +1,12 @@
-//! Cache LRU degli sprite ingranditi. Appartiene al frontend (una per finestra/scala) e va svuotata
-//! quando cambia il fattore di scala. Ha due limiti, entrambi dichiarati:
+//! LRU cache of upscaled sprites. It belongs to the frontend (one per window/scale) and must be emptied
+//! when the scale factor changes. It has two limits, both declared:
 //!
 //! - al massimo [`DEFAULT_CAPACITY_ENTRIES`] voci (128);
-//! - al massimo [`DEFAULT_CAPACITY_BYTES`] byte di pixel (8 MiB).
+//! - at most [`DEFAULT_CAPACITY_BYTES`] bytes of pixels (8 MiB).
 //!
-//! Il secondo conta davvero: la mascotte 32 x 32 AP a `ap_device` 8 pesa 256 KiB, quindi 128 voci
-//! sarebbero 32 MiB. Con 8 MiB ne restano ~32 di quel peso, ben più degli sprite visibili insieme.
-//! Una voce più grande dell'intero budget si calcola ma non si conserva.
+//! The second one really counts: the mascot 32 x 32 AP at `ap_device` 8 weighs 256 KiB, so 128 entries
+//! would be 32 MiB. With 8 MiB about 32 of that weight remain, well more than the sprites visible together.
+//! An entry bigger than the whole budget is computed but not kept.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use crate::tokens::color::Rgba;
 pub const DEFAULT_CAPACITY_ENTRIES: usize = 128;
 pub const DEFAULT_CAPACITY_BYTES: usize = 8 * 1024 * 1024;
 
-/// Chiave: sprite (indice nel foglio), frame, fattore, tinta (solo per le maschere).
+/// Key: sprite (index in the sheet), frame, factor, tint (for masks only).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Key {
     sprite: usize,
@@ -32,7 +32,7 @@ struct Entry {
     last_used: u64,
 }
 
-/// Cache LRU di [`Pixels`] ingranditi, condivisibili con `Arc` (la texture può vivere oltre la voce).
+/// LRU cache of upscaled [`Pixels`], shareable with `Arc` (the texture can outlive the entry).
 pub struct UpscaleCache {
     max_entries: usize,
     max_bytes: usize,
@@ -48,7 +48,7 @@ impl Default for UpscaleCache {
 }
 
 impl UpscaleCache {
-    /// Cache con i limiti predefiniti (128 voci, 8 MiB).
+    /// Cache with the default limits (128 entries, 8 MiB).
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_CAPACITY_ENTRIES, DEFAULT_CAPACITY_BYTES)
     }
@@ -65,7 +65,7 @@ impl UpscaleCache {
         self.entries.is_empty()
     }
 
-    /// Byte di pixel attualmente conservati.
+    /// Bytes of pixels currently kept.
     pub fn bytes(&self) -> usize {
         self.bytes
     }
@@ -78,14 +78,14 @@ impl UpscaleCache {
         self.max_bytes
     }
 
-    /// Svuota la cache (da chiamare al cambio del fattore di scala).
+    /// Empties the cache (call it when the scale factor changes).
     pub fn clear(&mut self) {
         self.entries.clear();
         self.bytes = 0;
     }
 
-    /// Frame ingrandito di `factor`; `None` se il frame non esiste. `tint` vale solo per le maschere
-    /// (per gli sprite a colori è ignorato e non entra nella chiave). Senza tinta, una maschera
+    /// Upscaled frame at `factor`; `None` if the frame does not exist. `tint` only counts for masks
+    /// (for coloured sprites it is ignored and does not enter the key). Without a tint, a mask
     /// resta del colore esportato.
     pub fn get_or_upscale(
         &mut self,

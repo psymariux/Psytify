@@ -1,33 +1,33 @@
-//! Account, profilo, amici, presenza e playlist pubbliche (passo 4.7).
+//! Account, profile, friends, presence and public playlists (step 4.7).
 //!
-//! **Accesso.** Password, codice via email e GitHub, Google o Discord con ritorno sul loopback sono
-//! una macchina a stati del riduttore: ogni passo è un lavoro (`Job`) che parla con Clerk e il suo
-//! esito (`Done::Stepped`) porta al passo dopo (un codice da scrivere, oppure `Job::Enter`: l'utente
-//! sul server e, la prima volta, un profilo proposto da Clerk). Il browser si apre con un effetto
-//! (`Effect::OpenUrl`, che l'host esegue con `platform::open_url`), non dentro un lavoro, così i test
-//! lo vedono senza aprirlo. Ogni tentativo ha un numero: se l'utente rinuncia, o il browser non si
-//! apre, l'esito che arriva dopo si butta. I campi di testo restano al frontend, che manda i valori
-//! nel comando; la password e il codice sono `Secret`, che non si stampa.
+//! **Sign-in.** Password, the code by email and GitHub, Google or Discord with the return on the loopback are
+//! a state machine of the reducer: each step is a job (`Job`) that talks to Clerk, and its outcome
+//! (`Done::Stepped`) leads to the next step (a code to type, or `Job::Enter`: the user on the server and, the first
+//! time, a profile proposed by Clerk). The browser opens with an effect
+//! (`Effect::OpenUrl`, which the host runs with `platform::open_url`), not inside a job, so the tests
+//! see it without opening it. Each attempt has a number: if the user gives up, or the browser does not
+//! open, the outcome that arrives later is thrown away. The text fields stay in the frontend, which sends the values
+//! in the command; the password and the code are `Secret`s, which are not printed.
 //!
-//! **Dove vive il token.** La sessione (`auth::Session`: token del client e id di sessione, più il
-//! token di un minuto che manda il backend) sta solo qui dentro, mai nella vista, negli eventi o nei
-//! log, e i lavori ne portano una copia. Il token di un minuto lo rinnova il lavoro che ne ha bisogno
-//! (`Session::bearer`, una sola serratura): nessun timer lo rinnova, perché un'app ferma non deve
-//! telefonare a Clerk. `session.json` sta nella cartella dei dati del core (`ClerkApp::session_file`).
+//! **Where the token lives.** The session (`auth::Session`: the client token and session id, plus the
+//! one-minute token the backend is sent) stays only here inside, never in the view, the events or the
+//! logs, and the jobs carry a copy. The one-minute token is renewed by the job that needs it
+//! (`Session::bearer`, a single lock): no timer renews it, because an idle app must not phone Clerk.
+//! `session.json` sits in the core's data folder (`ClerkApp::session_file`).
 //!
-//! **Cosa va al server da solo.** Dopo ogni ingresso il passaggio fra i domini chiama
-//! [`Social::sync`] e [`Social::listen`]: il brano in ascolto (quando cambia brano, va in pausa,
-//! riprende o si salta lontano; mai mentre il brano si carica, così parte una volta sola per ogni
-//! brano), gli ascolti (un brano sentito per 30 secondi, solo con un accesso fatto: uno sentito prima
-//! non parte dopo) e le playlist rese pubbliche (quando cambiano nome o brani; o tornano private, o
-//! spariscono). Il confronto costa qualche campo; la rete parte solo se qualcosa è cambiato.
+//! **What goes to the server by itself.** After each input the passing between domains calls
+//! [`Social::sync`] and [`Social::listen`]: the track being listened to (when the track changes, pauses,
+//! resumes or jumps far; never while the track loads, so it is sent once for each
+//! track), the plays (a track heard for 30 seconds, only with a sign-in made: one heard before
+//! does not go later) and the playlists made public (when their name or tracks change; or go private again, or
+//! disappear). The comparison costs a few fields; the network starts only if something has changed.
 //!
-//! **Quando si sveglia.** Un core senza accesso non arma nessun timer. Con un accesso e un profilo
-//! ne arma uno da 15 secondi (amici, richieste e inviti alle jam), che si ferma uscendo; il rinvio di
-//! un salto di posizione troppo ravvicinato è un timer a colpo solo.
+//! **When it wakes.** A core without a sign-in arms no timer. With a sign-in and a profile it arms one
+//! of 15 seconds (friends, requests and jam invitations), which stops on exit; the deferral of a
+//! position jump too close to the previous one is a one-shot timer.
 //!
-//! Cambiare vista solo se qualcosa cambia davvero: un sondaggio che riporta gli stessi amici, un
-//! comando ripetuto o un esito superato non pubblicano niente.
+//! Change the view only if something really changes: a poll that brings back the same friends, a
+//! repeated command or a superseded outcome publish nothing.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -51,71 +51,71 @@ use crate::player::PlaybackState;
 use crate::state::library::LibraryView;
 use crate::state::playback::PlaybackView;
 
-/// Ogni quanto, con un accesso e un profilo, si chiedono richieste d'amicizia, amici e inviti.
+/// How often, with a sign-in and a profile, friend requests, friends and invitations are asked for.
 pub const POLL: Duration = Duration::from_secs(15);
-/// Un salto oltre questo scarto rispetto alla posizione attesa aggiorna il brano in ascolto.
+/// A jump beyond this difference from the expected position updates the track being listened to.
 pub const PRESENCE_DRIFT: Duration = Duration::from_secs(5);
-/// Fra due aggiornamenti del brano in ascolto, almeno questo tempo (un salto dopo l'altro).
+/// Between two updates of the track being listened to, at least this time (one jump after another).
 pub const PRESENCE_GAP: Duration = Duration::from_secs(2);
-/// Utenti cercati mostrati.
+/// Searched users shown.
 pub const MAX_FOUND: usize = 20;
-/// Brani di una playlist pubblica mandati al server, al massimo.
+/// Tracks of a public playlist sent to the server, at most.
 const PUBLIC_TRACKS: usize = 500;
-/// Eventi tenuti nella vista: un frontend che legge a ogni pubblicazione non ne perde.
+/// Events kept in the view: a frontend that reads at each publish does not lose any.
 const EVENTS: usize = 32;
 
-/// I comandi del dominio.
+/// The domain's commands.
 #[derive(Debug, Clone)]
 pub enum SocialCmd {
-    /// Accesso con email o nome utente e password.
+    /// Sign-in with email or username and password.
     SignIn { identifier: String, password: Secret },
-    /// Registrazione: l'email si conferma con un codice.
+    /// Sign-up: the email is confirmed with a code.
     SignUp { email: String, username: String, password: Secret },
-    /// Il codice che Clerk ha mandato via email, per il passo in corso (`AuthView::step`).
+    /// The code Clerk sent by email, for the step in progress (`AuthView::step`).
     SubmitCode(Secret),
-    /// Un altro codice per lo stesso passo.
+    /// Another code for the same step.
     ResendCode,
-    /// Accesso con il browser (GitHub, Google o Discord): il core apre il provider e aspetta il ritorno.
+    /// Sign-in with the browser (GitHub, Google or Discord): the core opens the provider and waits for the return.
     SignInWith(Provider),
-    /// Torna dal codice ai campi, o rinuncia ad aspettare il browser (libera la porta di loopback).
-    /// Un invio già partito non si ferma: finisce da solo.
+    /// Returns from the code to the fields, or gives up waiting for the browser (frees the loopback port).
+    /// A send already started is not stopped: it finishes by itself.
     CancelSignIn,
-    /// Toglie l'errore dell'accesso (il frontend lo manda quando l'utente riprende a scrivere).
+    /// Removes the sign-in error (the frontend sends it when the user resumes typing).
     DismissError,
-    /// Esce: chiude la sessione su Clerk, toglie il presenza dal server e il file dal disco.
+    /// Signs out: closes the session on Clerk, removes the presence from the server and the file from disk.
     SignOut,
-    /// Salva nome utente, nome e, con `Some`, la condivisione dell'attività.
+    /// Saves the username, name and, with `Some`, the sharing of the activity.
     SaveProfile { handle: String, display_name: String, share_activity: Option<bool> },
-    /// Rilegge gli amici e le richieste (la pagina Amici è aperta, o «Riprova»).
+    /// Rereads the friends and the requests (the Friends page is open, or "Riprova").
     RefreshFriends,
-    /// Chiede o accetta l'amicizia (`add`), oppure la toglie, la ritira o la rifiuta.
+    /// Asks for or accepts the friendship (`add`), or removes it, withdraws it or refuses it.
     FriendAction { handle: String, add: bool },
-    /// Cerca persone per nome utente; un testo vuoto azzera i risultati.
+    /// Searches people by username; an empty text clears the results.
     SearchUsers(String),
-    /// Apre il profilo di `handle` (il suo caricamento è nella vista); se è già aperto e pronto non
-    /// fa niente.
+    /// Opens the profile of `handle` (its loading is in the view); if it is already open and ready it does
+    /// nothing.
     OpenProfile(String),
-    /// «Riprova» sul profilo aperto: lo rilegge.
+    /// "Riprova" on the open profile: rereads it.
     ReloadProfile,
-    /// Apre una playlist pubblica di un amico.
+    /// Opens a friend's public playlist.
     OpenFriendPlaylist { handle: String, id: Uuid },
-    /// Invita degli amici nella jam in cui si è.
+    /// Invites friends to the jam one is in.
     InviteToJam(Vec<String>),
-    /// Toglie un invito alla jam, subito dalla vista e dal server.
+    /// Removes a jam invitation, at once from the view and from the server.
     DismissInvite(String),
-    /// Solo per i test: l'accesso è già fatto, come se l'ultimo passo fosse appena finito.
+    /// Tests only: the sign-in is already done, as if the last step had just finished.
     #[cfg(any(test, feature = "test-support"))]
     Adopt { session: Session, me: Me },
 }
 
-/// Lo stato del login con Clerk.
+/// The state of the Clerk sign-in.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Account {
-    /// Clerk non è configurato: niente pulsante di accesso.
+    /// Clerk is not configured: no sign-in button.
     Unavailable,
     #[default]
     SignedOut,
-    /// Un accesso in corso (anche il ripristino della sessione all'avvio).
+    /// A sign-in in progress (also the session restore at startup).
     Working,
     SignedIn(Me),
 }
@@ -128,67 +128,67 @@ impl Account {
         }
     }
 
-    /// Il proprio profilo: manca finché l'utente non sceglie un nome utente.
+    /// One's own profile: missing until the user chooses a username.
     pub fn profile(&self) -> Option<&MyProfile> {
         self.me()?.profile.as_ref()
     }
 }
 
-/// Dov'è l'accesso, per il modulo.
+/// Where the sign-in is, for the form.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuthView {
-    /// Un invio è partito e non è ancora tornato: il modulo non ne accetta un altro.
+    /// A send has started and has not come back yet: the form does not accept another.
     pub busy: bool,
-    /// Il provider aperto nel browser, mentre si aspetta il ritorno.
+    /// The provider opened in the browser, while the return is awaited.
     pub waiting: Option<Provider>,
-    /// Clerk ha mandato un codice: si chiede quello.
+    /// Clerk has sent a code: that one is asked for.
     pub step: Option<CodeHint>,
-    /// L'ultimo tentativo non è riuscito. Resta finché non se ne fa un altro o il frontend lo toglie.
+    /// The last attempt did not succeed. It stays until another is made or the frontend removes it.
     pub error: Option<AppError>,
 }
 
-/// Dove è arrivato il codice (l'indirizzo, in parte nascosto da Clerk).
+/// Where the code arrived (the address, partly hidden by Clerk).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeHint {
     pub sent_to: String,
 }
 
-/// Un profilo aperto, con gli ascolti recenti già pronti per la coda.
+/// An open profile, with the recent plays already ready for the queue.
 #[derive(Debug, Clone)]
 pub struct OpenProfile {
     pub page: UserPage,
     pub recent: Arc<[Track]>,
 }
 
-/// Qualcosa che il frontend deve far sapere.
+/// Something the frontend must make known.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SocialEvent {
-    /// L'accesso è riuscito (non il ripristino all'avvio): il nome del profilo, o «di nuovo».
+    /// The sign-in succeeded (not the restore at startup): the profile's name, or "di nuovo".
     Welcomed(String),
-    /// Un altro codice è partito, per questo indirizzo.
+    /// Another code has been sent, to this address.
     CodeResent(String),
     ProfileSaved,
-    /// Il nome utente scelto è già di qualcun altro.
+    /// The chosen username already belongs to someone else.
     HandleTaken,
-    /// Il nome utente è troppo corto, o il nome visibile è vuoto.
+    /// The username is too short, or the display name is empty.
     HandleTooShort,
-    /// Un'azione d'amicizia è riuscita: la relazione che ne risulta.
+    /// A friendship action succeeded: the resulting relationship.
     FriendChanged(Relation),
-    /// Un invito alla jam è nuovo: chi l'ha mandato, e quanti altri ne sono arrivati insieme.
+    /// A jam invitation is new: who sent it, and how many others arrived together.
     JamInvite {
         from: String,
         more: usize,
     },
-    /// Gli inviti alla jam sono partiti.
+    /// The jam invitations have been sent.
     InvitesSent(usize),
-    /// La jam non ha ancora un codice da dare agli amici.
+    /// The jam has no code to give the friends yet.
     JamNotReady,
-    /// Un'operazione non è riuscita (la sessione scaduta compresa: il core esce da solo).
+    /// An operation did not succeed (the expired session included: the core signs out by itself).
     Failed(AppError),
 }
 
 impl SocialEvent {
-    /// L'avviso da mostrare.
+    /// The notice to show.
     pub fn message(&self) -> String {
         match self {
             Self::Welcomed(name) => format!("Ciao {name}!"),
@@ -208,60 +208,60 @@ impl SocialEvent {
         }
     }
 
-    /// L'avviso è un errore, non un'informazione.
+    /// The notice is an error, not information.
     pub fn is_error(&self) -> bool {
         matches!(self, Self::HandleTaken | Self::HandleTooShort | Self::Failed(_))
     }
 }
 
-/// Un [`SocialEvent`] con il suo numero d'ordine, che cresce a ogni evento.
+/// A [`SocialEvent`] with its sequence number, which grows with each event.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SocialRaised {
     pub seq: u64,
     pub event: SocialEvent,
 }
 
-/// Ciò che i frontend vedono del dominio.
+/// What the frontends see of the domain.
 #[derive(Debug, Clone, Default)]
 pub struct SocialView {
     pub account: Account,
     pub auth: AuthView,
-    /// Il profilo si sta salvando.
+    /// The profile is being saved.
     pub profile_saving: bool,
     pub friends: Load<Arc<Friends>>,
-    /// Il risultato della ricerca di persone (al più [`MAX_FOUND`]).
+    /// The people search result (at most [`MAX_FOUND`]).
     pub found: Load<Arc<[Profile]>>,
-    /// Il profilo aperto: il nome utente e la pagina.
+    /// The open profile: the username and the page.
     pub open: Option<(String, Load<Arc<OpenProfile>>)>,
-    /// La playlist pubblica aperta.
+    /// The open public playlist.
     pub playlist: Option<Load<Arc<PublicPlaylist>>>,
-    /// Nomi utente con un'azione d'amicizia in corso.
+    /// Usernames with a friendship action in progress.
     pub pending: Vec<String>,
-    /// Inviti alle jam ricevuti dagli amici, dal più recente.
+    /// Jam invitations received from friends, the most recent first.
     pub jam_invites: Arc<[JamInvite]>,
-    /// Gli inviti agli amici sono partiti e non hanno ancora risposto.
+    /// The invitations to friends have been sent and have not answered yet.
     pub inviting: bool,
-    /// Gli ultimi eventi, dal più vecchio: un frontend mostra quelli con `seq` nuovo, in ordine.
+    /// The latest events, from the oldest: a frontend shows those with a new `seq`, in order.
     pub events: Arc<VecDeque<SocialRaised>>,
 }
 
-/// I timer del dominio.
+/// The domain's timers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Timer {
-    /// Il sondaggio da [`POLL`]: armato solo con un accesso e un profilo.
+    /// The poll every [`POLL`]: armed only with a sign-in and a profile.
     Poll,
-    /// Un salto di posizione arrivato troppo presto dopo l'ultimo invio: si rimanda a [`PRESENCE_GAP`].
+    /// A position jump that arrived too soon after the last send: it is deferred to [`PRESENCE_GAP`].
     Presence,
 }
 
-/// Il brano in ascolto da dire al server.
+/// The track being listened to that is to be told to the server.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Presence {
     Put { track: Uuid, position_ms: u64, paused: bool },
     Delete,
 }
 
-/// I lavori asincroni del dominio (rete, file), che l'host esegue sul runtime.
+/// The domain's async jobs (network, files), which the host runs on the runtime.
 #[derive(Debug)]
 pub(crate) enum Job {
     SignIn {
@@ -287,25 +287,25 @@ pub(crate) enum Job {
         app: ClerkApp,
         step: CodeStep,
     },
-    /// Mette in ascolto il loopback e chiede a Clerk il provider.
+    /// Puts the loopback in listening and asks Clerk for the provider.
     OauthBegin {
         app: ClerkApp,
         provider: Provider,
         attempt: u64,
     },
-    /// Aspetta il ritorno del browser, finché `cancel` non scatta.
+    /// Waits for the browser's return, until `cancel` fires.
     OauthWait {
         app: ClerkApp,
         oauth: Box<Oauth>,
         cancel: Arc<Notify>,
         attempt: u64,
     },
-    /// All'avvio: la sessione salvata, se Clerk la considera ancora attiva.
+    /// At startup: the saved session, if Clerk still considers it active.
     Restore {
         app: ClerkApp,
         api: Result<ApiClient, AppError>,
     },
-    /// Dopo l'accesso: l'utente sul server e, la prima volta, il profilo proposto da Clerk.
+    /// After the sign-in: the user on the server and, the first time, the profile proposed by Clerk.
     Enter {
         api: Result<ApiClient, AppError>,
         session: Session,
@@ -315,7 +315,7 @@ pub(crate) enum Job {
         api: Result<ApiClient, AppError>,
         session: Session,
     },
-    /// Toglie `session.json`: Clerk non riconosce più la sessione.
+    /// Removes `session.json`: Clerk no longer recognises the session.
     Forget {
         app: ClerkApp,
     },
@@ -392,23 +392,23 @@ pub(crate) enum Job {
     },
 }
 
-/// L'esito di un [`Job`], che torna al dominio.
+/// The outcome of a [`Job`], which goes back to the domain.
 #[derive(Debug)]
 pub(crate) enum Done {
-    /// Un passo dell'accesso: fatto, oppure serve un codice. `attempt` dice a quale tentativo risponde.
+    /// A sign-in step: done, or a code is needed. `attempt` says which attempt it answers.
     Stepped {
         attempt: u64,
         result: Result<Box<Step>, AppError>,
     },
-    /// Il loopback è in ascolto e Clerk ha dato l'indirizzo del provider.
+    /// The loopback is listening and Clerk has given the provider's address.
     OauthReady {
         attempt: u64,
         result: Result<Box<Oauth>, AppError>,
     },
-    /// L'host non è riuscito ad aprire il browser.
+    /// The host did not manage to open the browser.
     BrowserFailed,
     CodeResent(Result<CodeStep, AppError>),
-    /// L'accesso è completo (o il ripristino è finito): sessione, utente di Clerk e utente del server.
+    /// The sign-in is complete (or the restore has finished): session, Clerk user and server user.
     Entered {
         restored: bool,
         result: Result<Box<(Session, ClerkUser, Me)>, AppError>,
@@ -438,12 +438,12 @@ pub(crate) enum Done {
         ticket: u64,
         result: Result<Arc<PublicPlaylist>, AppError>,
     },
-    /// Un invio al server che non mostra nulla (brano in ascolto, ascolti, playlist, invito tolto):
-    /// solo la sessione scaduta conta.
+    /// A send to the server that shows nothing (track being listened to, plays, playlist, invitation removed):
+    /// only the expired session counts.
     Sync(Result<(), AppError>),
 }
 
-/// L'ultimo brano in ascolto mandato al server.
+/// The last track being listened to sent to the server.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct SentPresence {
     track: Uuid,
@@ -452,9 +452,9 @@ struct SentPresence {
     at: Instant,
 }
 
-/// Che cosa il profilo vuole far vedere agli amici adesso.
+/// What the profile wants friends to see now.
 enum Wanted {
-    /// Il brano si sta caricando: si aspetta che suoni (o fallisca), senza dire niente nel frattempo.
+    /// The track is loading: one waits for it to play (or fail), saying nothing in the meantime.
     Hold,
     Nothing,
     Track {
@@ -464,7 +464,7 @@ enum Wanted {
     },
 }
 
-/// Impronta di nome e brani: cambia quando la playlist pubblica va aggiornata sul server.
+/// The fingerprint of name and tracks: it changes when the public playlist must be updated on the server.
 fn fingerprint(name: &str, tracks: &[Track]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     name.hash(&mut hasher);
@@ -474,43 +474,43 @@ fn fingerprint(name: &str, tracks: &[Track]) -> u64 {
     hasher.finish()
 }
 
-/// Lo stato del dominio: la vista pubblicata e ciò che resta dentro il core.
+/// The domain's state: the published view and what stays inside the core.
 #[derive(Debug)]
 pub(crate) struct Social {
     pub(crate) view: Arc<SocialView>,
-    /// L'istanza Clerk, se il login è configurato.
+    /// The Clerk instance, if the sign-in is configured.
     clerk: Option<ClerkApp>,
     api: Result<ApiClient, AppError>,
     server: Option<String>,
-    /// C'è una sessione salvata da riprendere: la riprende `start`.
+    /// There is a saved session to resume: `start` resumes it.
     restoring: bool,
-    /// La sessione di Clerk: mai nella vista.
+    /// The Clerk session: never in the view.
     session: Option<Session>,
-    /// L'utente di Clerk dell'ultimo accesso: da qui si propone il profilo.
+    /// The Clerk user of the last sign-in: from here the profile is proposed.
     clerk_user: Option<ClerkUser>,
-    /// Il passo con il codice da scrivere.
+    /// The step with the code to type.
     step: Option<CodeStep>,
-    /// Il numero dell'ultimo tentativo di accesso: l'esito di uno superato si butta.
+    /// The number of the last sign-in attempt: the outcome of a superseded one is thrown away.
     attempt: u64,
-    /// Ferma l'attesa del browser.
+    /// Stops the browser wait.
     wait: Option<Arc<Notify>>,
-    /// Il numero dell'ultima lettura degli amici, della ricerca e della playlist aperta.
+    /// The number of the last reading of the friends, the search and the open playlist.
     friends_ticket: u64,
     found_ticket: u64,
     playlist_ticket: u64,
-    /// Codici degli inviti già annunciati: ognuno si annuncia una volta sola.
+    /// Codes of the invitations already announced: each is announced once only.
     announced: Vec<String>,
-    /// La jam in cui si è, se si è in una e la stanza ha detto il suo codice (la dà la jam).
+    /// The jam one is in, if one is in one and the room has said its code (the jam gives it).
     jam_code: Option<String>,
     sent: Option<SentPresence>,
-    /// Impronta delle playlist pubbliche già mandate.
+    /// Fingerprints of the public playlists already sent.
     published: HashMap<Uuid, u64>,
-    /// L'elenco delle playlist visto per ultimo: finché è lo stesso non si ricalcola niente.
+    /// The playlist list seen last: while it is the same nothing is recalculated.
     seen_playlists: Option<crate::shared::Shared<config::Playlist>>,
-    /// I timer armati.
+    /// The timers armed.
     polling: bool,
     presence_timer: bool,
-    /// Il numero dell'ultimo evento.
+    /// The number of the last event.
     events: u64,
 }
 
@@ -521,7 +521,7 @@ impl Default for Social {
 }
 
 impl Social {
-    /// Il dominio con l'istanza Clerk (se c'è) e il backend scelto nelle impostazioni.
+    /// The domain with the Clerk instance (if there is one) and the backend chosen in the settings.
     pub(crate) fn new(clerk: Option<ClerkApp>, server: Option<String>) -> Self {
         let account = if clerk.is_some() { Account::SignedOut } else { Account::Unavailable };
         Self {
@@ -549,9 +549,9 @@ impl Social {
         }
     }
 
-    /// Dove sta `session.json` e se c'è una sessione da riprendere (lo sa l'host, che ha guardato il
-    /// disco prima della prima istantanea: il riduttore non tocca i file). Con una sessione salvata
-    /// la vista parte già su «accesso in corso», e `start` la riprende.
+    /// Where `session.json` sits and whether there is a session to resume (the host knows it, having looked at the
+    /// disk before the first snapshot: the reducer does not touch files). With a saved session
+    /// the view already starts on "sign-in in progress", and `start` resumes it.
     #[must_use]
     pub(crate) fn with_session(mut self, file: Option<PathBuf>, stored: bool) -> Self {
         if let Some(clerk) = &mut self.clerk {
@@ -568,19 +568,19 @@ impl Social {
         Arc::make_mut(&mut self.view)
     }
 
-    /// L'istanza Clerk, per i test che aprono un accesso già fatto.
+    /// The Clerk instance, for the tests that open a sign-in already done.
     #[cfg(test)]
     pub(crate) fn clerk_app(&self) -> Option<ClerkApp> {
         self.clerk.clone()
     }
 
-    /// L'indirizzo del backend in uso, per i test.
+    /// The backend address in use, for the tests.
     #[cfg(test)]
     pub(crate) fn api_base(&self) -> Option<String> {
         self.api.as_ref().ok().map(|api| api.base_url().to_owned())
     }
 
-    /// I numeri delle ultime richieste, per i test che consegnano un esito a mano.
+    /// The numbers of the last requests, for the tests that hand over an outcome by hand.
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn friends_ticket(&self) -> u64 {
         self.friends_ticket
@@ -609,7 +609,7 @@ impl Social {
         effects.push(Effect::Run(effect::Job::Social(job)));
     }
 
-    /// Il core è appena partito: se c'è una sessione salvata, la si riprende.
+    /// The core has just started: if there is a saved session, it is resumed.
     pub(crate) fn start(&mut self, effects: &mut Vec<Effect>) {
         if !std::mem::take(&mut self.restoring) {
             return;
@@ -619,16 +619,16 @@ impl Social {
         }
     }
 
-    /// La stanza della jam in cui si è, se la stanza ha detto il suo codice: lo legge il passaggio fra
-    /// i domini dalla vista della jam (passo 4.8). Serve a non annunciare l'invito alla propria
-    /// stanza e a mandare gli inviti con il codice giusto. Si copia solo quando cambia.
+    /// The jam room one is in, if the room has said its code: the passing between domains reads it from the jam view
+    /// (step 4.8). It serves to not announce the invitation to one's own room and to send the right code.
+    /// code. It is copied only when it changes.
     pub(crate) fn set_jam(&mut self, code: Option<&str>) {
         if self.jam_code.as_deref() != code {
             self.jam_code = code.map(str::to_owned);
         }
     }
 
-    /// Il backend scelto nelle impostazioni è cambiato: il client HTTP si rifà.
+    /// The backend chosen in the settings has changed: the HTTP client is made again.
     pub(crate) fn set_server(&mut self, server: &Option<String>) {
         if self.server != *server {
             self.server.clone_from(server);
@@ -646,7 +646,7 @@ impl Social {
         }
     }
 
-    /// Un'operazione non è riuscita: se la sessione è scaduta si esce, altrimenti si dice solo l'errore.
+    /// An operation did not succeed: if the session has expired one signs out, otherwise only the error is said.
     fn fail(&mut self, err: AppError, effects: &mut Vec<Effect>) {
         let expired = err == AppError::AuthExpired;
         self.raise(SocialEvent::Failed(err));
@@ -655,12 +655,12 @@ impl Social {
         }
     }
 
-    /// La sessione e il profilo, se ci sono entrambi: le funzioni social vogliono un nome utente.
+    /// The session and the profile, if there are both: the social functions want a username.
     fn session_with_profile(&self) -> Option<Session> {
         self.session.clone().filter(|_| self.view.account.profile().is_some())
     }
 
-    // ---------- Comandi ----------
+    // ---------- Commands ----------
 
     pub(crate) fn apply(&mut self, command: SocialCmd, _now: Instant, effects: &mut Vec<Effect>) {
         match command {
@@ -725,8 +725,8 @@ impl Social {
         self.keep_polling(effects);
     }
 
-    /// Un nuovo tentativo di accesso: serve il login configurato, nessun accesso in corso e nessuno
-    /// fatto. Restituisce l'istanza e il numero del tentativo.
+    /// A new sign-in attempt: it needs the configured login, no sign-in in progress and none
+    /// made. Returns the instance and the attempt's number.
     fn begin(&mut self, waiting: Option<Provider>) -> Option<(ClerkApp, u64)> {
         let clerk = self.clerk.clone()?;
         if self.view.auth.busy || self.view.account != Account::SignedOut {
@@ -741,7 +741,7 @@ impl Social {
         Some((clerk, self.attempt))
     }
 
-    /// Chiude il tentativo in corso senza esito: né un errore né un accesso.
+    /// Closes the attempt in progress without an outcome: neither an error nor a sign-in.
     fn end_attempt(&mut self, account: Account) {
         self.wait = None;
         let view = self.view_mut();
@@ -753,8 +753,8 @@ impl Social {
     }
 
     fn cancel_sign_in(&mut self) {
-        // Un invio a Clerk già partito (password, codice) finisce da solo: fermarlo lascerebbe una
-        // sessione creata sul server e dimenticata qui. Si rinuncia solo ad aspettare il browser.
+        // A send to Clerk already started (password, code) finishes by itself: stopping it would leave a
+        // session created on the server and forgotten here. One only gives up waiting for the browser.
         if self.view.auth.waiting.is_some() {
             if let Some(wait) = self.wait.take() {
                 wait.notify_one();
@@ -774,7 +774,7 @@ impl Social {
         }
     }
 
-    /// L'esito di un passo dell'accesso, se è del tentativo in corso.
+    /// The outcome of a sign-in step, if it belongs to the attempt in progress.
     fn stepped(&mut self, attempt: u64, result: Result<Box<Step>, AppError>, effects: &mut Vec<Effect>) {
         if attempt != self.attempt {
             return;
@@ -787,7 +787,7 @@ impl Social {
                 self.view_mut().auth.step = Some(hint);
             }
             Ok(Step::Done(session, user)) => {
-                // Il tentativo è finito, ma l'accesso no: l'utente sul server si legge ancora.
+                // The attempt has finished, but the sign-in has not: the user on the server is still read.
                 self.wait = None;
                 self.step = None;
                 let view = self.view_mut();
@@ -803,10 +803,10 @@ impl Social {
         }
     }
 
-    /// Clerk ha dato l'indirizzo del provider: il browser lo apre l'host, e intanto si aspetta il ritorno.
+    /// Clerk has given the provider's address: the host opens the browser, and meanwhile the return is awaited.
     fn oauth_ready(&mut self, attempt: u64, result: Result<Box<Oauth>, AppError>, effects: &mut Vec<Effect>) {
         if attempt != self.attempt {
-            // L'utente ha rinunciato: l'accesso a metà si chiude con il suo `Oauth` (e la porta).
+            // The user gave up: the half sign-in closes with its `Oauth` (and the port).
             return;
         }
         match (result, self.clerk.clone()) {
@@ -821,7 +821,7 @@ impl Social {
         }
     }
 
-    /// L'accesso è completo, o il ripristino è finito.
+    /// The sign-in is complete, or the restore has finished.
     fn entered(
         &mut self,
         restored: bool,
@@ -852,12 +852,12 @@ impl Social {
                     self.view_mut().account = account;
                 }
                 if !restored {
-                    // Sul modulo, dove l'utente sta guardando.
+                    // On the form, where the user is looking.
                     self.view_mut().auth.error = Some(err.clone());
                 } else if err != AppError::AuthExpired {
                     self.raise(SocialEvent::Failed(err.clone()));
                 }
-                // Una sessione che Clerk non riconosce più non serve: la si toglie dal disco.
+                // A session that Clerk no longer recognises is no use: it is removed from disk.
                 if err == AppError::AuthExpired
                     && let Some(app) = self.clerk.clone()
                 {
@@ -867,8 +867,8 @@ impl Social {
         }
     }
 
-    /// Esce: la sessione si chiude su Clerk, il brano in ascolto sparisce dal server e `session.json`
-    /// dal disco. Tutto ciò che era dell'utente (amici, profili aperti, ricerche) si butta.
+    /// Signs out: the session closes on Clerk, the track being listened to leaves the server and `session.json`
+    /// from disk. Everything that was the user's (friends, open profiles, searches) is thrown away.
     fn sign_out(&mut self, effects: &mut Vec<Effect>) {
         let Some(session) = self.session.take() else { return };
         let account = if self.clerk.is_some() { Account::SignedOut } else { Account::Unavailable };
@@ -880,7 +880,7 @@ impl Social {
         self.published.clear();
         self.seen_playlists = None;
         self.announced.clear();
-        // Le risposte in volo sono di chi è uscito.
+        // The replies in flight belong to whoever has signed out.
         self.friends_ticket += 1;
         self.found_ticket += 1;
         self.playlist_ticket += 1;
@@ -902,7 +902,7 @@ impl Social {
             self.raise(SocialEvent::HandleTooShort);
             return;
         }
-        // L'immagine resta quella del profilo; la prima volta, quella di Clerk (solo dal suo dominio).
+        // The image stays the profile's; the first time, Clerk's (only from its domain).
         let avatar_url = current
             .as_ref()
             .and_then(|p| p.avatar_url.clone())
@@ -923,7 +923,7 @@ impl Social {
         match result {
             Ok(profile) => {
                 if !profile.share_activity {
-                    // Il server toglie da sé il brano in ascolto di chi smette di condividere.
+                    // The server removes by itself the track being listened to of whoever stops sharing.
                     self.sent = None;
                 }
                 let first = self.view.account.profile().is_none();
@@ -931,7 +931,7 @@ impl Social {
                     me.profile = Some(profile);
                 }
                 self.raise(SocialEvent::ProfileSaved);
-                // Il primo profilo apre le funzioni sociali: amici e richieste si leggono subito.
+                // The first profile opens the social functions: friends and requests are read at once.
                 if first {
                     self.load_friends(effects);
                 }
@@ -941,9 +941,9 @@ impl Social {
         }
     }
 
-    // ---------- Amici e profili ----------
+    // ---------- Friends and profiles ----------
 
-    /// Legge gli amici e le richieste. Vale solo la risposta all'ultima lettura.
+    /// Reads the friends and the requests. Only the reply to the last reading counts.
     fn load_friends(&mut self, effects: &mut Vec<Effect>) {
         let Some(session) = self.session_with_profile() else { return };
         if !matches!(self.view.friends, Load::Ready(_)) && !self.view.friends.is_loading() {
@@ -959,9 +959,9 @@ impl Social {
         }
         let expired = result == Err(AppError::AuthExpired);
         match (result, &self.view.friends) {
-            // Un aggiornamento periodico che fallisce non cancella la lista già mostrata.
+            // A periodic update that fails does not delete the list already shown.
             (Err(_), Load::Ready(_)) if !expired => {}
-            // Gli stessi amici di prima: niente da pubblicare.
+            // The same friends as before: nothing to publish.
             (Ok(friends), Load::Ready(old)) if **old == friends => {}
             (result, _) => self.view_mut().friends = Load::of(result.map(Arc::new)),
         }
@@ -980,10 +980,10 @@ impl Social {
         let invites = match result {
             Ok(invites) => invites,
             Err(AppError::AuthExpired) => return self.fail(AppError::AuthExpired, effects),
-            // Un aggiornamento mancato si riprova al prossimo giro.
+            // A missed update is retried at the next round.
             Err(_) => return,
         };
-        // Chi è già in una jam non ha bisogno dell'invito a una stanza in cui si trova.
+        // Whoever is already in a jam does not need the invitation to a room they are in.
         let current = self.jam_code.as_deref();
         let fresh: Vec<&JamInvite> = invites
             .iter()
@@ -995,7 +995,7 @@ impl Social {
             self.raise(SocialEvent::JamInvite { from, more });
         }
         self.announced.extend(codes);
-        // Si ricordano solo i codici ancora in giro: la lista non cresce senza fondo.
+        // Only the codes still around are remembered: the list does not grow without bounds.
         self.announced.retain(|code| invites.iter().any(|i| i.code == *code));
         if *self.view.jam_invites != *invites {
             self.view_mut().jam_invites = Arc::from(invites);
@@ -1068,7 +1068,7 @@ impl Social {
         match result {
             Ok(relation) => {
                 self.raise(SocialEvent::FriendChanged(relation));
-                // La pagina aperta di questa persona ha la relazione di prima: si rilegge.
+                // The open page of this person has the previous relationship: it is reread.
                 if matches!(&self.view.open, Some((open, _)) if *open == handle) {
                     self.load_profile(handle, effects);
                 }
@@ -1088,18 +1088,18 @@ impl Social {
         );
     }
 
-    // ---------- Sincronizzazione ----------
+    // ---------- Synchronisation ----------
 
-    /// Un brano contato come ascoltato: se si è collegati con un profilo va anche al profilo. Senza,
-    /// si butta: non resta in sospeso per partire a un accesso futuro.
+    /// A play counted as listened to: if one is connected with a profile it goes to the profile too. Without one,
+    /// it is thrown away: it does not stay pending to start at a future sign-in.
     pub(crate) fn listen(&mut self, track: Uuid, effects: &mut Vec<Effect>) {
         if let Some(session) = self.session_with_profile() {
             Self::run(effects, Job::Listen { api: self.api(), session, track });
         }
     }
 
-    /// Dopo ogni ingresso: manda al server ciò che è cambiato nel brano in ascolto e nelle playlist
-    /// pubbliche. Quasi sempre non c'è niente da mandare.
+    /// After each input: sends the server what has changed in the track being listened to and in the public
+    /// playlists. Almost always there is nothing to send.
     pub(crate) fn sync(
         &mut self,
         playback: &PlaybackView,
@@ -1107,8 +1107,8 @@ impl Social {
         now: Instant,
         effects: &mut Vec<Effect>,
     ) {
-        // La sessione si presta ai due passaggi senza clonarla: si copia solo quando parte un invio
-        // (questo giro avviene a ogni battito di una riproduzione, e quasi sempre non manda niente).
+        // The session is lent to the two passes without cloning it: it is copied only when a send starts
+        // (this round happens at each tick of playback, and almost always sends nothing).
         let Some(session) = self.session.take() else { return };
         if let Some(share) = self.view.account.profile().map(|p| p.share_activity) {
             self.sync_presence(&session, share, playback, now, effects);
@@ -1148,7 +1148,7 @@ impl Social {
                 let expected = if sent.paused { sent.position } else { sent.position + elapsed };
                 let far = position.abs_diff(expected) > PRESENCE_DRIFT;
                 if far && elapsed <= PRESENCE_GAP && *track == sent.track && *paused == sent.paused {
-                    // Un salto subito dopo un invio aspetta: fra due invii passano almeno due secondi.
+                    // A jump right after a send waits: between two sends at least two seconds pass.
                     if !self.presence_timer {
                         self.presence_timer = true;
                         effects.push(Effect::Timer {
@@ -1180,8 +1180,8 @@ impl Social {
         Self::run(effects, Job::Presence { api: self.api(), session: session.clone(), what });
     }
 
-    /// Le playlist pubbliche cambiate dall'ultimo invio, e quelle che non lo sono più. L'impronta si
-    /// calcola solo sulle pubbliche (poche) e solo quando l'elenco delle playlist è un altro.
+    /// The public playlists changed since the last send, and those that no longer are. The fingerprint is
+    /// computed only on the public ones (few) and only when the list of playlists is another one.
     fn sync_playlists(&mut self, session: &Session, library: &LibraryView, effects: &mut Vec<Effect>) {
         if self.seen_playlists.as_ref().is_some_and(|seen| seen.same(&library.playlists)) {
             return;
@@ -1207,7 +1207,7 @@ impl Social {
                 },
             );
         }
-        // Tornata privata, o tolta: sparisce anche dal profilo.
+        // Gone private again, or removed: it disappears from the profile too.
         let gone: Vec<Uuid> = self.published.keys().filter(|id| !public.contains(id)).copied().collect();
         for id in gone {
             self.published.remove(&id);
@@ -1215,9 +1215,9 @@ impl Social {
         }
     }
 
-    // ---------- Timer ----------
+    // ---------- Timers ----------
 
-    /// Il sondaggio gira solo con un accesso e un profilo: lo arma o lo ferma di conseguenza.
+    /// The poll runs only with a sign-in and a profile: it arms or stops it accordingly.
     fn keep_polling(&mut self, effects: &mut Vec<Effect>) {
         let wanted = self.session.is_some() && self.view.account.profile().is_some();
         match (wanted, self.polling) {
@@ -1240,13 +1240,13 @@ impl Social {
                 self.load_friends(effects);
                 self.load_invites(effects);
             }
-            // Il passaggio che segue ogni ingresso rilegge il brano in ascolto: basta svegliarlo.
+            // The passing that follows each input rereads the track being listened to: it is enough to wake it.
             Timer::Presence => self.presence_timer = false,
         }
         self.keep_polling(effects);
     }
 
-    // ---------- Esiti ----------
+    // ---------- Outcomes ----------
 
     pub(crate) fn done(&mut self, done: Done, _now: Instant, effects: &mut Vec<Effect>) {
         match done {
@@ -1271,11 +1271,11 @@ impl Social {
             },
             Done::Entered { restored, result } => self.entered(restored, result, effects),
             Done::SignedOut(result) | Done::Forgotten(result) | Done::Sync(result) => {
-                // Un errore qui non cambia ciò che si vede. Solo una sessione scaduta fa uscire.
+                // An error here does not change what is seen. Only an expired session signs out.
                 match result {
                     Err(AppError::AuthExpired) => self.fail(AppError::AuthExpired, effects),
                     Err(err) if !matches!(err, AppError::Network | AppError::Timeout) => {
-                        // Il file della sessione che non si toglie, per esempio: va detto.
+                        // The session file that is not removed, for example: it must be said.
                         self.raise(SocialEvent::Failed(err));
                     }
                     _ => {}
@@ -1319,7 +1319,7 @@ impl Social {
     }
 }
 
-/// Un'operazione che vuole il token: lo chiede alla sessione (rinnovandolo se scaduto), poi chiama.
+/// An operation that wants the token: it asks the session for it (renewing it if expired), then calls.
 async fn with_token<T, F, Fut>(
     session: Session,
     api: Result<ApiClient, AppError>,
@@ -1333,8 +1333,8 @@ where
     call(api?, token).await
 }
 
-/// Dopo l'accesso: l'utente sul server e, la prima volta, il profilo proposto da Clerk. Un nome
-/// utente già preso riceve un numero in fondo.
+/// After the sign-in: the user on the server and, the first time, the profile proposed by Clerk. A username
+/// already taken receives a number at the end.
 async fn enter(api: Result<ApiClient, AppError>, session: Session, user: ClerkUser) -> Result<Me, AppError> {
     let api = api?;
     let token = session.bearer().await?;
@@ -1359,7 +1359,7 @@ async fn enter(api: Result<ApiClient, AppError>, session: Session, user: ClerkUs
                 return Ok(me);
             }
             Err(AppError::Api { status: 409, .. }) => {}
-            // Un profilo che non si crea non impedisce di entrare: lo si sceglie nelle impostazioni.
+            // A profile that cannot be created does not prevent entering: it is chosen in the settings.
             Err(_) => return Ok(me),
         }
     }
@@ -1372,7 +1372,7 @@ fn random_digits() -> u32 {
     u32::from(u16::from_le_bytes(bytes)) % 1000
 }
 
-/// Sessione, utente di Clerk e utente del server, per l'esito di un accesso.
+/// Session, Clerk user and server user, for the outcome of a sign-in.
 async fn enter_with(
     api: Result<ApiClient, AppError>,
     session: Session,
@@ -1382,7 +1382,7 @@ async fn enter_with(
     Ok(Box::new((session, user, me)))
 }
 
-/// L'esito `Err` di un lavoro andato perso, per un lavoro che parla col server.
+/// The `Err` outcome of a lost job, for a job that talks to the server.
 fn lost<T>() -> Result<T, AppError> {
     Err(AppError::Network)
 }
@@ -1425,7 +1425,7 @@ impl Job {
                 Done::Entered { restored: false, result: enter_with(api, session, user).await }
             }
             Self::SignOut { api, session } => {
-                // Chi esce non resta «in ascolto» per gli amici.
+                // Whoever signs out does not stay "listening" for the friends.
                 if let (Ok(api), Ok(token)) = (api, session.bearer().await) {
                     let _ = api.delete_presence(&token).await;
                 }
@@ -1535,8 +1535,8 @@ impl Job {
         }
     }
 
-    /// Se il lavoro va perso, il dominio non resta ad aspettare: un accesso torna al modulo con un
-    /// errore, una lettura fallisce come senza rete.
+    /// If the job is lost, the domain does not keep waiting: a sign-in returns to the form with an
+    /// error, a read fails as without network.
     pub(crate) fn lost(&self) -> Done {
         match self {
             Self::SignIn { attempt, .. }
@@ -1610,8 +1610,8 @@ mod tests {
         Duration::from_secs(n)
     }
 
-    /// Il dominio da solo, con un orologio finto e una riproduzione e una libreria costruite a mano:
-    /// il passaggio fra i domini (`CoreState::handoff`) lo fa il test, chiamando `sync` e `listen`.
+    /// The domain alone, with a fake clock and a playback and a library built by hand:
+    /// the passing between domains (`CoreState::handoff`) is done by the test, calling `sync` and `listen`.
     struct Rig {
         social: Social,
         playback: PlaybackView,
@@ -1629,8 +1629,8 @@ mod tests {
             }
         }
 
-        /// Un accesso già fatto, come dopo l'ultimo passo: con il profilo, e condividendo l'attività
-        /// se `share`. Restituisce anche gli effetti dell'ingresso.
+        /// A sign-in already done, as after the last step: with the profile, and sharing the activity
+        /// if `share`. It also returns the effects of the entry.
         fn signed_in(share: bool) -> (Self, Vec<Effect>) {
             let mut rig = Self::new();
             let effects =
@@ -1660,7 +1660,7 @@ mod tests {
             self.now += by;
         }
 
-        /// Il passaggio che segue ogni ingresso, per il brano in ascolto e le playlist.
+        /// The passing that follows each input, for the track being listened to and the playlists.
         fn sync(&mut self) -> Vec<Effect> {
             let mut effects = Vec::new();
             self.social.sync(&self.playback, &self.library, self.now, &mut effects);
@@ -1681,7 +1681,7 @@ mod tests {
             self.view().events.iter().map(|raised| raised.event.clone()).collect()
         }
 
-        /// Il brano `n` in questo stato, con l'orologio a `position` (che scorre se suona).
+        /// Track `n` in this state, with the clock at `position` (which runs if it plays).
         fn play(&mut self, n: u128, state: PlaybackState, position: Duration) {
             let mut queue = Queue::default();
             queue.replace(vec![track(n)], 0, 1);
@@ -1697,7 +1697,7 @@ mod tests {
             self.playback = PlaybackView::default();
         }
 
-        /// Le playlist della libreria, nuove (un'altra allocazione) come dopo un cambio vero.
+        /// The library's playlists, new (another allocation) as after a real change.
         fn playlists(&mut self, playlists: Vec<Playlist>) {
             self.library.playlists = Shared::from(playlists);
         }
@@ -1743,10 +1743,10 @@ mod tests {
         Secret::new("una-password-segreta")
     }
 
-    // ---------- Accesso ----------
+    // ---------- Sign-in ----------
 
-    /// Un core fermo e senza accesso non arma nessun timer e non chiede nessun lavoro, qualunque
-    /// cosa succeda: il sondaggio nasce solo con un accesso.
+    /// An idle core without a sign-in arms no timer and asks for no job, whatever
+    /// happens: the poll exists only with a sign-in.
     #[test]
     fn an_idle_signed_out_core_arms_nothing() {
         let mut rig = Rig::new();
@@ -1783,7 +1783,7 @@ mod tests {
         assert_eq!(view.account, Account::Working);
         assert!(view.auth.busy && view.auth.error.is_none());
 
-        // Un secondo invio mentre il primo è in volo non parte.
+        // A second send while the first is in flight does not start.
         let again = rig.cmd(SocialCmd::SignIn { identifier: "psy".into(), password: password() });
         assert!(works(&again).is_empty());
 
@@ -1830,7 +1830,7 @@ mod tests {
         assert_eq!(works(&effects), [SocialWork::SubmitCode]);
         assert!(rig.view().auth.busy);
 
-        // Un codice sbagliato lascia il passo dov'è e dice l'errore: si riprova.
+        // A wrong code leaves the step where it is and says the error: one retries.
         rig.done(Done::Stepped { attempt: 2, result: Err(AppError::AuthFailed) });
         let view = rig.view();
         assert_eq!(view.auth.error, Some(AppError::AuthFailed));
@@ -1839,7 +1839,7 @@ mod tests {
         assert_eq!(works(&effects), [SocialWork::SubmitCode]);
         assert!(rig.view().auth.error.is_none(), "un nuovo tentativo toglie l'errore");
 
-        // Dal codice si torna ai campi.
+        // From the code one goes back to the fields.
         rig.done(Done::Stepped { attempt: 3, result: Err(AppError::AuthFailed) });
         rig.cmd(SocialCmd::CancelSignIn);
         let view = rig.view();
@@ -1885,7 +1885,7 @@ mod tests {
         assert_eq!(works(&effects), [SocialWork::OauthWait]);
         assert!(rig.social.wait.is_some());
 
-        // Il ritorno del browser è un passo come gli altri.
+        // The browser's return is a step like the others.
         rig.done(Done::Stepped {
             attempt: 1,
             result: Ok(Box::new(Step::Done(Session::for_tests(clerk()), ClerkUser::default()))),
@@ -1909,10 +1909,10 @@ mod tests {
             (view.account.clone(), view.auth.busy, view.auth.waiting),
             (Account::SignedOut, false, None)
         );
-        // Chi aspetta il ritorno viene svegliato: la porta di loopback si libera.
+        // Whoever waits for the return is woken: the loopback port is freed.
         tokio::time::timeout(secs(1), wait.notified()).await.expect("l'attesa del browser è stata fermata");
 
-        // L'esito di quel tentativo, se arriva lo stesso, si butta: non si entra da una porta chiusa.
+        // The outcome of that attempt, if it arrives all the same, is thrown away: no entering through a closed port.
         let late = rig.done(Done::Stepped {
             attempt: 1,
             result: Ok(Box::new(Step::Done(Session::for_tests(clerk()), ClerkUser::default()))),
@@ -1920,10 +1920,10 @@ mod tests {
         assert!(late.is_empty());
         assert_eq!(rig.view().account, Account::SignedOut);
 
-        // Un nuovo tentativo ha il suo numero.
+        // A new attempt has its own number.
         let effects = rig.cmd(SocialCmd::SignInWith(Provider::Discord));
         assert_eq!(works(&effects), [SocialWork::OauthBegin(Provider::Discord)]);
-        // E l'indirizzo di quello vecchio, arrivato tardi, non apre il browser.
+        // And the address of the old one, arrived late, does not open the browser.
         let stale = Oauth::for_tests("https://example.com/vecchio").await.unwrap();
         let effects = rig.done(Done::OauthReady { attempt: 1, result: Ok(Box::new(stale)) });
         assert!(effects.is_empty());
@@ -1944,7 +1944,7 @@ mod tests {
             (false, None, Account::SignedOut)
         );
         tokio::time::timeout(secs(1), wait.notified()).await.expect("l'attesa si ferma");
-        // Una seconda notizia dello stesso guasto non cambia niente.
+        // A second report of the same fault changes nothing.
         let before = rig.view();
         rig.done(Done::BrowserFailed);
         assert!(Arc::ptr_eq(&before, &rig.view()));
@@ -1959,7 +1959,7 @@ mod tests {
         assert_eq!(rig.view().account, Account::SignedOut);
     }
 
-    // ---------- Sessione salvata ----------
+    // ---------- Saved session ----------
 
     #[test]
     fn a_stored_session_is_restored_silently_at_start() {
@@ -1974,7 +1974,7 @@ mod tests {
             rig.social.clerk.as_ref().and_then(|c| c.session_file.clone()),
             Some(PathBuf::from("/dati/session.json"))
         );
-        // Una volta sola.
+        // Only once.
         let mut again = Vec::new();
         rig.social.start(&mut again);
         assert!(again.is_empty());
@@ -2049,7 +2049,7 @@ mod tests {
         assert_eq!(view.auth.error, Some(AppError::Network), "sul modulo, dove l'utente sta guardando");
     }
 
-    // ---------- Uscita e sessione scaduta ----------
+    // ---------- Exit and expired session ----------
 
     #[test]
     fn signing_out_drops_everything_of_the_user_and_stops_the_poll() {
@@ -2071,10 +2071,10 @@ mod tests {
         assert!(matches!(view.friends, Load::Idle) && view.open.is_none() && view.jam_invites.is_empty());
         assert!(rig.social.session.is_none());
 
-        // Ciò che era in volo per l'utente di prima si butta.
+        // What was in flight for the previous user is thrown away.
         rig.done(Done::Friends { ticket, result: Ok(Friends::default()) });
         assert!(matches!(rig.view().friends, Load::Idle));
-        // E uscire due volte è come una.
+        // And signing out twice is the same as once.
         assert!(rig.cmd(SocialCmd::SignOut).is_empty());
     }
 
@@ -2097,7 +2097,7 @@ mod tests {
         assert!(rig.events().is_empty());
     }
 
-    // ---------- Sondaggio ----------
+    // ---------- Poll ----------
 
     #[test]
     fn polling_runs_only_while_signed_in_with_a_profile() {
@@ -2110,11 +2110,11 @@ mod tests {
         assert_eq!(works(&effects), [SocialWork::Friends, SocialWork::Invites]);
         assert_eq!(timers(&effects), [(Timer::Poll, Some(POLL))], "si riarma da sé finché c'è l'accesso");
 
-        // Un accesso senza profilo non sonda: le funzioni sociali vogliono un nome utente.
+        // A sign-in without a profile does not poll: the social functions want a username.
         let mut rig = Rig::new();
         let effects = rig.cmd(SocialCmd::Adopt { session: Session::for_tests(clerk()), me: me(false, true) });
         assert!(works(&effects).is_empty() && timers(&effects).is_empty());
-        // Il primo profilo apre le funzioni sociali: amici subito, e poi il sondaggio.
+        // The first profile opens the social functions: friends at once, and then the poll.
         let effects = rig.done(Done::ProfileSaved(Ok(MyProfile {
             handle: "prova".into(),
             display_name: "Prova".into(),
@@ -2178,24 +2178,24 @@ mod tests {
         assert!(matches!(rig.view().friends, Load::Ready(_)));
     }
 
-    // ---------- Inviti alle jam ----------
+    // ---------- Jam invitations ----------
 
     #[test]
     fn each_jam_invite_is_announced_once() {
         let (mut rig, _) = Rig::signed_in(true);
         rig.done(Done::Invites(Ok(vec![invite("AAA111", "luca")])));
         assert_eq!(rig.events(), [SocialEvent::JamInvite { from: "LUCA".into(), more: 0 }]);
-        // Lo stesso invito riletto non si annuncia di nuovo.
+        // The same invitation reread is not announced again.
         rig.done(Done::Invites(Ok(vec![invite("AAA111", "luca")])));
         assert_eq!(rig.events().len(), 1);
-        // Due nuovi insieme: un solo avviso, con «e altri».
+        // Two new together: a single notice, with "e altri".
         rig.done(Done::Invites(Ok(vec![
             invite("AAA111", "luca"),
             invite("BBB222", "sara"),
             invite("CCC333", "anna"),
         ])));
         assert_eq!(rig.events().last(), Some(&SocialEvent::JamInvite { from: "SARA".into(), more: 1 }));
-        // Un invito sparito e tornato con lo stesso codice si annuncia di nuovo.
+        // An invitation that vanished and came back with the same code is announced again.
         rig.done(Done::Invites(Ok(Vec::new())));
         rig.done(Done::Invites(Ok(vec![invite("AAA111", "luca")])));
         assert_eq!(rig.events().len(), 3);
@@ -2234,14 +2234,14 @@ mod tests {
             [SocialWork::InviteToJam { code: "K7QXM3".into(), handles: vec!["luca".into(), "sara".into()] }]
         );
         assert!(rig.view().inviting);
-        // Finché non risponde, un secondo invio non parte.
+        // Until it answers, a second send does not start.
         assert!(works(&rig.cmd(SocialCmd::InviteToJam(vec!["anna".into()]))).is_empty());
         rig.done(Done::Invited(Ok(2)));
         assert!(!rig.view().inviting);
         assert_eq!(rig.events().last(), Some(&SocialEvent::InvitesSent(2)));
     }
 
-    // ---------- Profilo ----------
+    // ---------- Profile ----------
 
     #[test]
     fn saving_the_profile_checks_it_then_reports() {
@@ -2284,7 +2284,7 @@ mod tests {
         assert_eq!(rig.events().last(), Some(&SocialEvent::ProfileSaved));
     }
 
-    /// La bozza del profilo che il lavoro `PutProfile` porta al server.
+    /// The profile draft that the `PutProfile` job brings to the server.
     fn draft_of(effects: &[Effect]) -> Option<&ProfileDraft> {
         effects.iter().find_map(|effect| match effect {
             Effect::Run(effect::Job::Social(Job::PutProfile { draft, .. })) => Some(draft),
@@ -2314,7 +2314,7 @@ mod tests {
         }
     }
 
-    // ---------- Persone e profili ----------
+    // ---------- People and profiles ----------
 
     #[test]
     fn searching_people_ignores_old_answers_and_empty_queries() {
@@ -2333,7 +2333,7 @@ mod tests {
         let ticket = rig.social.found_ticket;
         rig.done(Done::Found { ticket, result: Ok(found) });
         assert_eq!(rig.view().found.ready().map(|f| f.len()), Some(MAX_FOUND));
-        // Il testo vuoto azzera, e una risposta in volo non lo rimette.
+        // Empty text clears, and a reply in flight does not put it back.
         rig.cmd(SocialCmd::SearchUsers(String::new()));
         assert!(matches!(rig.view().found, Load::Idle));
     }
@@ -2362,9 +2362,9 @@ mod tests {
                 recent: Arc::from(Vec::new()),
             })),
         });
-        // Aperto e pronto: riaprirlo non rifà la richiesta.
+        // Open and ready: reopening it does not repeat the request.
         assert!(works(&rig.cmd(SocialCmd::OpenProfile("luca".into()))).is_empty());
-        // Una risposta per un altro profilo non tocca quello aperto.
+        // A reply for another profile does not touch the open one.
         let before = rig.view();
         rig.done(Done::ProfileLoaded { handle: "sara".into(), result: Err(AppError::Network) });
         assert!(Arc::ptr_eq(&before, &rig.view()));
@@ -2381,7 +2381,7 @@ mod tests {
         assert_eq!(rig.events(), [SocialEvent::FriendChanged(Relation::Outgoing)]);
         assert_eq!(works(&effects), [SocialWork::OpenProfile("luca".into()), SocialWork::Friends]);
 
-        // «Riprova» sul profilo aperto lo rilegge.
+        // "Riprova" on the open profile rereads it.
         assert_eq!(works(&rig.cmd(SocialCmd::ReloadProfile)), [SocialWork::OpenProfile("luca".into())]);
     }
 
@@ -2427,10 +2427,10 @@ mod tests {
         }
     }
 
-    // ---------- Presenza (BACKLOG 9) ----------
+    // ---------- Presence (BACKLOG 9) ----------
 
-    /// BACKLOG 9: un brano che parte manda la presenza una volta sola, quando suona davvero; mentre
-    /// si carica non manda niente («in pausa» e poi «in riproduzione» erano due invii per brano).
+    /// BACKLOG 9: a track that starts sends the presence once, when it really plays; while
+    /// it loads it sends nothing ("in pausa" and then "in riproduzione" were two sends per track).
     #[test]
     fn presence_goes_once_per_real_transition() {
         let (mut rig, _) = Rig::signed_in(true);
@@ -2440,13 +2440,13 @@ mod tests {
         rig.play(1, PlaybackState::Playing, Duration::ZERO);
         assert_eq!(works(&rig.sync()), [presence(1, 0, false)]);
 
-        // Il battito (250 ms) e gli altri messaggi non rimandano niente.
+        // The tick (250 ms) and the other messages send nothing back.
         for _ in 0..8 {
             rig.elapse(Duration::from_millis(250));
             assert!(works(&rig.sync()).is_empty());
         }
 
-        // La pausa parte subito, e la ripresa pure.
+        // The pause starts at once, and so does the resume.
         rig.play(1, PlaybackState::Paused, secs(2));
         assert_eq!(works(&rig.sync()), [presence(1, 2_000, true)]);
         assert!(works(&rig.sync()).is_empty());
@@ -2455,14 +2455,14 @@ mod tests {
         rig.play(1, PlaybackState::Playing, secs(2));
         assert_eq!(works(&rig.sync()), [presence(1, 2_000, false)]);
 
-        // Il brano dopo: caricamento muto, poi un invio solo.
+        // The next track: silent loading, then a single send.
         rig.elapse(secs(1));
         rig.play(2, PlaybackState::Loading { track_id: track_id(2) }, Duration::ZERO);
         assert!(works(&rig.sync()).is_empty());
         rig.play(2, PlaybackState::Playing, Duration::ZERO);
         assert_eq!(works(&rig.sync()), [presence(2, 0, false)]);
 
-        // Fine della coda: il brano in ascolto sparisce dal server, una volta.
+        // End of the queue: the track being listened to disappears from the server, once.
         rig.stop();
         assert_eq!(works(&rig.sync()), [SocialWork::Presence { track: None, position_ms: 0, paused: false }]);
         assert!(works(&rig.sync()).is_empty());
@@ -2474,12 +2474,12 @@ mod tests {
         rig.play(1, PlaybackState::Playing, Duration::ZERO);
         assert_eq!(works(&rig.sync()).len(), 1);
 
-        // Fra cinque secondi di scarto e meno: niente.
+        // Less than five seconds of difference: nothing.
         rig.elapse(secs(1));
         rig.playback.clock = Clock::running(secs(1) + Duration::from_secs(4), rig.now);
         assert!(works(&rig.sync()).is_empty());
 
-        // Un salto lontano subito dopo un invio aspetta: un timer, non un invio.
+        // A far jump right after a send waits: a timer, not a send.
         rig.playback.clock = Clock::running(secs(11), rig.now);
         let effects = rig.sync();
         assert!(works(&effects).is_empty());
@@ -2488,11 +2488,11 @@ mod tests {
         assert_eq!(waits[0].0, Timer::Presence);
         let after = waits[0].1.expect("armato");
         assert!(after > Duration::ZERO && after <= PRESENCE_GAP, "{after:?}");
-        // Il battito che continua non riarma il timer: l'orologio di riproduzione scorre da sé.
+        // The continuing tick does not re-arm the timer: the playback clock runs by itself.
         rig.elapse(Duration::from_millis(250));
         assert!(rig.sync().is_empty());
 
-        // Scaduta l'attesa, lo stesso passaggio manda la posizione nuova.
+        // Once the wait has expired, the same step sends the new position.
         rig.elapse(after - Duration::from_millis(250));
         rig.fire(Timer::Presence);
         let sent = works(&rig.sync());
@@ -2546,7 +2546,7 @@ mod tests {
             share_activity: false,
         })));
         assert!(works(&rig.sync()).is_empty(), "`PUT /v1/me/profile` toglie la presenza da sé");
-        // Riaccendendo la condivisione, il brano che suona torna visibile.
+        // Turning sharing back on, the track that plays becomes visible again.
         rig.cmd(SocialCmd::SaveProfile {
             handle: "prova".into(),
             display_name: "Prova".into(),
@@ -2561,10 +2561,10 @@ mod tests {
         assert_eq!(works(&rig.sync()).len(), 1);
     }
 
-    // ---------- Ascolti (BACKLOG 5) ----------
+    // ---------- Plays (BACKLOG 5) ----------
 
-    /// BACKLOG 5: un brano sentito senza accesso non resta in sospeso per partire a un accesso
-    /// futuro: l'ascolto si butta, e dopo l'accesso non parte niente.
+    /// BACKLOG 5: a track heard without a sign-in does not stay pending to start at a future sign-in:
+    /// the play is thrown away, and after the sign-in nothing starts.
     #[test]
     fn a_listen_heard_while_signed_out_is_not_sent_after_signing_in() {
         let mut rig = Rig::new();
@@ -2579,13 +2579,13 @@ mod tests {
     fn a_listen_heard_while_signed_in_is_sent_once() {
         let (mut rig, _) = Rig::signed_in(true);
         assert_eq!(works(&rig.listen(1)), [SocialWork::Listen(track_id(1))]);
-        // Un accesso senza profilo non manda ascolti.
+        // A sign-in without a profile sends no plays.
         let mut rig = Rig::new();
         rig.cmd(SocialCmd::Adopt { session: Session::for_tests(clerk()), me: me(false, true) });
         assert!(rig.listen(1).is_empty());
     }
 
-    // ---------- Playlist pubbliche ----------
+    // ---------- Public playlists ----------
 
     fn playlist(name: &str, tracks: &[u128], public: bool) -> Playlist {
         let mut playlist = Playlist::new(name, tracks.iter().map(|n| track(*n)).collect());
@@ -2603,28 +2603,28 @@ mod tests {
             works(&rig.sync()),
             [SocialWork::PublishPlaylist { id, name: "Sera".into(), tracks: vec![track_id(1)] }]
         );
-        // Frame, battiti e messaggi vari: niente.
+        // Frames, ticks and miscellaneous messages: nothing.
         assert!(works(&rig.sync()).is_empty());
-        // Un'altra allocazione con lo stesso contenuto (è cambiata un'altra playlist, o altro): niente.
+        // Another allocation with the same content (another playlist has changed, or something else): nothing.
         rig.playlists(vec![sera.clone(), playlist("Privata", &[3], false)]);
         assert!(works(&rig.sync()).is_empty());
-        // Un brano in più: un invio.
+        // One more track: a send.
         sera.tracks.push(track(2));
         rig.playlists(vec![sera.clone()]);
         assert_eq!(
             works(&rig.sync()),
             [SocialWork::PublishPlaylist { id, name: "Sera".into(), tracks: vec![track_id(1), track_id(2)] }]
         );
-        // Un altro nome: un invio.
+        // Another name: a send.
         sera.name = "Notte".into();
         rig.playlists(vec![sera.clone()]);
         assert_eq!(works(&rig.sync()).len(), 1);
-        // Tornata privata: sparisce dal profilo.
+        // Gone private again: it disappears from the profile.
         sera.public = false;
         rig.playlists(vec![sera.clone()]);
         assert_eq!(works(&rig.sync()), [SocialWork::UnpublishPlaylist(id)]);
         assert!(works(&rig.sync()).is_empty());
-        // Ripubblicata: di nuovo un invio. Poi tolta del tutto: sparisce.
+        // Published again: again a send. Then removed altogether: it disappears.
         sera.public = true;
         rig.playlists(vec![sera.clone()]);
         assert_eq!(works(&rig.sync()).len(), 1);
@@ -2652,7 +2652,7 @@ mod tests {
         assert!(matches!(&sent[..], [SocialWork::PublishPlaylist { tracks, .. }] if tracks.len() == 500));
     }
 
-    // ---------- Segreti, lavori persi, eventi ----------
+    // ---------- Secrets, lost jobs, events ----------
 
     #[test]
     fn passwords_codes_and_urls_never_print() {
@@ -2674,7 +2674,7 @@ mod tests {
         assert!(!printed.contains("token-di-prova") && !printed.contains("client-di-prova"), "{printed}");
     }
 
-    /// Un lavoro che va in panic non lascia il dominio ad aspettare: ogni lavoro ha il suo esito.
+    /// A job that panics does not leave the domain waiting: every job has its outcome.
     #[test]
     fn a_lost_job_never_leaves_the_form_stuck() {
         let mut rig = Rig::new();
@@ -2689,7 +2689,7 @@ mod tests {
             (false, Account::SignedOut, Some(AppError::AuthFailed))
         );
 
-        // Anche uno di lettura perso fallisce come senza rete, senza cancellare ciò che c'è.
+        // A lost read too fails as without network, without deleting what is there.
         let (mut rig, effects) = Rig::signed_in(true);
         let Some(Effect::Run(effect::Job::Social(job))) =
             effects.into_iter().find(|e| matches!(e, Effect::Run(_)))

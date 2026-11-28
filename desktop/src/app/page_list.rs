@@ -1,28 +1,28 @@
-//! La lista di una pagina d'oggetto (album, artista, playlist): la testa (`PageHeader`) è la voce 0 e
-//! scorre con le righe, che vengono dopo. È la `list` di GPUI: costruisce solo le voci visibili (più un
-//! margine) e ne ricorda l'altezza, così una testa di 260 dp e righe da 48 dp stanno nella stessa lista.
-//! La testa non si rimisura finché non lo si chiede ([`remeasure_header`]); le righe cambiate si
-//! annunciano con [`set_rows`], che tiene il punto di scorrimento.
+//! The list of an object page (album, artist, playlist): the head (`PageHeader`) is item 0 and
+//! scrolls with the rows, which come after. It is GPUI's `list`: it builds only the visible items (plus a
+//! margin) and remembers their height, so a 260 dp head and 48 dp rows fit in the same list.
+//! The head is not measured again until asked ([`remeasure_header`]); changed rows are
+//! announced with [`set_rows`], which keeps the scroll point.
 
 use gpui::{ListAlignment, ListOffset, ListState, px};
 use psytify_design::tokens::size::TRACK_ROW_H;
 
-/// Quanto si costruisce oltre il bordo visibile: quattro righe, per non vedere comparire le voci.
+/// How far it builds beyond the visible edge: four rows, so entries do not pop in.
 const OVERDRAW: f32 = 4.0 * TRACK_ROW_H;
 
-/// Una lista con la testa e `rows` righe.
+/// A list with the head and `rows` rows.
 pub fn new_list(rows: usize) -> ListState {
     ListState::new(1 + rows, ListAlignment::Top, crate::theme::dp(OVERDRAW))
 }
 
-/// Le righe sono cambiate (ora sono `rows`): la testa resta misurata, lo scorrimento resta dov'è.
+/// The rows changed (now they are `rows`): the head stays measured, the scroll stays where it is.
 pub fn set_rows(list: &ListState, rows: usize) {
     let old = list.item_count();
     if old == 0 {
         list.splice(0..0, 1 + rows);
     } else {
-        // `splice` riporta all'inizio del tratto sostituito un punto di scorrimento che vi cadeva dentro:
-        // si rimette la stessa voce allo stesso scarto (o la fine, se le righe sono meno).
+        // `splice` brings back to the start of the replaced stretch a scroll point that fell inside it:
+        // the same entry is put back at the same offset (or the end, if there are fewer rows).
         let top = list.logical_scroll_top();
         list.splice(1..old, rows);
         if top.item_ix > 0 {
@@ -31,14 +31,14 @@ pub fn set_rows(list: &ListState, rows: usize) {
     }
 }
 
-/// La testa ha cambiato contenuto (e forse altezza).
+/// The head changed content (and perhaps height).
 pub fn remeasure_header(list: &ListState) {
     if list.item_count() > 0 {
         list.remeasure_items(0..1);
     }
 }
 
-/// Torna in cima (un'altra pagina nella stessa vista).
+/// Back to the top (another page in the same view).
 pub fn to_top(list: &ListState) {
     list.scroll_to(ListOffset { item_ix: 0, offset_in_item: px(0.0) });
 }
@@ -55,10 +55,10 @@ mod tests {
         set_rows(&list, 30);
         let top = list.logical_scroll_top();
         assert_eq!((top.item_ix, top.offset_in_item), (8, px(7.0)));
-        // Meno righe di prima: si resta in fondo, non si torna in cima.
+        // Fewer rows than before: stay at the bottom, do not go back to the top.
         set_rows(&list, 3);
         assert_eq!(list.logical_scroll_top().item_ix, 4);
-        // In cima si resta in cima.
+        // At the top, stay at the top.
         to_top(&list);
         set_rows(&list, 10);
         assert_eq!(list.logical_scroll_top().item_ix, 0);

@@ -1,5 +1,5 @@
-//! Livelli flottanti: Toast, Dialog (con Scrim) e EmptyState. Il toast e il dialogo sono riquadri
-//! di `SURFACE_RAISED` con bordo `LINE_STRONG` e ombra dura di 2 AP; il posizionamento e la durata
+//! Floating layers: Toast, Dialog (with Scrim) and EmptyState. The toast and the dialog are panels
+//! of `SURFACE_RAISED` with a `LINE_STRONG` border and a 2 AP hard shadow; the placement and the duration
 //! (4 s, sospesa in hover) spettano a chi li mostra.
 
 use gpui::{
@@ -20,7 +20,7 @@ use crate::pixel::PixelSprite;
 use crate::pixel::shape::{hard_shadow, notch_box};
 use crate::theme::{Ap, TypeStyle, col, dp};
 
-/// Toast: una riga di testo con azione facoltativa («Annulla»). Gli errori hanno una barra `ERROR`
+/// Toast: one line of text with an optional action («Annulla»). Errors have an `ERROR` bar
 /// di `MARKER_W` a sinistra.
 #[derive(IntoElement)]
 pub struct Toast {
@@ -130,7 +130,7 @@ impl RenderOnce for Dialog {
     }
 }
 
-/// Stato vuoto: mascotte o illustrazione, titolo, una frase e una sola azione.
+/// Empty state: mascot or illustration, title, one phrase and a single action.
 #[derive(IntoElement)]
 pub struct EmptyState {
     sprite: &'static str,
@@ -144,7 +144,7 @@ impl EmptyState {
         Self { sprite, title: title.into(), body: body.into(), action: None }
     }
 
-    /// Mascotte che ascolta l'utente: playlist e raccolta vuote usano `empty_crate`.
+    /// Mascot that listens to the user: empty playlists and collections use `empty_crate`.
     pub fn crate_(title: impl Into<SharedString>, body: impl Into<SharedString>) -> Self {
         Self::new(sprite::EMPTY_CRATE, title, body)
     }

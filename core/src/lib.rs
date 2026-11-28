@@ -1,8 +1,8 @@
-//! Psytify core: la logica dell'app senza interfaccia, condivisa dai frontend (Iced oggi, GPUI per
-//! il desktop e Kotlin su Android in seguito). Non dipende da nessun framework grafico: i frontend
-//! avviano un [`Core`], gli mandano [`Command`] e leggono le [`Snapshot`] che pubblica.
+//! Psytify core: the app's logic without an interface, shared by the frontends (GPUI on the desktop,
+//! Kotlin on Android). It depends on no graphics framework: the frontends
+//! start a [`Core`], send it [`Command`]s and read the [`Snapshot`]s it publishes.
 //!
-//! Il piano dello spostamento è in `docs/transformation/04-core-architecture.md`.
+//! The move plan is in `docs/transformation/04-core-architecture.md`.
 
 pub mod api;
 pub mod artwork;
@@ -29,8 +29,8 @@ mod state;
 pub mod system_motion;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
-/// Il lato del videoclip che i frontend usano direttamente: le regole di sincronia con l'audio, pure,
-/// da applicare al loro player (il resto, che videoclip e quando, è `VideoCmd` e `VideoView`).
+/// The side of the music video that the frontends use directly: the audio sync rules, pure,
+/// to apply to their player (the rest, which video and when, is `VideoCmd` and `VideoView`).
 #[cfg(feature = "video")]
 pub mod video {
     pub use crate::state::video::{

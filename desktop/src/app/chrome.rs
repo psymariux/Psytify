@@ -14,14 +14,14 @@ use super::nav::Page;
 use super::sidebar::Tab;
 use crate::titlebar::AccountChip;
 
-/// Quale parte.
+/// Which part.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
     TitleBar,
     Sidebar,
 }
 
-/// Ciò che una parte mostra di `Shell`: finché non cambia, la parte si riusa dalla cache.
+/// What a part shows of `Shell`: until it changes, the part is reused from the cache.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Key {
     TitleBar { playing: bool, back: bool, forward: bool, account: AccountChip },

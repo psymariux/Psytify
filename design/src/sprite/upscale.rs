@@ -1,13 +1,13 @@
-//! Ingrandimento intero nearest-neighbour: ogni pixel d'arte diventa un blocco `k x k` di pixel
+//! Integer nearest-neighbour upscaling: each art pixel becomes a `k x k` block of pixels
 //! fisici identici. Solo aritmetica intera, nessun filtro, nessun colore nuovo.
 
 use super::Frame;
 use crate::tokens::color::Rgba;
 
-/// Fattore massimo accettato (scala 8,0): oltre, il fattore si limita a questo valore.
+/// Maximum accepted factor (scale 8.0): above it, the factor is capped at this value.
 pub const MAX_FACTOR: u32 = 16;
 
-/// Immagine RGBA8 non premoltiplicata, righe contigue (`width * height * 4` byte).
+/// Non-premultiplied RGBA8 image, contiguous rows (`width * height * 4` bytes).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pixels {
     pub width: u32,
@@ -22,13 +22,13 @@ impl Pixels {
     }
 }
 
-/// Ingrandisce `frame` di `factor` (0 vale 1; massimo [`MAX_FACTOR`]).
+/// Upscales `frame` by `factor` (0 means 1; maximum [`MAX_FACTOR`]).
 pub fn upscale_nearest(frame: &Frame, factor: u32) -> Pixels {
     upscale_rgba(frame, factor, |px| px)
 }
 
-/// Come [`upscale_nearest`] ma tinge prima la maschera: ogni pixel non trasparente prende il colore di
-/// `tint`, con alfa = alfa del pixel x alfa del tint. I pixel trasparenti restano tali.
+/// Like [`upscale_nearest`] but first tints the mask: every non-transparent pixel takes the colour of
+/// `tint`, with alpha = pixel alpha x tint alpha. Transparent pixels stay transparent.
 pub fn upscale_tinted(frame: &Frame, factor: u32, tint: Rgba) -> Pixels {
     let [tr, tg, tb, ta] = tint.bytes();
     upscale_rgba(frame, factor, |px| {

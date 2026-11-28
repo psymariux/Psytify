@@ -1,12 +1,12 @@
-//! Dove vanno i millisecondi di un fotogramma: il profilo di GPUI letto da noi, per misurare prima di
-//! ottimizzare (`docs/PERFORMANCE.md`, BACKLOG 23). Esiste solo con la feature `profile` e si accende con
-//! `PSYTIFY_FRAME_STATS=SECONDI` (senza il numero, 10): ogni intervallo scrive su stderr una riga con i
-//! fotogrammi disegnati, il tempo medio di `Window::draw` diviso per fase (layout dei widget, prepaint,
-//! paint), il tempo di consegna alla GPU, i task che hanno girato più di 100 µs (con il punto del codice
-//! che li ha lanciati), le viste che da sole hanno pesato più di 500 µs e quanti sono i task piccoli.
-//! Senza la variabile non si accende niente.
+//! Where the milliseconds of a frame go: GPUI's profile read by us, to measure before
+//! optimising (`docs/PERFORMANCE.md`, BACKLOG 23). It exists only with the `profile` feature and is switched on with
+//! `PSYTIFY_FRAME_STATS=SECONDI` (without the number, 10): each interval writes on stderr a line with the
+//! frames drawn, the average time of `Window::draw` split by phase (widget layout, prepaint,
+//! paint), the delivery time to the GPU, the tasks that ran for more than 100 µs (with the point of the code
+//! that launched them), the views that alone weighed more than 500 µs and how many small tasks there are.
+//! Without the variable nothing is switched on.
 //!
-//! La somma di queste voci è il lavoro del thread della finestra; il resto della CPU del processo sta nei
+//! The sum of these entries is the window thread's work; the rest of the process's CPU is in
 //! thread del core, dell'audio e di GPUI (`scripts/perf-sample.py` li separa).
 
 use std::collections::HashMap;
@@ -17,10 +17,10 @@ use gpui::profiler::journal::{ForegroundEvent, ForegroundJournalEntry};
 
 /// Intervallo di stampa predefinito, in secondi.
 const DEFAULT_SECS: u64 = 10;
-/// Quante voci dei task e delle viste si stampano per intervallo.
+/// How many task and view entries are printed per interval.
 const TOP: usize = 6;
 
-/// Somma e conteggio di una voce.
+/// Sum and count of an entry.
 #[derive(Clone, Copy, Default)]
 struct Sum {
     count: u64,
@@ -91,17 +91,17 @@ impl Stats {
                 self.small_polls.count += flush.summary.count;
                 self.small_polls.total += flush.summary.total;
             }
-            // `ForegroundEvent` può crescere: ciò che non conosciamo non si conta.
+            // `ForegroundEvent` may grow: what we do not know is not counted.
             _ => {}
         }
     }
 
-    /// Una riga di riepilogo e, sotto, le voci più pesanti.
+    /// A summary line and, under it, the heaviest entries.
     fn report(&self, secs: f64) -> String {
         let per_frame = |total: Duration| {
             if self.draw.count == 0 { 0.0 } else { ms(total) / self.draw.count as f64 }
         };
-        // Il lavoro del thread della finestra in questo intervallo, per secondo di orologio.
+        // The window thread's work in this interval, per second of clock.
         let busy = self.draw.total
             + self.present.total
             + self.inputs.total
@@ -145,8 +145,8 @@ impl Stats {
     }
 }
 
-/// Accende le misure se c'è `PSYTIFY_FRAME_STATS`: il profilo di GPUI registra e un task lo legge a
-/// intervalli. Va chiamato una volta all'avvio.
+/// Switches the measures on if `PSYTIFY_FRAME_STATS` is set: GPUI's profile records and a task reads it at
+/// intervals. It must be called once at start-up.
 pub fn install(cx: &mut App) {
     let Some(value) = std::env::var_os("PSYTIFY_FRAME_STATS") else { return };
     let secs = value.to_str().and_then(|text| text.parse::<u64>().ok()).unwrap_or(DEFAULT_SECS).max(1);

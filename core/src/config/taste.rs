@@ -1,6 +1,6 @@
-//! Ciò che l'app impara da chi ascolta, solo su questo computer: gli artisti seguiti, gli album
-//! salvati, quanti ascolti ha ogni brano e i «mix» che ne vengono. Il backend non ha utenti per
-//! questo, quindi tutto vive nel file di configurazione; ogni lista ha un tetto.
+//! What the app learns from whoever listens, only on this computer: the followed artists, the saved albums,
+//! how many plays each track has and the "mixes" that come from them. The backend has no users for
+//! this, so everything lives in the configuration file; each list has a cap.
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,16 +11,16 @@ use uuid::Uuid;
 use crate::api::Track;
 use crate::api::models::ArtistRef;
 
-/// Artisti seguiti al massimo.
+/// Followed artists at most.
 pub const MAX_FOLLOWED: usize = 200;
-/// Album salvati al massimo.
+/// Saved albums at most.
 pub const MAX_SAVED_ALBUMS: usize = 200;
-/// Brani di cui si ricordano gli ascolti.
+/// Tracks whose plays are remembered.
 pub const MAX_STATS: usize = 150;
-/// Brani di un mix.
+/// Tracks of a mix.
 pub const MIX_SIZE: usize = 24;
 
-/// Un artista seguito, con ciò che serve a mostrarlo senza interrogare il backend.
+/// A followed artist, with what is needed to show them without asking the backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FollowedArtist {
     pub id: Uuid,
@@ -29,7 +29,7 @@ pub struct FollowedArtist {
     pub cover_url: Option<String>,
 }
 
-/// Un album salvato nella libreria.
+/// An album saved in the library.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedAlbum {
     pub id: Uuid,
@@ -39,16 +39,16 @@ pub struct SavedAlbum {
     pub cover_url: Option<String>,
 }
 
-/// Quante volte è partito un brano, e quando l'ultima.
+/// How many times a track has played, and when the last time was.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayStat {
     pub track: Track,
     pub plays: u32,
-    /// Secondi dal 1970.
+    /// Seconds since 1970.
     pub last_played: u64,
 }
 
-/// Un artista con i suoi ascolti, per «i tuoi artisti» e i mix.
+/// An artist with their plays, for «i tuoi artisti» and the mixes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistTaste {
     pub artist: ArtistRef,
@@ -56,7 +56,7 @@ pub struct ArtistTaste {
     pub cover_url: Option<String>,
 }
 
-/// Un mix: un nome, i brani e i nomi degli artisti da mostrare sotto.
+/// A mix: a name, the tracks and the artist names to show below.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mix {
     pub title: String,
@@ -68,8 +68,8 @@ pub fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-/// Cambia la copertina dei brani che il catalogo ha appena rimandato con un'altra (o senza).
-/// `true` se qualcosa è cambiato.
+/// Changes the cover of the tracks the catalog has just sent back with another one (or none).
+/// `true` if something changed.
 pub fn patch_covers(tracks: &mut [Track], fresh: &HashMap<Uuid, Option<String>>) -> bool {
     let mut changed = false;
     for track in tracks {
@@ -83,7 +83,7 @@ pub fn patch_covers(tracks: &mut [Track], fresh: &HashMap<Uuid, Option<String>>)
     changed
 }
 
-/// Segue o smette di seguire. Restituisce `true` se ora lo segue.
+/// Follows or stops following. Returns `true` if it is now followed.
 pub fn toggle_follow(followed: &mut Vec<FollowedArtist>, artist: FollowedArtist) -> bool {
     match followed.iter().position(|a| a.id == artist.id) {
         Some(at) => {
@@ -98,7 +98,7 @@ pub fn toggle_follow(followed: &mut Vec<FollowedArtist>, artist: FollowedArtist)
     }
 }
 
-/// Salva o toglie un album. Restituisce `true` se ora è salvato.
+/// Saves or removes an album. Returns `true` if it is now saved.
 pub fn toggle_saved_album(saved: &mut Vec<SavedAlbum>, album: SavedAlbum) -> bool {
     match saved.iter().position(|a| a.id == album.id) {
         Some(at) => {
@@ -113,8 +113,8 @@ pub fn toggle_saved_album(saved: &mut Vec<SavedAlbum>, album: SavedAlbum) -> boo
     }
 }
 
-/// Conta un ascolto. La lista resta ordinata (più ascolti prima, a parità il più recente) e
-/// limitata: chi ha pochi ascolti e vecchi esce per primo.
+/// Counts a play. The list stays sorted (more plays first, on a tie the most recent) and
+/// capped: whoever has few and old plays leaves first.
 pub fn count_play(stats: &mut Vec<PlayStat>, track: &Track, now: u64) {
     match stats.iter_mut().find(|s| s.track.id == track.id) {
         Some(stat) => {
@@ -128,12 +128,12 @@ pub fn count_play(stats: &mut Vec<PlayStat>, track: &Track, now: u64) {
     stats.truncate(MAX_STATS);
 }
 
-/// I brani più ascoltati, dal primo.
+/// The most played tracks, from the first.
 pub fn top_tracks(stats: &[PlayStat], count: usize) -> Vec<&PlayStat> {
     stats.iter().take(count).collect()
 }
 
-/// Gli artisti più ascoltati: gli ascolti dei loro brani sommati.
+/// The most played artists: the plays of their tracks added up.
 pub fn top_artists(stats: &[PlayStat]) -> Vec<ArtistTaste> {
     let mut artists: Vec<ArtistTaste> = Vec::new();
     for stat in stats {
@@ -155,13 +155,13 @@ pub fn top_artists(stats: &[PlayStat]) -> Vec<ArtistTaste> {
     artists
 }
 
-/// Ascolti totali, per la riga «hai ascoltato N brani».
+/// Total plays, for the line "hai ascoltato N brani".
 pub fn total_plays(stats: &[PlayStat]) -> u64 {
     stats.iter().map(|s| u64::from(s.plays)).sum()
 }
 
-/// Un generatore di numeri casuali minimo (xorshift): basta a mescolare, e il seme lo rende
-/// ripetibile nei test.
+/// A minimal random number generator (xorshift): enough to shuffle, and the seed makes it
+/// repeatable in tests.
 struct Shuffler(u64);
 
 impl Shuffler {
@@ -180,13 +180,13 @@ impl Shuffler {
     }
 }
 
-/// Mescola `items` in modo ripetibile: lo stesso seme dà lo stesso ordine.
+/// Shuffles `items` in a repeatable way: the same seed gives the same order.
 pub fn shuffle<T>(items: &mut [T], seed: u64) {
     Shuffler(seed | 1).shuffle(items);
 }
 
-/// La coda di una «radio» partita da `start`: il brano, poi altri brani dello stesso artista e
-/// qualche brano di altri artisti da scoprire, mescolati. `own` sono i brani dell'artista, `pool` il
+/// The queue of a "radio" started from `start`: the track, then other tracks of the same artist and
+/// a few tracks of other artists to discover, shuffled. `own` are the artist's tracks, `pool` the
 /// catalogo recente.
 pub fn radio(start: &Track, own: &[Track], pool: &[Track], size: usize, seed: u64) -> Vec<Track> {
     let mut rng = Shuffler(seed | 1);
@@ -195,7 +195,7 @@ pub fn radio(start: &Track, own: &[Track], pool: &[Track], size: usize, seed: u6
     let mut other: Vec<Track> =
         pool.iter().filter(|t| t.id != start.id && t.artist.id != start.artist.id).cloned().collect();
     rng.shuffle(&mut other);
-    // Due terzi dello stesso artista, il resto da altri: la radio resta riconoscibile ma varia.
+    // Two thirds from the same artist, the rest from others: the radio stays recognisable but varies.
     let from_others = (size.saturating_sub(1) / 3).min(other.len());
     let from_same = size.saturating_sub(1).saturating_sub(from_others).min(same.len());
     let mut queue = vec![start.clone()];
@@ -204,9 +204,9 @@ pub fn radio(start: &Track, own: &[Track], pool: &[Track], size: usize, seed: u6
     queue
 }
 
-/// Fino a `count` mix, uno per ognuno dei tuoi artisti più ascoltati: i brani di quell'artista
-/// (quelli che hai ascoltato per primi, poi il resto del catalogo), mescolati, con in coda qualche
-/// brano di altri artisti da scoprire. `pool` è il catalogo recente.
+/// Up to `count` mixes, one for each of your most played artists: that artist's tracks
+/// (the ones you listened to first, then the rest of the catalog), shuffled, with a few
+/// tracks of other artists to discover at the end. `pool` is the recent catalog.
 pub fn mixes(stats: &[PlayStat], pool: &[Track], count: usize, seed: u64) -> Vec<Mix> {
     let mut rng = Shuffler(seed | 1);
     let mut result = Vec::new();

@@ -1,12 +1,11 @@
-# Marchi dei provider di accesso
+# Sign-in provider marks
 
-I tre marchi dei pulsanti «Continua con …» della schermata di accesso: l'unica eccezione vettoriale
-alla regola dei pixel (`docs/design/PSYTIFY_ART_DIRECTION.md`, «Sign-in logos»: le linee guida dei
-marchi vietano di ridisegnarli).
+The three marks of the «Continua con …» buttons on the sign-in screen: the only vector exception
+to the pixel rule (`docs/design/PSYTIFY_ART_DIRECTION.md`, «Sign-in logos»: the brand guidelines
+forbid redrawing them).
 
 - `github.svg`, `google.svg`, `discord.svg`: **Simple Icons** 13.21.0 (https://simpleicons.org/),
-  licenza CC0 1.0, la variante monocroma di ciascun marchio. Sono gli stessi file di
-  `client/assets/icons/brand-*.svg` (vedi `client/assets/icons/CREDITS.md`).
-- Riempimento bianco: chi li disegna li tinge con il colore dell'etichetta (`TEXT_PRIMARY`).
-- I marchi restano dei loro titolari (GitHub, Google, Discord); qui servono solo a indicare il
-  provider dell'accesso.
+  licence CC0 1.0, the monochrome variant of each mark. The credits are in `CREDITS.md` in this folder.
+- White fill: whoever draws them tints them with the label colour (`TEXT_PRIMARY`).
+- The marks remain the property of their owners (GitHub, Google, Discord); here they only indicate the
+  sign-in provider.

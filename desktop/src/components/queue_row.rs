@@ -1,7 +1,7 @@
-//! QueueRow: riga di 48 dp del pannello della coda. Posizione (o equalizzatore se è il brano in
-//! corso) | copertina | titolo e artista | durata; in hover la durata lascia il posto a «Rimuovi».
-//! Stati come TrackRow: rest, hover, premuto, focus (anello interno). Altezza fissa, quindi va bene
-//! per `uniform_list`: una coda lunga costruisce solo le righe visibili.
+//! QueueRow: 48 dp row of the queue panel. Position (or the equaliser if it is the playing
+//! track) | cover | title and artist | duration; on hover the duration gives way to «Rimuovi».
+//! States as in TrackRow: rest, hover, pressed, focus (inner ring). Fixed height, so it suits
+//! `uniform_list`: a long queue builds only the visible rows.
 
 use gpui::{App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 use psytify_design::sprite;
@@ -20,10 +20,10 @@ use super::tile::Cover;
 use crate::pixel::shape::inset_ring;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Larghezza della colonna della posizione.
+/// Width of the position column.
 const INDEX_W: f32 = 24.0;
 
-/// Stringhe già pronte: la view non formatta.
+/// Strings already ready: the view does not format.
 #[derive(Clone)]
 pub struct QueueRowData {
     /// Posizione nell'ordine di ascolto, da 1.
@@ -39,7 +39,7 @@ pub struct QueueRow {
     id: ElementId,
     data: QueueRowData,
     current: Option<PlayState>,
-    /// Dove `Shell` dipinge l'equalizzatore al posto della riga (vedi `playing_spot`).
+    /// Where `Shell` paints the equaliser in place of the row (see `playing_spot`).
     spot: Option<PlayingSpot>,
     preview: Preview,
     on_play: Option<OnClick>,
@@ -59,13 +59,13 @@ impl QueueRow {
         }
     }
 
-    /// Il brano della riga è quello in corso (suona, è in pausa o si sta caricando).
+    /// The row's track is the playing one (it plays, is paused or is loading).
     pub fn current(mut self, state: PlayState) -> Self {
         self.current = Some(state);
         self
     }
 
-    /// Come [`QueueRow::current`], ma l'equalizzatore lo dipinge `Shell` sopra il pannello (in cache).
+    /// As [`QueueRow::current`], but `Shell` paints the equaliser over the panel (cached).
     pub fn current_at(mut self, state: PlayState, spot: &PlayingSpot) -> Self {
         self.current = Some(state);
         self.spot = Some(spot.clone());
@@ -116,7 +116,7 @@ impl RenderOnce for QueueRow {
                 IconButton::new(SharedString::from(format!("{id}-remove")), sprite::ICON_CLOSE)
                     .tooltip("Rimuovi dalla coda", None)
                     .on_click(move |event, window, cx| {
-                        // Togliere una voce non deve farla partire.
+                        // Removing an entry must not start it.
                         cx.stop_propagation();
                         handler(event, window, cx);
                     })

@@ -1,5 +1,5 @@
-//! Separatore: 1 AP di `LINE_SUBTLE` (strong: `LINE_STRONG`, solo ai bordi dei livelli flottanti).
-//! Mai più sottile, mai sfumato, mai rientrato.
+//! Separator: 1 AP of `LINE_SUBTLE` (strong: `LINE_STRONG`, only at the edges of floating layers).
+//! Never thinner, never faded, never indented.
 
 use gpui::{App, IntoElement, RenderOnce, Styled, Window, div};
 use psytify_design::tokens::color::{LINE_STRONG, LINE_SUBTLE};

@@ -1,5 +1,5 @@
-//! Errori dell'applicazione. Sono `Clone` perché viaggiano dentro i `Message` di Iced, e i
-//! messaggi non contengono mai URL firmati, token o percorsi dello storage.
+//! Application errors. They are `Clone` because they travel inside the frontends' messages, and the
+//! messages never contain signed URLs, tokens or storage paths.
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AppError {
@@ -23,12 +23,12 @@ pub enum AppError {
     Seek,
     #[error("Impossibile scrivere {0}.")]
     Io(String),
-    /// Un lavoro annullato da chi l'aveva chiesto (un download tolto dalla coda).
+    /// A job cancelled by whoever asked for it (a download removed from the queue).
     #[error("Operazione annullata.")]
     Cancelled,
     #[error("Accesso non riuscito. Riprova.")]
     AuthFailed,
-    /// Errore spiegato da Clerk (password errata, codice scaduto...), già in italiano.
+    /// An error explained by Clerk (wrong password, expired code...), already in Italian.
     #[error("{0}")]
     Auth(String),
     #[error("Accesso annullato.")]
@@ -45,12 +45,12 @@ pub enum AppError {
 }
 
 impl AppError {
-    /// Il server non conosce più il contenuto richiesto (`404`).
+    /// The server no longer knows the requested content (`404`).
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::Api { status: 404, .. })
     }
 
-    /// Traduce un errore di reqwest senza conservarne il testo, che può contenere l'URL.
+    /// Translates a reqwest error without keeping its text, which can contain the URL.
     pub fn from_http(err: &reqwest::Error) -> Self {
         if err.is_timeout() {
             Self::Timeout

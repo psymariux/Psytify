@@ -1,5 +1,4 @@
-//! «Amici» (`Page::Friends`, `PSYTIFY_ART_DIRECTION.md` «Friends», the Iced client's
-//! `client/src/ui/pages/friends.rs`): the title with your username, the search by username (Enter searches,
+//! «Amici» (`Page::Friends`, `PSYTIFY_ART_DIRECTION.md` «Friends»): the title with your username, the search by username (Enter searches,
 //! an empty field clears the results), then one list of 48 dp rows at the frame margins: the people found,
 //! the requests received (Accetta secondary, Rifiuta ghost), those pending (Ritira) and the friends with what
 //! they listen to («Sta ascoltando …» with the live dot). A click on a person opens their profile. While a
@@ -40,12 +39,12 @@ use crate::components::section::{PageTitle, note_at, section_heading_at};
 use crate::core_model::{Changed, CoreModel};
 use crate::theme::{TypeStyle, col, dp};
 
-/// Che cosa la pagina può mostrare.
+/// What the page can show.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Gate {
     #[default]
     SignedOut,
-    /// Ha fatto l'accesso ma non ha ancora un nome utente.
+    /// Signed in but without a username yet.
     NoProfile,
     Ready,
 }
@@ -90,35 +89,35 @@ impl Line {
     }
 }
 
-/// Una riga della lista, nell'ordine in cui si disegna.
+/// A row of the list, in the order it is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Row {
     Heading(Section, usize),
     Person(usize),
     Note(Line),
-    /// Gli amici non si sono caricati: l'errore e «Riprova».
+    /// The friends did not load: the error and «Riprova».
     Retry,
 }
 
-/// I pulsanti di una persona.
+/// The buttons of a person.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Actions {
     None,
-    /// Trovata, non ancora amica: «Aggiungi».
+    /// Found, not yet a friend: «Aggiungi».
     Add,
-    /// Trovata, già amica: «Amici», spento.
+    /// Found, already a friend: «Amici», off.
     Friends,
-    /// Trovata, richiesta già mandata: «Richiesta inviata», spento.
+    /// Found, request already sent: «Richiesta inviata», off.
     Sent,
-    /// Trovata, ti ha mandato una richiesta: «Accetta».
+    /// Found, they sent you a request: «Accetta».
     Accept,
-    /// Una richiesta arrivata: «Accetta» e «Rifiuta».
+    /// An incoming request: «Accetta» and «Rifiuta».
     AcceptReject,
-    /// Una richiesta mandata: «Ritira».
+    /// An outgoing request: «Ritira».
     Withdraw,
 }
 
-/// Una persona di una riga, con i testi pronti.
+/// A person of a row, with the texts ready.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Person {
     handle: String,
@@ -126,11 +125,11 @@ struct Person {
     avatar: Option<SharedString>,
     status: Status,
     actions: Actions,
-    /// Una richiesta per lei è in volo: i pulsanti sono spenti.
+    /// A request for them is in flight: the buttons are off.
     busy: bool,
 }
 
-/// Tutto ciò che la pagina mostra.
+/// Everything the page shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Model {
     gate: Gate,
@@ -138,11 +137,11 @@ struct Model {
     me: SharedString,
     rows: Vec<Row>,
     people: Vec<Person>,
-    /// L'errore del caricamento degli amici.
+    /// The error of loading the friends.
     error: Option<SharedString>,
 }
 
-/// La relazione di una persona trovata, dagli elenchi degli amici.
+/// The relation of a person found, from the friends lists.
 fn found_actions(handle: &str, own: &str, friends: Option<&Friends>) -> Actions {
     if handle == own {
         return Actions::None;
@@ -160,7 +159,7 @@ fn found_actions(handle: &str, own: &str, friends: Option<&Friends>) -> Actions 
     }
 }
 
-/// Le righe e i testi della pagina. Pura.
+/// The rows and the texts of the page. Pure.
 fn model(view: &SocialView) -> Model {
     let own = match &view.account {
         Account::SignedIn(me) => match &me.profile {
@@ -216,7 +215,7 @@ fn model(view: &SocialView) -> Model {
             let nobody =
                 friends.friends.is_empty() && friends.incoming.is_empty() && friends.outgoing.is_empty();
             if nobody && matches!(view.found, Load::Idle) {
-                // Nessuno e nessuna ricerca: lo stato vuoto della pagina, non una lista.
+                // No one and no search: the page's empty state, not a list.
                 return Model { rows: Vec::new(), people: Vec::new(), ..model };
             }
             model.rows.push(Row::Heading(Section::Friends, friends.friends.len()));
@@ -267,7 +266,7 @@ impl FriendsPage {
                 .on_change({
                     let core = core.clone();
                     move |text, _, cx| {
-                        // Come nel client Iced: si cerca con Invio; un campo vuoto azzera i risultati.
+                        // You search with Enter; an empty field clears the results.
                         if text.trim().trim_start_matches('@').is_empty() {
                             core.read(cx).social(SocialCmd::SearchUsers(String::new()));
                         }

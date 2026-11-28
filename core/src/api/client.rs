@@ -1,7 +1,7 @@
-//! Client HTTP verso il backend Psytify e verso gli URL firmati dello storage.
+//! HTTP client for the Psytify backend and for the storage's signed URLs.
 //!
-//! Ogni richiesta ha un timeout. Gli URL firmati non vengono mai registrati né restituiti dentro
-//! un errore: `AppError` conserva solo status e codice.
+//! Every request has a timeout. Signed URLs are never logged nor returned inside
+//! an error: `AppError` keeps only the status and the code.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -27,41 +27,41 @@ use super::models::{MetaArtistPageDto, MetaListPageDto, MetaSearchDto, OpenedArt
 use crate::error::AppError;
 use crate::player::stream::{Next, PREFETCH_BYTES, StreamBuffer};
 
-/// Timeout complessivo delle chiamate al catalogo.
+/// Overall timeout for the catalog calls.
 pub const API_TIMEOUT: Duration = Duration::from_secs(10);
-/// Timeout complessivo per scaricare un brano tutto in memoria (test sul server vivo).
+/// Overall timeout for downloading a track entirely into memory (tests against the live server).
 #[cfg(test)]
 pub const AUDIO_TIMEOUT: Duration = Duration::from_secs(120);
-/// Un download lungo non ha un timeout totale, ma si interrompe se non arrivano dati.
+/// A long download has no total timeout, but it is interrupted if no data arrives.
 pub const DOWNLOAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-/// L'importazione legge i metadati da Archive: può richiedere qualche secondo in più.
+/// The import reads the metadata from Archive: it may take a few seconds more.
 const IMPORT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Ricerca sulle fonti esterne: il server interroga tre fonti in parallelo.
+/// Search on the external sources: the server queries three sources in parallel.
 const SOURCE_SEARCH_TIMEOUT: Duration = Duration::from_secs(45);
-/// L'importazione da una fonte esterna scarica l'audio sul server (il server si ferma a 120 secondi).
+/// Importing from an external source downloads the audio to the server (the server stops at 120 seconds).
 const SOURCE_IMPORT_TIMEOUT: Duration = Duration::from_secs(130);
-/// Catalogo ufficiale: il server interroga Deezer (più pagine per la discografia di un artista).
+/// Official catalog: the server queries Deezer (several pages for an artist's discography).
 const META_TIMEOUT: Duration = Duration::from_secs(25);
-/// Il primo `video-url` di un brano scarica il videoclip sul server (che si ferma a 120 secondi).
+/// The first `video-url` of a track downloads the music video to the server (which stops at 120 seconds).
 #[cfg(feature = "video")]
 const VIDEO_TIMEOUT: Duration = Duration::from_secs(130);
-/// La preparazione di un videoclip risponde subito: il download resta sul server.
+/// Preparing a music video answers at once: the download stays on the server.
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(15);
-/// Copertine: timeout e dimensione massima di un'immagine.
+/// Covers: timeout and maximum size of an image.
 const COVER_TIMEOUT: Duration = Duration::from_secs(20);
-/// Il backend attende LRCLIB (fino a 10 s per ricerca) prima di rispondere.
+/// The backend waits for LRCLIB (up to 10 s per search) before answering.
 const LYRICS_TIMEOUT: Duration = Duration::from_secs(25);
 pub const MAX_COVER_BYTES: usize = 4 * 1024 * 1024;
-/// Redirect seguiti al massimo per una copertina (archive.org manda a un nodo di archiviazione).
+/// Redirects followed at most for a cover (archive.org sends to a storage node).
 const MAX_COVER_REDIRECTS: usize = 5;
-/// Oltre questa dimensione un brano non viene caricato in memoria per l'ascolto.
+/// Beyond this size a track is not loaded into memory for listening.
 pub const MAX_STREAM_BYTES: u64 = 600 * 1024 * 1024;
-/// Tentativi di una richiesta `Range` dopo un salto, prima di dare il brano per perso.
+/// Attempts of a `Range` request after a jump, before giving the track up as lost.
 const RANGE_ATTEMPTS: usize = 2;
-/// URL risolti ricordati al massimo: oltre si ricomincia da capo.
+/// Resolved URLs remembered at most: beyond it one starts again from scratch.
 const MAX_RESOLVED: usize = 256;
-/// Quante volte un download caduto a metà riparte da dove era arrivato.
+/// How many times a download that fell halfway restarts from where it had reached.
 const MAX_REOPEN: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -88,8 +88,8 @@ pub struct TrackQuery {
     pub offset: u32,
 }
 
-/// Risposta di `download-url`: l'URL pronto, oppure la versione chiesta è ancora in preparazione sul
-/// server (la ricodifica) e va richiesta di nuovo fra poco.
+/// Reply of `download-url`: the ready URL, or the requested version is still being prepared on the
+/// server (the re-encoding) and must be requested again shortly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadReply {
     Ready(SignedUrl),
@@ -100,20 +100,20 @@ pub enum DownloadReply {
 pub struct ApiClient {
     http: reqwest::Client,
     download: reqwest::Client,
-    /// Solo copertine, chieste al backend. Il controllo sull'host dell'immagine (`is_allowed_cover_url`)
-    /// resta: il backend lo rifà, ma il client non chiede mai altro.
+    /// Only covers, requested from the backend. The check on the image's host (`is_allowed_cover_url`)
+    /// stays: the backend repeats it, but the client never asks for anything else.
     covers: reqwest::Client,
     base: Arc<str>,
-    /// URL d'ascolto → URL finale dopo i redirect, per la sessione. archive.org manda ogni
-    /// richiesta a un nodo di archiviazione e il redirect costa circa 2,7 secondi: riascoltare un
-    /// brano o saltarci dentro va subito al nodo. Solo in memoria, mai nei log.
+    /// Listen URL → final URL after the redirects, for the session. archive.org sends each
+    /// request to a storage node and the redirect costs about 2.7 seconds: listening again to a
+    /// track or jumping inside it goes straight to the node. In memory only, never in logs.
     resolved: Arc<Mutex<HashMap<String, reqwest::Url>>>,
 }
 
-/// Un URL di copertina si scarica solo in https da `archive.org` o da un suo sottodominio
-/// (`ia800608.us.archive.org`), o dal CDN delle immagini di Deezer (`cdn-images.dzcdn.net`), da
-/// cui il backend prende le copertine ufficiali dei brani di YouTube e le foto degli artisti. Sono
-/// le uniche eccezioni ammesse agli URL risolti dal backend, e solo per le immagini.
+/// A cover URL is downloaded only over https from `archive.org` or one of its subdomains
+/// (`ia800608.us.archive.org`), or from Deezer's image CDN (`cdn-images.dzcdn.net`), from
+/// which the backend takes the official covers of YouTube tracks and the artists' photos. These are
+/// the only allowed exceptions to the URLs resolved by the backend, and only for images.
 pub fn is_allowed_cover_url(url: &reqwest::Url) -> bool {
     url.scheme() == "https"
         && url.username().is_empty()
@@ -123,7 +123,7 @@ pub fn is_allowed_cover_url(url: &reqwest::Url) -> bool {
             host == "archive.org"
                 || host.ends_with(".archive.org")
                 || host.ends_with(".dzcdn.net")
-                // Gli avatar dei profili.
+                // The profiles' avatars.
                 || host == "img.clerk.com"
         })
 }
@@ -134,9 +134,9 @@ impl std::fmt::Debug for ApiClient {
     }
 }
 
-/// Host e porta di un indirizzo di backend (come li mostra [`ApiClient::host`]), dopo lo stesso controllo
-/// di [`ApiClient::new`]: `http` o `https` con un host. Serve a un frontend che vuole controllare un
-/// indirizzo scritto a mano senza costruire i client HTTP.
+/// Host and port of a backend address (as [`ApiClient::host`] shows them), after the same check
+/// as [`ApiClient::new`]: `http` or `https` with a host. It serves a frontend that wants to check an
+/// address typed by hand without building the HTTP clients.
 pub fn base_host(base_url: &str) -> Result<String, AppError> {
     let base = base_url.trim().trim_end_matches('/');
     let parsed = reqwest::Url::parse(base).map_err(|_| AppError::InvalidBaseUrl(base.into()))?;
@@ -182,13 +182,13 @@ impl ApiClient {
         Ok(Self { http, download, covers, base: base.into(), resolved: Arc::default() })
     }
 
-    /// L'indirizzo del backend, senza barra finale (chi tiene un client in cache lo confronta con
-    /// quello scelto nelle impostazioni).
+    /// The backend address, without a trailing slash (whoever keeps a client cached compares it with
+    /// the one chosen in the settings).
     pub fn base_url(&self) -> &str {
         &self.base
     }
 
-    /// Host e porta del backend, da mostrare nell'interfaccia.
+    /// Backend host and port, to show in the interface.
     pub fn host(&self) -> String {
         reqwest::Url::parse(&self.base)
             .ok()
@@ -209,8 +209,8 @@ impl ApiClient {
         self.get_json_within(path, query, API_TIMEOUT).await
     }
 
-    /// Come `get_json`, con un tempo massimo proprio: il backend può attendere un servizio esterno
-    /// (LRCLIB) più a lungo di una richiesta del catalogo.
+    /// As `get_json`, with its own maximum time: the backend may wait for an external service
+    /// (LRCLIB) longer than a catalog request.
     async fn get_json_within<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -245,7 +245,7 @@ impl ApiClient {
         self.get_json("/v1/catalog/tracks", &params).await
     }
 
-    /// Ricerca nel catalogo: risultato principale, brani, artisti e album.
+    /// Search in the catalog: main result, tracks, artists and albums.
     pub async fn search(&self, q: &str) -> Result<SearchResults, AppError> {
         self.get_json("/v1/catalog/search", &[("q", q.to_owned())]).await
     }
@@ -259,21 +259,21 @@ impl ApiClient {
         self.get_json("/v1/catalog/albums", &params).await
     }
 
-    /// Cerca nel catalogo ufficiale: brani, artisti, album e playlist.
+    /// Searches the official catalog: tracks, artists, albums and playlists.
     pub async fn meta_search(&self, q: &str) -> Result<MetaSearch, AppError> {
         let dto: MetaSearchDto =
             self.get_json_within("/v1/meta/search", &[("q", q.to_owned())], META_TIMEOUT).await?;
         Ok(dto.into())
     }
 
-    /// L'artista con questo nome: brani popolari e tutta la discografia.
+    /// The artist with this name: popular tracks and the whole discography.
     pub async fn meta_artist_named(&self, name: &str) -> Result<MetaArtistPage, AppError> {
         let dto: MetaArtistPageDto =
             self.get_json_within("/v1/meta/artists", &[("name", name.to_owned())], META_TIMEOUT).await?;
         Ok(dto.into())
     }
 
-    /// Porta un artista del catalogo nel server e restituisce il suo identificatore (UUID).
+    /// Brings a catalog artist into the server and returns its identifier (UUID).
     pub async fn open_meta_artist(&self, id: u64) -> Result<Uuid, AppError> {
         let response = self
             .http
@@ -291,7 +291,7 @@ impl ApiClient {
         Err(api_error(status, code))
     }
 
-    /// Album o playlist del catalogo (`album/123`, `playlist/456`) con i loro brani.
+    /// Catalog album or playlist (`album/123`, `playlist/456`) with its tracks.
     async fn meta_list(&self, id: &str) -> Result<SourcePlaylistPage, AppError> {
         let (kind, number) = id.split_once('/').ok_or(AppError::InvalidResponse)?;
         if !matches!(kind, "album" | "playlist")
@@ -305,7 +305,7 @@ impl ApiClient {
         Ok(dto.into_page(kind))
     }
 
-    /// I brani di una playlist esterna. L'identificatore è quello ricevuto dal server.
+    /// The tracks of an external playlist. The identifier is the one received from the server.
     pub async fn source_playlist(
         &self,
         source: SourceKind,
@@ -332,9 +332,9 @@ impl ApiClient {
         Err(api_error(status, code))
     }
 
-    /// Porta un risultato della ricerca esterna nel catalogo e restituisce il brano. `source` è uno
-    /// di `youtube`, `soundcloud`, `bandcamp`; l'identificatore è quello ricevuto dal server.
-    /// Con `video` (solo per il catalogo ufficiale) il server scarica il videoclip insieme all'audio.
+    /// Brings an external search result into the catalog and returns the track. `source` is one
+    /// of `youtube`, `soundcloud`, `bandcamp`; the identifier is the one received from the server.
+    /// With `video` (only for the official catalog) the server downloads the music video along with the audio.
     pub async fn import_source(
         &self,
         source: SourceKind,
@@ -372,8 +372,8 @@ impl ApiClient {
         Err(api_error(status, code))
     }
 
-    /// Byte di una copertina, dal backend (`/v1/cover`): il client non apre connessioni verso Deezer
-    /// o Internet Archive. L'indirizzo originale si controlla comunque prima di chiederlo, al massimo
+    /// Bytes of a cover, from the backend (`/v1/cover`): the client opens no connections to Deezer
+    /// or Internet Archive. The original address is checked anyway before asking for it, at most
     /// `MAX_COVER_BYTES`.
     pub async fn cover(&self, url: &str) -> Result<Vec<u8>, AppError> {
         let parsed = reqwest::Url::parse(url).map_err(|_| AppError::InvalidResponse)?;
@@ -407,7 +407,7 @@ impl ApiClient {
         self.get_json(&format!("/v1/catalog/albums/{id}"), &[]).await
     }
 
-    /// Un solo brano del catalogo: la jam lo usa per i brani della coda condivisa che non ha.
+    /// A single catalog track: the jam uses it for the tracks of the shared queue it does not have.
     pub async fn track(&self, id: Uuid) -> Result<Track, AppError> {
         self.get_json(&format!("/v1/catalog/tracks/{id}"), &[]).await
     }
@@ -419,8 +419,8 @@ impl ApiClient {
         Ok(self.absolute(signed))
     }
 
-    /// Un brano o un videoclip appena importati li serve il backend stesso, dal suo disco: l'URL è
-    /// relativo alla sua origine.
+    /// A track or music video just imported is served by the backend itself, from its disk: the URL is
+    /// relative to its origin.
     fn absolute(&self, mut signed: SignedUrl) -> SignedUrl {
         if signed.url.starts_with("/v1/") {
             signed.url = format!("{}{}", self.base, signed.url);
@@ -428,19 +428,19 @@ impl ApiClient {
         signed
     }
 
-    /// Testi del brano. `found: false` se non ci sono; `503` se il backend non raggiunge LRCLIB.
+    /// Track lyrics. `found: false` if there are none; `503` if the backend cannot reach LRCLIB.
     pub async fn lyrics(&self, id: Uuid) -> Result<Lyrics, AppError> {
         self.get_json_within(&format!("/v1/tracks/{id}/lyrics"), &[], LYRICS_TIMEOUT).await
     }
 
-    /// URL firmato del videoclip; `404` se il brano non ne ha.
+    /// Signed URL of the music video; `404` if the track has none.
     #[cfg(feature = "video")]
     pub async fn video_url(&self, id: Uuid) -> Result<SignedUrl, AppError> {
         let signed = self.get_json_within(&format!("/v1/tracks/{id}/video-url"), &[], VIDEO_TIMEOUT).await?;
         Ok(self.absolute(signed))
     }
 
-    /// Chiede al server di preparare il videoclip di un brano che suonerà presto: risponde subito.
+    /// Asks the server to prepare the music video of a track that will play soon: it answers at once.
     pub async fn prepare_video(&self, id: Uuid) -> Result<(), AppError> {
         let response = self
             .http
@@ -457,8 +457,8 @@ impl ApiClient {
         Err(api_error(status, code))
     }
 
-    /// Una richiesta con il login (profili, amici, attività). `None` per le risposte senza corpo
-    /// (`204`); `401` diventa `AuthExpired`, i messaggi del server restano quelli di `api_error`.
+    /// A request with the login (profiles, friends, activity). `None` for replies without a body
+    /// (`204`); `401` becomes `AuthExpired`, the server's messages stay those of `api_error`.
     pub(crate) async fn authed<T: DeserializeOwned>(
         &self,
         method: reqwest::Method,
@@ -488,7 +488,7 @@ impl ApiClient {
         }
     }
 
-    /// L'utente del token di Clerk. `401` vuol dire token scaduto o revocato.
+    /// The user of the Clerk token. `401` means an expired or revoked token.
     pub async fn me(&self, access_token: &str) -> Result<Me, AppError> {
         let response = self
             .http
@@ -517,7 +517,7 @@ impl ApiClient {
             .await
             .map_err(|e| AppError::from_http(&e))?;
         let status = response.status();
-        // 202: il server sta ricodificando la versione chiesta; `Retry-After` dice quando riprovare.
+        // 202: the server is re-encoding the requested version; `Retry-After` says when to retry.
         if status == StatusCode::ACCEPTED {
             let seconds = response
                 .headers()
@@ -535,19 +535,19 @@ impl ApiClient {
         Err(api_error(status, code))
     }
 
-    /// Apre l'ascolto progressivo: controlla subito lo stato (401 e 403 vogliono dire URL scaduto),
-    /// poi un task continua a scaricare nel buffer. Torna appena ci sono i byte per partire.
+    /// Opens the progressive listening: it checks the state at once (401 and 403 mean the URL has expired),
+    /// then a task keeps downloading into the buffer. It returns as soon as there are bytes to start with.
     ///
-    /// Si chiede il file con `Range: bytes=0-`: se il server risponde 206, il buffer conosce la
-    /// lunghezza e un seek lontano fa ripartire il download da quel punto (vedi `player::stream`).
+    /// The file is requested with `Range: bytes=0-`: if the server answers 206, the buffer knows the
+    /// length and a far seek restarts the download from that point (see `player::stream`).
     #[cfg(test)]
     pub async fn open_stream(&self, url: &SignedUrl) -> Result<StreamBuffer, AppError> {
         self.open_stream_held(url, None).await
     }
 
-    /// Come [`Self::open_stream`], ma con `hold` il download si ferma dopo quei byte iniziali e
-    /// riparte con `StreamBuffer::release`: serve a tenere pronta la testata di un brano che
-    /// forse si ascolterà, senza scaricarlo tutto.
+    /// As [`Self::open_stream`], but with `hold` the download stops after those first bytes and
+    /// restarts with `StreamBuffer::release`: it keeps the head of a track ready that
+    /// may be listened to, without downloading all of it.
     pub async fn open_stream_held(
         &self,
         url: &SignedUrl,
@@ -573,8 +573,8 @@ impl ApiClient {
         if buffer.ready(PREFETCH_BYTES).await { Ok(buffer) } else { Err(AppError::Network) }
     }
 
-    /// Prima risposta dello stream e URL finale da usare per i salti. Prova prima il nodo già
-    /// risolto; se non risponde, torna all'URL originale.
+    /// First reply of the stream and final URL to use for the jumps. It tries the node already
+    /// resolved first; if it does not answer, it goes back to the original URL.
     async fn first_response(&self, original: &str) -> Result<(reqwest::Response, reqwest::Url), AppError> {
         let cached = self.resolved.lock().ok().and_then(|map| map.get(original).cloned());
         if let Some(node) = cached {
@@ -606,12 +606,12 @@ impl ApiClient {
         range_request(&self.download, url, from).await
     }
 
-    /// Cerca su Internet Archive la musica che non è nel catalogo.
+    /// Searches Internet Archive for music that is not in the catalog.
     pub async fn discover(&self, q: &str) -> Result<DiscoverPage, AppError> {
         self.get_json("/v1/discover", &[("q", q.to_owned())]).await
     }
 
-    /// Una pagina (da 1) degli album con licenza libera di una libreria di Archive.
+    /// A page (from 1) of the albums with a free licence of an Archive library.
     pub async fn library(&self, identifier: &str, page: u32) -> Result<LibraryPage, AppError> {
         if !is_archive_identifier(identifier) {
             return Err(AppError::InvalidResponse);
@@ -619,7 +619,7 @@ impl ApiClient {
         self.get_json(&format!("/v1/libraries/{identifier}"), &[("page", page.to_string())]).await
     }
 
-    /// Porta un item di Archive nel catalogo e restituisce i suoi brani, pronti da suonare.
+    /// Brings an Archive item into the catalog and returns its tracks, ready to play.
     pub async fn import_item(&self, identifier: &str) -> Result<DiscoverImport, AppError> {
         if !is_archive_identifier(identifier) {
             return Err(AppError::InvalidResponse);
@@ -661,15 +661,15 @@ impl ApiClient {
         Ok(bytes.to_vec())
     }
 
-    /// L'ultima release dell'app, come la legge il backend.
+    /// The app's latest release, as the backend reads it.
     pub async fn latest_release(&self) -> Result<update::Release, AppError> {
         self.get_json("/v1/app/release", &[]).await
     }
 
-    /// Scarica un file dell'ultima release dal backend nella cartella `dir` e restituisce il
-    /// percorso. Il nome viene dal server e finisce in un percorso e in un URL: se non è un nome di
-    /// file semplice (`update::safe_asset_name`) la risposta non è valida. Un file con lo stesso nome
-    /// (la stessa release scaricata due volte) si sostituisce.
+    /// Downloads a file of the latest release from the backend into the folder `dir` and returns the
+    /// path. The name comes from the server and ends up in a path and in a URL: if it is not a simple file
+    /// name (`update::safe_asset_name`) the reply is not valid. A file with the same name
+    /// (the same release downloaded twice) is replaced.
     pub async fn download_release(
         &self,
         asset: &update::Asset,
@@ -684,10 +684,10 @@ impl ApiClient {
     }
 
     /// Scarica `url` a blocchi in un file temporaneo unico dentro `dir`, contando i byte
-    /// (`progress`) e calcolando lo SHA-256 mentre scrive. Se il collegamento cade a metà e il
-    /// server aveva detto la lunghezza, riparte da dove era arrivato (`Range`), poche volte. Il
-    /// file resta temporaneo: chi lo vuole lo pubblica con `TempFile::publish`, altrimenti si
-    /// toglie da solo (errore, annullo).
+    /// (`progress`) and computing the SHA-256 while it writes. If the connection falls halfway and the
+    /// server had said the length, it restarts from where it had reached (`Range`), a few times. The
+    /// file stays temporary: whoever wants it publishes it with `TempFile::publish`, otherwise it is
+    /// removed by itself (error, cancel).
     pub(crate) async fn fetch_into(
         &self,
         url: &str,
@@ -725,14 +725,14 @@ impl ApiClient {
         }
         file.flush().await.map_err(io_error)?;
         drop(file);
-        // Una risposta chiusa prima della lunghezza annunciata senza errore non è un file intero.
+        // A reply closed before the announced length without an error is not a whole file.
         if total.is_some_and(|total| total != written) {
             return Err(AppError::Network);
         }
         Ok(Fetched { temp, size: written, sha256: crate::offline::hex(&hasher.finalize()) })
     }
 
-    /// Riapre `url` da `from`: solo se il server risponde `206` proprio da quel byte.
+    /// Reopens `url` from `from`: only if the server answers `206` from exactly that byte.
     async fn resume(&self, url: &str, from: u64) -> Option<reqwest::Response> {
         let parsed = reqwest::Url::parse(url).ok()?;
         let response = range_request(&self.download, parsed, usize::try_from(from).ok()?).await.ok()?;
@@ -741,7 +741,7 @@ impl ApiClient {
     }
 }
 
-/// Un file scaricato, ancora temporaneo, con quanto pesa e il suo SHA-256 (esadecimale).
+/// A downloaded file, still temporary, with its weight and its SHA-256 (hexadecimal).
 #[derive(Debug)]
 pub(crate) struct Fetched {
     pub(crate) temp: TempFile,
@@ -757,7 +757,7 @@ async fn range_request(
     client.get(url).header(reqwest::header::RANGE, format!("bytes={from}-")).send().await
 }
 
-/// Inizio e lunghezza totale da `Content-Range: bytes 100-199/1000`.
+/// Start and total length from `Content-Range: bytes 100-199/1000`.
 fn content_range(response: &reqwest::Response) -> Option<(u64, u64)> {
     let value = response.headers().get(reqwest::header::CONTENT_RANGE)?.to_str().ok()?;
     parse_content_range(value)
@@ -769,8 +769,8 @@ fn parse_content_range(value: &str) -> Option<(u64, u64)> {
     Some((start.trim().parse().ok()?, total.trim().parse().ok()?))
 }
 
-/// Scrive nel buffer la risposta in corso e, quando il buffer lo chiede, ne apre un'altra da un
-/// altro punto del file (un seek lontano, poi i buchi rimasti).
+/// Writes the response in progress into the buffer and, when the buffer asks, opens another one from a
+/// another point of the file (a distant seek, then the holes left).
 async fn download_into(
     client: reqwest::Client,
     target: reqwest::Url,
@@ -784,16 +784,16 @@ async fn download_into(
         _ => Some(0),
     };
     let mut received: u64 = 0;
-    // Una risposta caduta a metà (il server chiude una connessione ferma da un po') si riapre dal
-    // punto in cui era arrivata, poche volte.
+    // A response dropped halfway (the server closes a connection idle for a while) is reopened from the
+    // point where it had arrived, a few times.
     let mut reopened = 0;
     loop {
         let Some(at) = offset else {
             writer.fail();
             return;
         };
-        // Testata pronta e nessun ascolto in corso: si aspetta, senza consumare banda e senza sondare (si
-        // sveglia a `release`, `cancel` o quando un lettore va oltre la testata).
+        // Header ready and no listening in progress: one waits, without using bandwidth and without polling (it
+        // wakes on `release`, `cancel` or when a reader goes beyond the head).
         writer.wait_released().await;
         if writer.is_cancelled() {
             return;
@@ -803,15 +803,15 @@ async fn download_into(
             () = writer.jump_requested() => None,
         };
         let next = match arrival {
-            // Un lettore chiede un salto: un blocco vuoto fa dire al buffer dove andare.
+            // A reader asks for a jump: an empty block tells the buffer where to go.
             None => match writer.write_at(at, &[]) {
                 Next::Continue(_) => continue,
                 other => other,
             },
             Some(Ok(Some(chunk))) => {
                 received += chunk.len() as u64;
-                // Senza lunghezza annunciata il limite si controlla qui; con i salti un byte può
-                // arrivare due volte, quindi il conto ha margine.
+                // Without an announced length the limit is checked here; with jumps a byte can
+                // arrive twice, so the count has a margin.
                 if received > 2 * MAX_STREAM_BYTES {
                     writer.fail();
                     return;
@@ -859,16 +859,16 @@ fn check_storage_status(status: StatusCode) -> Result<(), AppError> {
     }
 }
 
-/// Identificatore di Archive: viene dal server ma finisce in un percorso, quindi si ricontrolla.
+/// Archive identifier: it comes from the server but ends up in a path, so it is checked again.
 fn is_archive_identifier(identifier: &str) -> bool {
     identifier.len() <= 100
         && identifier.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
         && identifier.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// Messaggio in italiano per ogni codice stabile di docs/BACKEND.md.
-/// Un identificatore delle fonti esterne sta in un solo segmento di percorso: lettere, cifre, `-`
-/// e `_`, al massimo 200 caratteri.
+/// Message in Italian for each stable code of docs/BACKEND.md.
+/// An external source identifier sits in a single path segment: letters, digits, `-`
+/// and `_`, at most 200 characters.
 fn is_opaque_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 200
@@ -966,13 +966,13 @@ mod tests {
         assert_eq!(parse_content_range("bytes */1000"), None);
     }
 
-    /// Server HTTP minimo con `Range` e un redirect, lento come un nodo di archive.org: `/orig`
-    /// manda a `/node`, che serve `SIZE` byte con il byte `i` uguale a `i % 251`.
+    /// Minimal HTTP server with `Range` and a redirect, slow like an archive.org node: `/orig`
+    /// sends to `/node`, which serves `SIZE` bytes with byte `i` equal to `i % 251`.
     ///
-    /// Fa anche da backend per i test sul rinnovo degli URL firmati: `/v1/tracks/{id}/stream-url`
-    /// e `/download-url` rispondono con un URL «firmato» (`/signed/node` o `/signed/small`, con
-    /// `sig=N` numerato in ordine di emissione, nessun token vero) che lo storage finto accetta o
-    /// rifiuta con 403 secondo il `Mode`.
+    /// Also acts as a backend for the tests on the renewal of signed URLs: `/v1/tracks/{id}/stream-url`
+    /// and `/download-url` answer with a "signed" URL (`/signed/node` or `/signed/small`, with
+    /// `sig=N` numbered in the order of issue, no real token) that the fake storage accepts or
+    /// rejects with 403 according to the `Mode`.
     mod range_server {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::{Arc, Mutex};
@@ -982,20 +982,20 @@ mod tests {
         use tokio::net::TcpListener;
 
         pub const SIZE: usize = 8 * 1024 * 1024;
-        /// Dimensione del file piccolo (`/signed/small`) dei test di download.
+        /// Size of the small file (`/signed/small`) of the download tests.
         pub const SMALL: usize = 4096;
         const CHUNK: usize = 16 * 1024;
-        /// 16 KB ogni 10 ms: circa 1,6 MB/s, tutto il file in cinque secondi.
+        /// 16 KB every 10 ms: about 1.6 MB/s, the whole file in five seconds.
         const PAUSE: Duration = Duration::from_millis(10);
 
-        /// Come lo storage finto tratta gli URL `/signed/...`.
+        /// How the fake storage treats the `/signed/...` URLs.
         #[derive(Clone, Copy, PartialEq, Eq)]
         pub enum Mode {
-            /// Tutti gli URL firmati sono validi.
+            /// All the signed URLs are valid.
             Fresh,
-            /// Il primo URL emesso (`sig=1`) è già scaduto: 403 una volta, poi tutto va.
+            /// The first URL issued (`sig=1`) has already expired: 403 once, then everything goes.
             Expiring,
-            /// Ogni URL firmato è scaduto: 403 sempre.
+            /// Every signed URL has expired: 403 always.
             Expired,
         }
 
@@ -1003,8 +1003,8 @@ mod tests {
             (i % 251) as u8
         }
 
-        /// Avvia il server e restituisce la base e l'elenco delle richieste (`percorso inizio`,
-        /// senza query).
+        /// Starts the server and returns the base and the list of requests (`path start`,
+        /// without query).
         pub async fn start() -> (String, Arc<Mutex<Vec<String>>>) {
             start_with(Mode::Fresh).await
         }
@@ -1059,7 +1059,7 @@ mod tests {
                 .and_then(|range| range.trim().trim_end_matches('-').parse().ok())
                 .unwrap_or(0);
             log.lock().unwrap().push(format!("{path} {start}"));
-            // Il «backend»: emette un URL firmato numerato (stream o download).
+            // The "backend": issues a numbered signed URL (stream or download).
             if path.starts_with("/v1/tracks/")
                 && (path.ends_with("/stream-url") || path.ends_with("/download-url"))
             {
@@ -1076,7 +1076,7 @@ mod tests {
                 reply_with(&mut socket, "200 OK", json.as_bytes(), "application/json").await;
                 return;
             }
-            // Lo «storage»: rifiuta gli URL firmati scaduti come fa il vero (403).
+            // The "storage": rejects expired signed URLs as the real one does (403).
             let mut path = path;
             if let Some(rest) = path.strip_prefix("/signed") {
                 let sig: usize = query.strip_prefix("sig=").and_then(|n| n.parse().ok()).unwrap_or(0);
@@ -1090,8 +1090,8 @@ mod tests {
                     return;
                 }
                 if rest == "/cut" {
-                    // Il file piccolo, ma la prima richiesta cade dopo 1024 byte con la lunghezza intera
-                    // già annunciata; una richiesta `Range` da un punto più avanti serve il resto.
+                    // The small file, but the first request drops after 1024 bytes with the full length
+                    // already announced; a `Range` request from a later point serves the rest.
                     let body: Vec<u8> = (0..SMALL).map(byte).collect();
                     let head = if start == 0 {
                         format!("HTTP/1.1 200 OK\r\ncontent-length: {SMALL}\r\nconnection: close\r\n\r\n")
@@ -1221,9 +1221,9 @@ mod tests {
         assert!(all.iter().enumerate().all(|(i, &b)| b == range_server::byte(i)));
     }
 
-    // ---------- Rinnovo degli URL firmati e download, end-to-end su un server locale ----------
+    // ---------- Renewal of signed URLs and downloads, end-to-end on a local server ----------
 
-    /// Richieste fatte al server finto al percorso che finisce con `suffix` (un elemento per richiesta).
+    /// Requests made to the fake server at the path that ends with `suffix` (one item per request).
     fn hits(log: &Mutex<Vec<String>>, suffix: &str) -> usize {
         log.lock()
             .unwrap()
@@ -1232,7 +1232,7 @@ mod tests {
             .count()
     }
 
-    /// Cartella vuota e unica per un test di download; la rimuove alla fine.
+    /// Empty and unique folder for a download test; it removes it at the end.
     struct ScratchDir(std::path::PathBuf);
 
     impl ScratchDir {
@@ -1262,7 +1262,7 @@ mod tests {
         let id = uuid::Uuid::from_u128(1);
         let stream = crate::api::stream_audio(api, id, crate::api::Quality::Lossless).await.unwrap();
         stream.cancel();
-        // Un URL nuovo a ogni tentativo: il primo storage lo rifiuta (403), il secondo serve.
+        // A new URL at each attempt: the first storage rejects it (403), the second serves.
         assert_eq!(hits(&log, "/stream-url"), 2);
         assert_eq!(hits(&log, "/signed/node"), 2);
         let order: Vec<String> = log
@@ -1281,7 +1281,7 @@ mod tests {
         let id = uuid::Uuid::from_u128(1);
         let result = crate::api::stream_audio(api, id, crate::api::Quality::Lossless).await;
         assert!(matches!(result, Err(AppError::UrlExpired)));
-        // Si prova una sola volta in più; poi l'errore arriva a chi chiama, senza altri tentativi.
+        // It is tried only once more; then the error reaches the caller, without other attempts.
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(hits(&log, "/stream-url"), 2);
         assert_eq!(hits(&log, "/signed/node"), 2);
@@ -1294,7 +1294,7 @@ mod tests {
         let track = crate::api::models::fixtures::track(1);
         let dir = ScratchDir::new();
         std::fs::create_dir_all(&dir.0).unwrap();
-        // Il file con il nome che avrebbe il download (titolo + formato dato dal server) esiste già.
+        // The file with the name the download would have (title + format given by the server) already exists.
         std::fs::write(dir.0.join("Brano 1.flac"), b"mio").unwrap();
 
         let progress = Arc::new(Progress::default());
@@ -1316,7 +1316,7 @@ mod tests {
         assert_eq!(std::fs::read(dir.0.join("Brano 1.flac")).unwrap(), b"mio");
         let expected: Vec<u8> = (0..range_server::SMALL).map(range_server::byte).collect();
         assert_eq!(std::fs::read(&done.path).unwrap(), expected);
-        // Peso e SHA-256 sono quelli del file scritto, e il progresso ha contato tutti i byte.
+        // Weight and SHA-256 are those of the written file, and the progress counted all the bytes.
         assert_eq!(done.size, range_server::SMALL as u64);
         assert_eq!(done.sha256, sha256_hex(&expected));
         assert_eq!(done.format, "flac");
@@ -1352,8 +1352,8 @@ mod tests {
         assert_eq!(dir.files(), ["Brano 1.flac"]);
     }
 
-    /// BACKLOG 3: il temporaneo ha un nome unico e non è `<titolo>.part`. Un file dell'utente con quel
-    /// nome (il vecchio temporaneo di «Brano 1 (2).flac») non si tronca, e a download finito non resta
+    /// BACKLOG 3: the temporary file has a unique name and is not `<title>.part`. A user's file with that
+    /// name (the old temporary of "Brano 1 (2).flac") is not truncated, and once the download ends it does not remain
     /// nessun temporaneo.
     #[tokio::test]
     async fn a_download_never_touches_an_unrelated_part_file_and_leaves_no_temp() {
@@ -1379,22 +1379,22 @@ mod tests {
         assert_eq!(dir.files(), ["Brano 1 (2).flac", "Brano 1 (2).part", "Brano 1.flac"]);
     }
 
-    /// Un download interrotto (il futuro lasciato cadere, come un annullo) toglie il suo temporaneo.
+    /// An interrupted download (the future dropped, as on a cancel) removes its temporary file.
     #[tokio::test]
     async fn a_dropped_download_removes_its_temp_file() {
         let (base, _) = range_server::start().await;
         let api = ApiClient::new(&base).unwrap();
         let dir = ScratchDir::new();
         std::fs::create_dir_all(&dir.0).unwrap();
-        // `/node` è il file lento da 8 MiB: dopo 200 ms è a metà.
+        // `/node` is the slow 8 MiB file: after 200 ms it is halfway.
         let (url, progress) = (format!("{base}/signed/node?sig=9"), Progress::default());
         let download = api.fetch_into(&url, &dir.0, &progress);
         assert!(tokio::time::timeout(Duration::from_millis(200), download).await.is_err());
         assert_eq!(dir.files(), Vec::<String>::new());
     }
 
-    /// Il collegamento cade a metà: il download riparte da dove era arrivato e il file è intero, con
-    /// lo SHA-256 giusto.
+    /// The connection falls halfway: the download restarts from where it had reached and the file is whole, with
+    /// the right SHA-256.
     #[tokio::test]
     async fn a_dropped_connection_resumes_from_where_it_was() {
         let (base, log) = range_server::start().await;
@@ -1416,7 +1416,7 @@ mod tests {
         assert_eq!(progress.received(), range_server::SMALL as u64);
     }
 
-    /// Una release con un nome che non è un file semplice non scrive niente e non fa richieste.
+    /// A release with a name that is not a simple file writes nothing and makes no requests.
     #[tokio::test]
     async fn a_release_asset_with_a_path_in_its_name_is_refused() {
         let (base, log) = range_server::start().await;

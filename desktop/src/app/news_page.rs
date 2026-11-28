@@ -1,4 +1,4 @@
-//! «Novità»: the releases of the artists you follow, as in the Iced client (`client/src/ui/pages/news.rs`).
+//! «Novità»: the releases of the artists you follow.
 //! The title and a line that says how many releases wait; the followed artists on a shelf of the fluid tile
 //! grid; then *Da ascoltare* (releases that arrived after the last visit, with «Nuovo») and *Uscite
 //! precedenti*, rows with the cover, kind, artist and date that flow into columns (desktop v2 §2). Without
@@ -7,7 +7,7 @@
 //!
 //! The catalogue does not know who follows whom: the list is the library domain's feed
 //! (`LibraryView::feed.news`), made from the Home's recent tracks. Leaving the page, `Shell` sends
-//! `LibraryCmd::MarkNewsSeen`, as the Iced client does.
+//! `LibraryCmd::MarkNewsSeen`.
 
 use std::sync::Arc;
 
@@ -105,7 +105,7 @@ fn plan(
     rows
 }
 
-/// «1 uscita da ascoltare», the Iced client's line.
+/// «1 uscita da ascoltare».
 fn subline(following: usize, unread: usize) -> String {
     match (following, unread) {
         (0, _) => "Segui gli artisti per ritrovare qui le loro uscite".to_owned(),

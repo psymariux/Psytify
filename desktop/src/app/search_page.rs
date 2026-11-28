@@ -2,7 +2,7 @@
 //! bar field, which sends `CatalogCmd::SearchInput` on every key: the 300 ms wait and «the last search wins»
 //! belong to the core, there is no timer here.
 //!
-//! Three groups, in the Iced client's order: the official catalogue (the artists of `search.artists`, which a
+//! Three groups, in this order: the official catalogue (the artists of `search.artists`, which a
 //! click brings to the server and opens; the tracks of `search.sources`, which the server imports on play;
 //! the albums and playlists of `search.playlists`, which open `source_page`), what the server already has
 //! (`search.results`: tracks, then artists and albums that open their pages) and Internet Archive
@@ -53,12 +53,12 @@ use crate::core_model::{Changed, CoreModel};
 use crate::format;
 use crate::theme::{TypeStyle, col, dp};
 
-/// Brani del catalogo ufficiale mostrati: come nel client Iced, gli altri si trovano affinando la ricerca.
+/// Official catalogue tracks shown: the others are found by refining the search.
 const OFFICIAL_TRACKS: usize = 12;
-/// Artisti, album e playlist mostrati per sezione (il client Iced ne mostra una fila di copertine).
+/// Artists, albums and playlists shown per section.
 const CARDS: usize = 6;
 
-/// Le sezioni, per le intestazioni.
+/// The sections, for the headers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Section {
     OfficialArtists,
@@ -85,7 +85,7 @@ impl Section {
         }
     }
 
-    /// Il conteggio accanto al titolo: brani, artisti, album o playlist.
+    /// The count next to the title: tracks, artists, albums or playlists.
     fn count(self, count: usize) -> String {
         match self {
             Self::OfficialArtists | Self::ServerArtists if count == 1 => "1 artista".to_owned(),
@@ -100,19 +100,19 @@ impl Section {
         match self {
             Self::Official => "Cerco nel catalogo ufficiale…",
             Self::Archive => "Cerco su Internet Archive…",
-            // Solo le sezioni dei brani aspettano: artisti, album e playlist compaiono quando ci sono.
+            // Only the track sections wait: artists, albums and playlists appear when there are some.
             _ => "Cerco…",
         }
     }
 }
 
-/// Una riga della lista, nell'ordine in cui si disegna. Gli indici sono nelle liste del core.
+/// A row of the list, in the order it is drawn. The indices are into the core's lists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Row {
     Heading(Section, usize),
-    /// La sezione sta ancora cercando.
+    /// The section is still searching.
     Waiting(Section),
-    /// La sezione non è arrivata: il testo dell'errore.
+    /// The section did not arrive: the error text.
     Problem(Section, String),
     Source(usize),
     Track(usize),
@@ -177,7 +177,7 @@ fn flow_rows(rows: Vec<Row>, flow: Flow) -> Vec<Row> {
     out
 }
 
-/// Quanti artisti, album e playlist ci sono oltre ai brani (già tagliati a [`CARDS`] da chi li conta).
+/// Artists, albums and playlists besides the tracks (already cut to [`CARDS`] by the counter).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Cards {
     official_artists: usize,
@@ -187,21 +187,21 @@ struct Cards {
     server_albums: usize,
 }
 
-/// Cosa mostra la pagina.
+/// What the page shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Screen {
-    /// Nessuna ricerca.
+    /// No search.
     Idle,
-    /// I brani del server stanno arrivando (le altre sezioni aspettano: come nel client Iced).
+    /// The server's tracks are arriving (the other sections wait).
     Loading,
-    /// Nessuna riga e il server ha dato un errore.
+    /// No row and the server gave an error.
     Failed(String),
-    /// Nessun risultato da nessuna parte.
+    /// No result anywhere.
     Empty,
     List,
 }
 
-/// Lo stato di un caricamento, ridotto a ciò che serve al piano: quanti elementi ci sono.
+/// The state of a load, reduced to what the plan needs: how many items there are.
 #[derive(Clone, Copy, Debug)]
 enum Counted<'a> {
     Idle,
@@ -233,7 +233,7 @@ struct Plan {
     rows: Vec<Row>,
 }
 
-/// Le righe di una sezione semplice (titolo e righe), se ce n'è almeno una.
+/// The rows of a simple section (title and rows), if there is at least one.
 fn cards(rows: &mut Vec<Row>, which: Section, count: usize, row: fn(usize) -> Row) {
     if count > 0 {
         rows.push(Row::Heading(which, count));
@@ -246,7 +246,7 @@ fn plan(results: Counted, sources: Counted, discover: Counted) -> Plan {
     plan_all(results, sources, discover, Cards::default())
 }
 
-/// Quali righe mostrare e in che ordine. Pura: dipende solo dai caricamenti e dai conteggi.
+/// Which rows to show and in what order. Pure: it depends only on the loads and the counts.
 fn plan_all(results: Counted, sources: Counted, discover: Counted, extra: Cards) -> Plan {
     match results {
         Counted::Idle => return Plan { screen: Screen::Idle, rows: Vec::new() },
@@ -254,8 +254,8 @@ fn plan_all(results: Counted, sources: Counted, discover: Counted, extra: Cards)
         Counted::Ready(_) | Counted::Failed(_) => {}
     }
     let mut rows = Vec::new();
-    // Il catalogo ufficiale per primo: è dove si scopre; poi ciò che il server suona subito. Come nel
-    // client Iced, mentre i brani ufficiali arrivano non si mostrano i suoi artisti.
+    // The official catalogue first: it is where discovery happens; then what the server plays at once. As in the
+    // While the official tracks arrive its artists are not shown.
     if !matches!(sources, Counted::Loading) {
         cards(&mut rows, Section::OfficialArtists, extra.official_artists, Row::OfficialArtist);
     }
@@ -279,7 +279,7 @@ fn plan_all(results: Counted, sources: Counted, discover: Counted, extra: Cards)
     Plan { screen, rows }
 }
 
-/// Intestazione e righe di una sezione che arriva da una fonte esterna, o il suo stato.
+/// Header and rows of a section that comes from an external source, or its state.
 fn section(rows: &mut Vec<Row>, which: Section, load: Counted, shown: usize, row: fn(usize) -> Row) {
     match load {
         Counted::Idle | Counted::Ready(0) => {}
@@ -298,7 +298,7 @@ fn section(rows: &mut Vec<Row>, which: Section, load: Counted, shown: usize, row
     }
 }
 
-/// I testi di una riga di brano, pronti: la view non formatta né alloca stringhe per riga a ogni disegno.
+/// The texts of a track row, ready: the view does not format or allocate strings per row at every draw.
 struct RowText {
     title: SharedString,
     artist: SharedString,
@@ -317,7 +317,7 @@ impl RowText {
     }
 }
 
-/// «Artista» per il catalogo ufficiale, «YouTube · Artista» per le altre fonti.
+/// «Artista» for the official catalogue, «YouTube · Artista» for the other sources.
 fn source_detail(item: &SourceItem) -> String {
     if item.source == SourceKind::Deezer {
         item.artist.clone()
@@ -358,7 +358,7 @@ fn archive_data(position: usize, item: &DiscoverItem) -> SourceData {
     }
 }
 
-/// I testi di una riga di artista, album o playlist, pronti.
+/// The texts of an artist, album or playlist row, ready.
 #[derive(Clone, Debug, PartialEq)]
 struct Card {
     title: SharedString,
@@ -415,18 +415,18 @@ pub struct SearchPage {
     downloads: Arc<DownloadsView>,
     external: Arc<ExternalView>,
     liked: Arc<HashSet<Uuid>>,
-    /// Il brano in corso e come mostrarlo, per l'equalizzatore sulla sua riga.
+    /// The playing track and how to show it, for the equaliser on its row.
     now: Option<(Uuid, PlayState)>,
     screen: Screen,
     rows: Vec<Row>,
-    /// Per ogni riga, in parallelo a `rows`: il conteggio delle intestazioni («3 brani»), vuoto per le
-    /// altre. Insieme ai testi di ogni riga si rifà quando i risultati cambiano.
+    /// For each row, in parallel to `rows`: the header count («3 brani»), empty for the
+    /// others. Together with each row's texts it is rebuilt when the results change.
     labels: Vec<SharedString>,
     tracks: Vec<RowText>,
     sources: Vec<SourceData>,
     archive: Vec<SourceData>,
-    /// Gli album e le playlist del catalogo ufficiale (al più [`CARDS`] per specie) e i testi di ogni riga
-    /// di artista, album e playlist.
+    /// The albums and playlists of the official catalogue (at most [`CARDS`] per kind) and the texts of each row
+    /// of artist, album and playlist.
     official_albums: Vec<SourcePlaylist>,
     official_playlists: Vec<SourcePlaylist>,
     cards: Vec<(Row, Card)>,
@@ -434,9 +434,9 @@ pub struct SearchPage {
     frame: PageFrame,
     /// The enter step of each row (a heading starts one).
     sections: Vec<usize>,
-    /// `--play-first-official`: suona il primo brano del catalogo ufficiale appena c'è, una volta sola.
+    /// `--play-first-official`: plays the first track of the official catalogue as soon as it is there, once only.
     autoplay_first: bool,
-    /// Il posto dell'equalizzatore del brano in corso: lo dipinge `Shell` (BACKLOG 23).
+    /// The equaliser spot of the playing track: `Shell` paints it (BACKLOG 23).
     spot: PlayingSpot,
     _changes: Subscription,
 }
@@ -444,7 +444,7 @@ pub struct SearchPage {
 impl gpui::EventEmitter<PageEvent> for SearchPage {}
 
 impl SearchPage {
-    /// Il posto dell'equalizzatore di questa vista, per lo strato di `Shell`.
+    /// The equaliser spot of this view, for `Shell`'s layer.
     pub fn spot(&self) -> PlayingSpot {
         self.spot.clone()
     }
@@ -514,7 +514,7 @@ impl SearchPage {
             }
         }
         if changed.external && !Arc::ptr_eq(&snapshot.external, &self.external) {
-            // Solo le importazioni cambiano ciò che si vede qui: gli eventi e le schede degli artisti no.
+            // Only the imports change what is seen here: the events and the artist cards do not.
             dirty |= snapshot.external.imports != self.external.imports;
             self.external = Arc::clone(&snapshot.external);
         }
@@ -539,7 +539,7 @@ impl SearchPage {
         }
     }
 
-    /// Con `--play-first-official`, il primo risultato del catalogo ufficiale parte appena arriva.
+    /// With `--play-first-official`, the first result of the official catalogue starts as soon as it arrives.
     fn autoplay(&mut self, cx: &gpui::App) {
         if self.autoplay_first && !self.sources.is_empty() {
             self.autoplay_first = false;
@@ -635,15 +635,15 @@ impl SearchPage {
         self.catalog.search.results.ready()
     }
 
-    /// Doppio clic o Invio su un brano del server: la coda diventa i risultati e parte la riga `start`.
+    /// Double click or Enter on a server track: the queue becomes the results and the `start` row plays.
     fn play(&self, start: usize, cx: &gpui::App) {
         let Some(results) = self.results() else { return };
         let tracks: Arc<[Track]> = results.tracks.as_slice().into();
         self.core.read(cx).playback(PlaybackCmd::Play { tracks, start });
     }
 
-    /// Doppio clic o Invio su un risultato del catalogo ufficiale (o di un'altra fonte): il core lo
-    /// importa e lo suona. Una richiesta alla volta: finché una è in corso il core ignora le altre.
+    /// Double click or Enter on a result of the official catalogue (or of another source): the core
+    /// imports and plays it. One request at a time: while one is in progress the core ignores the others.
     fn play_source(&self, ix: usize, cx: &gpui::App) {
         let Some(item) = self.catalog.search.sources.ready().and_then(|items| items.get(ix)) else { return };
         self.core.read(cx).external(ExternalCmd::PlaySource {
@@ -820,8 +820,8 @@ impl SearchPage {
     }
 }
 
-/// Le due viste hanno gli stessi risultati (le stesse `Arc`): un cambio altrove nel catalogo non
-/// ridisegna la pagina.
+/// The two views have the same results (the same `Arc`s): a change elsewhere in the catalogue does not
+/// redraw the page.
 fn same_search(a: &SearchView, b: &SearchView) -> bool {
     same_load(&a.results, &b.results)
         && same_load(&a.sources, &b.sources)
@@ -967,7 +967,7 @@ mod tests {
                 Section::ServerAlbums,
             ]
         );
-        // Mentre i brani ufficiali arrivano, i suoi artisti aspettano (come nel client Iced).
+        // While the official tracks arrive, its artists wait.
         let waiting = plan_all(Counted::Ready(0), Counted::Loading, Counted::Idle, extra);
         assert!(!headings(&waiting.rows).contains(&Section::OfficialArtists));
         assert_eq!(Section::ServerArtists.count(1), "1 artista");

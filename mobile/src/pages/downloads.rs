@@ -1,4 +1,4 @@
-//! «Scaricati», as the desktop page (`desktop/src/app/downloads_page.rs`) and the Iced one: the
+//! «Scaricati», as the desktop page (`desktop/src/app/downloads_page.rs`) and the phone one: the
 //! summary and the space, Riproduci, Casuale and «Controlla i file»; «In corso» (status, the bar of
 //! ten steps, Annulla; Riprova and «Togli dall'elenco» for a failed one), then «Sul dispositivo»
 //! (format and size, or «File mancante»/«File cambiato» in the error tint with «Scarica di nuovo»;

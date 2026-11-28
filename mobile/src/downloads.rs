@@ -222,7 +222,7 @@ pub(crate) fn notice(event: &DownloadsEvent) -> Option<(String, bool)> {
         DownloadsEvent::Verified { checked, lost } => error(format!(
             "Controllati {checked} brani: {lost} non hanno più il loro file. Suonano dalla rete finché non li scarichi di nuovo"
         )),
-        // The update's, as the Iced phone app said them (`client/src/app/downloads.rs`).
+        // The update's, as the phone app said them.
         DownloadsEvent::UpdateOffered { tag, .. } => info(format!("Nuova versione {tag} disponibile")),
         DownloadsEvent::UpToDate => info("Hai già l'ultima versione".to_owned()),
         DownloadsEvent::UpdateCheckFailed(why) => error(format!("Controllo non riuscito: {why}")),

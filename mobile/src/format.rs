@@ -1,4 +1,4 @@
-//! Short texts the app shows (times, counts), the same rules as `desktop/src/format.rs` and the Iced
+//! Short texts the app shows (times, counts), the same rules as `desktop/src/format.rs` and the
 //! client, so the three frontends say the same thing.
 
 /// `m:ss`, or `h:mm:ss` past the hour, of a time in milliseconds (whole seconds, rounded down).

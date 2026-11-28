@@ -1,18 +1,18 @@
-//! Testi sincronizzati: lettura del formato LRC e riga in corso per la posizione di riproduzione.
-//! Tutto è una funzione pura: il testo arriva già dal backend.
+//! Synced lyrics: reading the LRC format and the line playing at the playback position.
+//! All of it is a pure function: the text already arrives from the backend.
 
 use std::time::Duration;
 
 use crate::api::Lyrics;
 
-/// Una riga del testo, dal momento in cui va cantata.
+/// One line of the text, from the moment it is to be sung.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Line {
     pub at: Duration,
     pub text: String,
 }
 
-/// Testo pronto per la vista: le righe con i tempi, se il testo è sincronizzato, e il testo semplice.
+/// Text ready for the view: the lines with their times, if the text is synced, and the plain text.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Text {
     pub lines: Vec<Line>,
@@ -32,9 +32,9 @@ impl Text {
     }
 }
 
-/// Legge un testo in formato LRC. Una riga può avere più tempi (`[00:10.00][01:40.00] ritornello`);
-/// i tag di metadati (`[ar:...]`, `[ti:...]`) si ignorano, `[offset:±ms]` sposta tutte le righe.
-/// Il risultato è ordinato per tempo.
+/// Reads a text in LRC format. A line can have several times (`[00:10.00][01:40.00] ritornello`);
+/// the metadata tags (`[ar:...]`, `[ti:...]`) are ignored, `[offset:±ms]` shifts all the lines.
+/// The result is sorted by time.
 pub fn parse_lrc(text: &str) -> Vec<Line> {
     let mut offset_ms: i64 = 0;
     let mut stamped: Vec<(u64, String)> = Vec::new();
@@ -62,7 +62,7 @@ pub fn parse_lrc(text: &str) -> Vec<Line> {
     lines
 }
 
-/// Un tempo `mm:ss`, `mm:ss.xx` o `mm:ss.xxx` in millisecondi. `None` per ogni altro tag.
+/// A time `mm:ss`, `mm:ss.xx` or `mm:ss.xxx` in milliseconds. `None` for any other tag.
 fn parse_stamp(tag: &str) -> Option<u64> {
     let (minutes, seconds) = tag.split_once(':')?;
     let minutes: u64 = digits(minutes)?;
@@ -72,7 +72,7 @@ fn parse_stamp(tag: &str) -> Option<u64> {
     };
     let seconds: u64 = digits(whole)?;
     let millis = match fraction {
-        // I centesimi valgono dieci millisecondi: `.5` è mezzo secondo, `.45` è 450 ms.
+        // Hundredths are worth ten milliseconds: `.5` is half a second, `.45` is 450 ms.
         Some(fraction) if (1..=3).contains(&fraction.len()) => digits(&format!("{fraction:0<3}"))?,
         Some(_) => return None,
         None => 0,
@@ -80,7 +80,7 @@ fn parse_stamp(tag: &str) -> Option<u64> {
     Some(minutes * 60_000 + seconds * 1000 + millis)
 }
 
-/// Solo cifre ASCII, altrimenti il tag non è un tempo (`ar`, `ti`, `+1` ecc.).
+/// Only ASCII digits, otherwise the tag is not a time (`ar`, `ti`, `+1` etc.).
 fn digits(text: &str) -> Option<u64> {
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -88,22 +88,22 @@ fn digits(text: &str) -> Option<u64> {
     text.parse().ok()
 }
 
-/// Indice della riga in corso: l'ultima che inizia prima o nel momento `position`. `None` prima
-/// della prima riga.
+/// Index of the line playing: the last one that starts before or at the moment `position`. `None` before
+/// the first line.
 pub fn current(lines: &[Line], position: Duration) -> Option<usize> {
     lines.partition_point(|line| line.at <= position).checked_sub(1)
 }
 
-/// Puntini di una pausa strumentale.
+/// Dots of an instrumental pause.
 pub const DOTS: u32 = 3;
 
-/// Un verso è una pausa strumentale se non ha parole.
+/// A verse is an instrumental pause if it has no words.
 pub fn is_pause(line: &Line) -> bool {
     line.text.trim().is_empty()
 }
 
-/// Quanti puntini sono accesi in una pausa che va da `line.at` a `next`, alla posizione `position`: uno
-/// all'inizio, tutti e tre nell'ultimo terzo. Senza un verso dopo resta acceso il primo.
+/// How many dots are lit in a pause from `line.at` to `next`, at the position `position`: one
+/// at the start, all three in the last third. Without a verse after it, the first stays lit.
 pub fn dots_lit(line: &Line, next: Option<Duration>, position: Duration) -> u32 {
     let Some(next) = next else { return 1 };
     let span = next.saturating_sub(line.at).as_secs_f32();
@@ -114,8 +114,8 @@ pub fn dots_lit(line: &Line, next: Option<Duration>, position: Duration) -> u32 
     ((fraction * DOTS as f32).floor() as u32 + 1).min(DOTS)
 }
 
-/// Fra quanto cambia qualcosa da mostrare alla posizione `position`: l'inizio del verso dopo o, dentro
-/// una pausa, il prossimo puntino. `None` dopo l'ultimo verso: non c'è niente da aspettare.
+/// Until when something to show changes at the position `position`: the start of the next verse or, inside
+/// a pause, the next dot. `None` after the last verse: there is nothing to wait for.
 pub fn next_change(lines: &[Line], position: Duration) -> Option<Duration> {
     let now = current(lines, position);
     let next_line = lines.get(now.map_or(0, |ix| ix + 1)).map(|line| line.at);
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn the_wait_is_never_zero() {
-        // Due versi con lo stesso tempo: si aspetta quello dopo, mai un timer da 0 che gira a vuoto.
+        // Two verses with the same time: the next one is waited for, never a timer at 0 spinning idle.
         let lines = [verse(1_000, "a"), verse(1_000, "a bis"), verse(2_000, "b")];
         assert_eq!(next_change(&lines, ms(1_000)), Some(ms(1_000)));
     }

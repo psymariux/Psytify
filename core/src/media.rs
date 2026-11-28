@@ -1,12 +1,11 @@
-//! Controlli multimediali del sistema (MPRIS su Linux, la sessione multimediale su Android): i tasti
-//! multimediali della tastiera, il widget del desktop, la schermata di blocco del telefono e le
-//! cuffie comandano il player, e il sistema mostra titolo, artista, copertina e posizione. Su
-//! Android il lavoro con Java lo fa il guscio (`android/src/media.rs`), agganciato con
-//! `set_phone_media`. Su Windows e macOS per ora non c'è: servirebbe la finestra nativa (HWND), e lì
-//! `events` non produce nulla.
+//! System media controls (MPRIS on Linux, the media session on Android): the keyboard's media keys, the
+//! desktop widget, the phone's lock screen and the headphones control the player, and the system shows the
+//! title, artist, cover and position. On Android the Java work is done by the shell (`android/src/media.rs`),
+//! attached with `set_phone_media`. On Windows and macOS there is none for now: it would need the native
+//! window (HWND), and there `events` produces nothing.
 //!
-//! I comandi arrivano come un flusso neutro ([`events`]), senza framework: Iced lo ascolta come
-//! `Subscription`, il core lo potrà consumare direttamente.
+//! The commands arrive as a neutral stream ([`events`]), with no framework: the frontend listens to it as a
+//! stream, and the core can consume it directly.
 #![cfg_attr(
     not(any(target_os = "linux", target_os = "android")),
     expect(dead_code, reason = "fuori da Linux i comandi del sistema non arrivano mai")
@@ -18,25 +17,25 @@ use std::time::Duration;
 use futures_util::{Stream, StreamExt};
 use tokio::sync::mpsc;
 
-/// Un comando arrivato dal sistema.
+/// A command that came from the system.
 #[derive(Debug, Clone)]
 pub enum Event {
-    /// Il collegamento è pronto: da qui in poi si aggiorna ciò che il sistema mostra.
+    /// The link is ready: from now on what the system shows is updated.
     Ready(Handle),
     Play,
     Pause,
     Toggle,
     Next,
     Previous,
-    /// Avanti (positivo) o indietro, in secondi.
+    /// Forward (positive) or back, in seconds.
     SeekBy(i64),
     SetPosition(Duration),
     SetVolume(f32),
-    /// Porta la finestra in primo piano.
+    /// Brings the window to the front.
     Raise,
 }
 
-/// Ciò che il sistema mostra del brano in riproduzione.
+/// What the system shows of the track playing.
 pub struct NowPlaying<'a> {
     pub title: &'a str,
     pub artist: &'a str,
@@ -45,13 +44,13 @@ pub struct NowPlaying<'a> {
     pub duration: Duration,
     pub playing: bool,
     pub position: Duration,
-    /// La copertina già scaricata (lato e RGBA), per chi la vuole in pixel e non per indirizzo
-    /// (MPRIS la legge dall'indirizzo).
+    /// The cover already downloaded (side and RGBA), for whoever wants it in pixels and not by address
+    /// (MPRIS reads it from the address).
     pub artwork: Option<(u32, &'a [u8])>,
 }
 
-/// Il brano da mostrare al sistema, con i suoi testi: lo costruisce il riduttore (nessun prestito, può
-/// viaggiare in un effetto) e l'host ne fa un [`NowPlaying`] con [`Now::borrowed`].
+/// The track to show to the system, with its texts: the reducer builds it (no borrow, it can
+/// travel in an effect) and the host makes it a [`NowPlaying`] with [`Now::borrowed`].
 #[derive(Debug, Clone)]
 pub struct Now {
     pub title: String,
@@ -61,7 +60,7 @@ pub struct Now {
     pub duration: Duration,
     pub playing: bool,
     pub position: Duration,
-    /// La copertina già decodificata: lato e RGBA.
+    /// The cover already decoded: side and RGBA.
     pub artwork: Option<(u32, bytes::Bytes)>,
 }
 
@@ -87,16 +86,12 @@ pub use other::{Handle, events};
 #[cfg(target_os = "android")]
 pub use phone::{Handle, events};
 #[cfg(target_os = "android")]
-pub use phone::{
-    command as phone_command, install as phone_install, notify_update as phone_notify_update,
-    register as set_phone_media, register_install as set_phone_installer,
-    register_update_notifier as set_phone_update_notifier,
-};
+pub use phone::{command as phone_command, register as set_phone_media};
 
-/// Un flusso scritto da un compito: `run` riceve il capo che scrive e il flusso finisce quando `run`
-/// termina e i comandi già scritti sono stati letti. Fa ciò che faceva `iced::stream::channel`, con
-/// il canale di tokio al posto di quello di Iced.
-/// Lo usa anche il movimento ridotto del sistema (`system_motion`).
+/// A stream written by a task: `run` gets the sender that writes and the stream ends when `run`
+/// ends and the commands already written have been read. It is a stream channel, built on
+/// tokio's channel.
+/// The system's reduced motion (`system_motion`) uses it too.
 pub(crate) fn channel<T, F>(size: usize, run: impl FnOnce(mpsc::Sender<T>) -> F) -> impl Stream<Item = T>
 where
     F: Future<Output = ()>,
@@ -111,11 +106,11 @@ where
 
 #[cfg(target_os = "linux")]
 mod linux {
-    //! MPRIS sul bus della sessione, con zbus (in Rust puro: niente libdbus da installare). Il servizio è un
-    //! compito asincrono dentro il flusso di [`events`]: aspetta un metodo chiamato dal sistema o un cambio di
-    //! ciò che si mostra, e senza nessuno dei due non si sveglia (souvlaki, che c'era prima, controllava il suo
-    //! canale ogni 10 ms: 100 risvegli al secondo anche a riposo, BACKLOG 13). Le interfacce e le proprietà
-    //! sono quelle che souvlaki esponeva, con i nomi della specifica.
+    //! MPRIS on the session bus, with zbus (in pure Rust: no libdbus to install). The service is an
+    //! async task inside the [`events`] stream: it waits for a method called by the system or for a change in
+    //! what is shown, and with neither it does not wake up (souvlaki, which was there before, polled its
+    //! channel every 10 ms: 100 wake-ups a second even at rest, BACKLOG 13). The interfaces and properties
+    //! are those souvlaki exposed, with the names of the specification.
 
     use std::collections::HashMap;
     use std::time::Duration;
@@ -127,11 +122,11 @@ mod linux {
 
     use super::{Event, NowPlaying};
 
-    /// Dove stanno le due interfacce, come vuole MPRIS.
+    /// Where the two interfaces are, as MPRIS wants.
     const PATH: &str = "/org/mpris/MediaPlayer2";
 
-    /// Il collegamento con il sistema; si clona per viaggiare nei messaggi. Ciò che si mostra va al
-    /// servizio su un canale: chi lo chiama non aspetta il bus.
+    /// The link with the system; it is cloned to travel in messages. What is shown goes to the
+    /// service over a channel: whoever calls it does not wait for the bus.
     #[derive(Clone)]
     pub struct Handle(UnboundedSender<Change>);
 
@@ -142,8 +137,8 @@ mod linux {
     }
 
     impl Handle {
-        /// Mostra il brano (o niente, a player fermo). Un errore di D-Bus non ferma la musica: il
-        /// widget del desktop resta solo indietro.
+        /// Shows the track (or nothing, with the player stopped). A D-Bus error does not stop the music: the
+        /// desktop widget just stays behind.
         pub fn show(&self, now: Option<&NowPlaying<'_>>) {
             match now {
                 None => drop(self.0.send(Change::Playback(Status::Stopped))),
@@ -161,7 +156,7 @@ mod linux {
         }
     }
 
-    /// Lo stato di riproduzione che il sistema legge.
+    /// The playback state that the system reads.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Status {
         Playing,
@@ -169,14 +164,14 @@ mod linux {
         Stopped,
     }
 
-    /// Il brano come lo legge il sistema.
+    /// The track as the system reads it.
     #[derive(Debug, Clone, Default, PartialEq, Eq)]
     struct Metadata {
         title: String,
         artist: String,
         album: Option<String>,
         cover_url: Option<String>,
-        /// In microsecondi, come vuole `mpris:length`.
+        /// In microseconds, as `mpris:length` wants.
         length: i64,
     }
 
@@ -192,7 +187,7 @@ mod linux {
         }
     }
 
-    /// Un cambio di ciò che si mostra, dal core al servizio.
+    /// A change of what is shown, from the core to the service.
     #[derive(Debug)]
     enum Change {
         Metadata(Metadata),
@@ -205,13 +200,13 @@ mod linux {
         i64::try_from(duration.as_micros()).unwrap_or(i64::MAX)
     }
 
-    /// `Seek` di MPRIS (microsecondi, avanti se positivo) in secondi interi, come prima con souvlaki.
+    /// MPRIS `Seek` (microseconds, forward if positive) in whole seconds, as before with souvlaki.
     fn seek(offset: i64) -> Event {
         let secs = i64::try_from(offset.unsigned_abs() / 1_000_000).unwrap_or(i64::MAX);
         Event::SeekBy(if offset > 0 { secs } else { -secs })
     }
 
-    /// `SetPosition` di MPRIS: niente se la posizione è negativa o oltre la fine del brano.
+    /// MPRIS `SetPosition`: nothing if the position is negative or beyond the end of the track.
     fn set_position(position: i64, length: Option<i64>) -> Option<Event> {
         let micros = u64::try_from(position).ok()?;
         if length.is_some_and(|length| position > length) {
@@ -220,7 +215,7 @@ mod linux {
         Some(Event::SetPosition(Duration::from_micros(micros)))
     }
 
-    /// `org.mpris.MediaPlayer2`: chi è il player.
+    /// `org.mpris.MediaPlayer2`: who the player is.
     struct Root {
         commands: UnboundedSender<Event>,
     }
@@ -231,7 +226,7 @@ mod linux {
             let _ = self.commands.send(Event::Raise);
         }
 
-        /// Chiudere l'app dal widget non c'era nemmeno prima: la chiusura passa dal salvataggio della finestra.
+        /// Closing the app from the widget did not exist even before: closing goes through the window's save.
         fn quit(&self) {}
 
         #[dbus_interface(property)]
@@ -265,7 +260,7 @@ mod linux {
         }
     }
 
-    /// `org.mpris.MediaPlayer2.Player`: i comandi e ciò che si mostra.
+    /// `org.mpris.MediaPlayer2.Player`: the commands and what is shown.
     struct Player {
         commands: UnboundedSender<Event>,
         status: Status,
@@ -316,7 +311,7 @@ mod linux {
             }
         }
 
-        /// Psytify non apre indirizzi dal sistema.
+        /// Psytify does not open addresses from the system.
         fn open_uri(&self, _uri: String) {}
 
         #[dbus_interface(property)]
@@ -336,7 +331,7 @@ mod linux {
         #[dbus_interface(property)]
         fn metadata(&self) -> HashMap<&'static str, Value<'static>> {
             let mut dict = HashMap::new();
-            // Un id del brano serve perché il sistema possa chiedere `SetPosition`.
+            // A track id is needed so the system can ask for `SetPosition`.
             if let Ok(id) = ObjectPath::try_from("/") {
                 dict.insert("mpris:trackid", Value::new(id));
             }
@@ -410,12 +405,12 @@ mod linux {
         }
     }
 
-    /// Registra Psytify sul bus della sessione e inoltra i comandi. Senza bus (per esempio fuori
-    /// da una sessione grafica) il flusso finisce subito.
+    /// Registers Psytify on the session bus and forwards the commands. Without a bus (for example outside
+    /// a graphical session) the stream ends at once.
     pub fn events() -> impl Stream<Item = Event> + Send + 'static {
         super::channel(32, |output| async move {
-            // Un nome per processo, come chiede MPRIS con più istanze: con un nome fisso la seconda
-            // finestra non avrebbe il suo. `playerctl -p psytify` le trova tutte.
+            // One name per process, as MPRIS asks with several instances: with a fixed name the second
+            // window would not have its own. `playerctl -p psytify` finds them all.
             let name = format!("org.mpris.MediaPlayer2.psytify.instance{}", std::process::id());
             if let Ok(builder) = ConnectionBuilder::session() {
                 serve(builder, &name, output).await;
@@ -423,7 +418,7 @@ mod linux {
         })
     }
 
-    /// Il servizio su `builder` con il nome `name`, finché chi legge `output` c'è.
+    /// The service on `builder` with the name `name`, as long as whoever reads `output` is there.
     async fn serve(builder: ConnectionBuilder<'_>, name: &str, output: mpsc::Sender<Event>) {
         let (commands, mut called) = unbounded_channel();
         let (changes, mut changed) = unbounded_channel();
@@ -438,7 +433,7 @@ mod linux {
         let built = async { builder.serve_at(PATH, root)?.serve_at(PATH, player)?.name(name)?.build().await };
         let Ok(connection) = built.await else { return };
         let Ok(player) = connection.object_server().interface::<_, Player>(PATH).await else { return };
-        // Il capo resta anche qui: il canale dei cambi non si chiude finché il servizio vive.
+        // The sender stays here too: the channel of changes does not close while the service lives.
         if output.send(Event::Ready(Handle(changes.clone()))).await.is_err() {
             return;
         }
@@ -454,8 +449,8 @@ mod linux {
         }
     }
 
-    /// Applica un cambio alle proprietà e lo dice al sistema (`PropertiesChanged`), come faceva souvlaki:
-    /// la posizione non si annuncia (la specifica vuole che il sistema la legga quando serve).
+    /// Applies a change to the properties and tells the system (`PropertiesChanged`), as souvlaki did:
+    /// the position is not announced (the specification wants the system to read it when needed).
     async fn apply(player: &InterfaceRef<Player>, change: Change) {
         let mut iface = player.get_mut().await;
         let context = player.signal_context();
@@ -503,9 +498,9 @@ mod linux {
             assert!(matches!(at, Some(Event::SetPosition(at)) if at == Duration::from_secs(3)));
         }
 
-        /// Il servizio vero su un bus privato (`dbus-daemon` lanciato dal test, mai quello della sessione):
-        /// un metodo chiamato dal sistema diventa un comando, ciò che il core mostra diventa proprietà, e
-        /// fermo il flusso non dà niente. Senza `dbus-daemon` il test non fa niente.
+        /// The real service on a private bus (`dbus-daemon` started by the test, never the session's one):
+        /// a method called by the system becomes a command, what the core shows becomes a property, and
+        /// when the stream is idle it gives nothing. Without `dbus-daemon` the test does nothing.
         #[tokio::test]
         async fn the_service_forwards_commands_and_shows_the_track() {
             let dir = std::env::temp_dir().join(format!("psytify-mpris-test-{}", std::process::id()));
@@ -524,7 +519,7 @@ mod linux {
                 ),
             )
             .expect("configurazione del bus");
-            /// Il bus si ferma anche se il test fallisce.
+            /// The bus stops even if the test fails.
             struct Daemon(std::process::Child, std::path::PathBuf);
             impl Drop for Daemon {
                 fn drop(&mut self) {
@@ -553,8 +548,8 @@ mod linux {
             let within = Duration::from_secs(10);
             const NAME: &str = "org.mpris.MediaPlayer2.psytify.test";
 
-            // Il flusso gira in un compito suo, come nell'host del core che lo aspetta sempre: i cambi di ciò
-            // che si mostra arrivano al servizio solo mentre qualcuno lo fa avanzare.
+            // The stream runs in a task of its own, as in the core's host that always waits for it: the changes of
+            // what is shown reach the service only while someone makes it advance.
             let builder = ConnectionBuilder::address(address.as_str()).unwrap();
             let mut service = Box::pin(crate::media::channel(32, |output| async move {
                 serve(builder, NAME, output).await;
@@ -577,7 +572,7 @@ mod linux {
                     .await
                     .expect("il client")
                     .unwrap();
-            // Senza la cache delle proprietà: `Position` non si annuncia, il sistema la legge quando serve.
+            // Without the properties cache: `Position` is not announced, the system reads it when needed.
             let proxy = async |interface: &'static str| -> zbus::Proxy<'static> {
                 zbus::ProxyBuilder::new_bare(&client)
                     .destination(NAME)
@@ -594,8 +589,8 @@ mod linux {
             let player = proxy("org.mpris.MediaPlayer2.Player").await;
             let root = proxy("org.mpris.MediaPlayer2").await;
 
-            // I comandi del sistema, come li traduceva souvlaki: `Stop` è una pausa, `Quit` e `OpenUri` non
-            // fanno niente, il salto è in secondi interi con il segno, il volume si tiene fra 0 e 1.
+            // The system's commands, as souvlaki translated them: `Stop` is a pause, `Quit` and `OpenUri` do
+            // nothing, the jump is in whole seconds with the sign, the volume is kept between 0 and 1.
             type Expected = fn(&Event) -> bool;
             let calls: [(&str, Expected); 6] = [
                 ("Next", |event| matches!(event, Event::Next)),
@@ -623,7 +618,7 @@ mod linux {
             player.set_property("Volume", 1.5_f64).await.unwrap();
             assert!(matches!(next().await, Event::SetVolume(volume) if (volume - 1.0).abs() < 1e-6));
 
-            // Chi è il player.
+            // Who the player is.
             assert_eq!(root.get_property::<String>("Identity").await.unwrap(), "Psytify");
             for (property, value) in [("CanQuit", true), ("CanRaise", true), ("HasTrackList", false)] {
                 assert_eq!(root.get_property::<bool>(property).await.unwrap(), value, "{property}");
@@ -639,7 +634,7 @@ mod linux {
             assert_eq!(player.get_property::<String>("PlaybackStatus").await.unwrap(), "Stopped");
             assert_eq!(player.get_property::<f64>("Volume").await.unwrap(), 1.0);
 
-            // Ciò che il core mostra.
+            // What the core shows.
             let now = NowPlaying {
                 title: "Titolo",
                 artist: "Artista",
@@ -652,7 +647,7 @@ mod linux {
             };
             handle.show(Some(&now));
             handle.set_volume(0.5);
-            // I cambi arrivano al servizio su un canale: si aspetta che il sistema li legga.
+            // The changes reach the service over a channel: it waits for the system to read them.
             let read = async || -> (String, i64, f64, HashMap<String, OwnedValue>) {
                 let status: String = player.get_property("PlaybackStatus").await.unwrap();
                 let position: i64 = player.get_property("Position").await.unwrap();
@@ -682,13 +677,13 @@ mod linux {
                 shown.3.get("mpris:trackid").and_then(|value| ObjectPath::try_from(value.clone()).ok());
             assert_eq!(track.as_ref().map(ObjectPath::as_str), Some("/"));
 
-            // `SetPosition` oltre la fine del brano non fa niente; dentro, va lì.
+            // `SetPosition` beyond the end of the track does nothing; inside, it goes there.
             let track = ObjectPath::try_from("/").unwrap();
             let _: () = player.call("SetPosition", &(&track, 250_000_000_i64)).await.unwrap();
             let _: () = player.call("SetPosition", &(&track, 30_000_000_i64)).await.unwrap();
             assert!(matches!(next().await, Event::SetPosition(at) if at == Duration::from_secs(30)));
 
-            // Fermo: stato `Stopped`, posizione 0, il brano resta.
+            // Stopped: state `Stopped`, position 0, the track stays.
             handle.show(None);
             for _ in 0..50 {
                 shown = read().await;
@@ -700,7 +695,7 @@ mod linux {
             assert_eq!((shown.0.as_str(), shown.1), ("Stopped", 0));
             assert!(shown.3.contains_key("xesam:title"));
 
-            // Fermo, il flusso non dà niente.
+            // Stopped, the stream gives nothing.
             assert!(
                 tokio::time::timeout(Duration::from_millis(200), events.recv()).await.is_err(),
                 "nessun evento senza comandi"
@@ -711,11 +706,10 @@ mod linux {
     }
 }
 
-/// Android: il guscio registra chi mostra il brano al sistema e manda indietro i comandi (Play,
-/// Pausa, Successivo, Precedente, salto) con `command`.
+/// Android: the shell registers who shows the track to the system and sends back the commands (Play,
+/// Pause, Next, Previous, jump) with `command`.
 #[cfg(target_os = "android")]
 mod phone {
-    use std::path::Path;
     use std::sync::{Mutex, OnceLock, PoisonError};
     use std::time::Duration;
 
@@ -726,12 +720,8 @@ mod phone {
 
     type Show = Box<dyn Fn(Option<&NowPlaying<'_>>) + Send + Sync>;
     type Commands = (UnboundedSender<Event>, Mutex<Option<UnboundedReceiver<Event>>>);
-    type Install = Box<dyn Fn(&Path) + Send + Sync>;
-    type NotifyUpdate = Box<dyn Fn(&str) + Send + Sync>;
 
     static SHOW: OnceLock<Show> = OnceLock::new();
-    static INSTALL: OnceLock<Install> = OnceLock::new();
-    static NOTIFY_UPDATE: OnceLock<NotifyUpdate> = OnceLock::new();
     static COMMANDS: OnceLock<Commands> = OnceLock::new();
 
     fn commands() -> &'static Commands {
@@ -741,37 +731,13 @@ mod phone {
         })
     }
 
-    /// Registra chi mostra il brano al sistema. Vale la prima chiamata.
+    /// Registers who shows the track to the system. The first call counts.
     pub fn register(show: impl Fn(Option<&NowPlaying<'_>>) + Send + Sync + 'static) {
         let _ = SHOW.set(Box::new(show));
     }
 
-    /// Il guscio Android registra come si installa un pacchetto scaricato dall'app.
-    pub fn register_install(install: impl Fn(&Path) + Send + Sync + 'static) {
-        let _ = INSTALL.set(Box::new(install));
-    }
-
-    /// Il guscio Android registra come si mostra la notifica di una versione nuova.
-    pub fn register_update_notifier(notify: impl Fn(&str) + Send + Sync + 'static) {
-        let _ = NOTIFY_UPDATE.set(Box::new(notify));
-    }
-
-    /// Avvisa con una notifica di sistema che c'è la versione `tag`.
-    pub fn notify_update(tag: &str) {
-        if let Some(notify) = NOTIFY_UPDATE.get() {
-            notify(tag);
-        }
-    }
-
-    /// Passa il pacchetto al sistema, che chiede la conferma all'utente e installa.
-    pub fn install(path: &Path) {
-        if let Some(install) = INSTALL.get() {
-            install(path);
-        }
-    }
-
-    /// Un comando dal sistema: 0 Play, 1 Pausa, 2 Successivo, 3 Precedente, 4 salto a `value` ms,
-    /// 5 Play o Pausa. Gli altri codici non fanno nulla.
+    /// A command from the system: 0 Play, 1 Pause, 2 Next, 3 Previous, 4 jump to `value` ms,
+    /// 5 Play or Pause. The other codes do nothing.
     pub fn command(code: i32, value: i64) {
         let event = match code {
             0 => Event::Play,
@@ -811,8 +777,8 @@ mod phone {
         }
     }
 
-    /// I comandi del guscio. Senza guscio registrato (desktop con `PSYTIFY_PHONE=1`) il flusso
-    /// finisce subito.
+    /// The shell's commands. Without a registered shell (desktop with `PSYTIFY_PHONE=1`) the stream
+    /// ends at once.
     pub fn events() -> impl Stream<Item = Event> + Send + 'static {
         super::channel(32, |output| async move {
             if SHOW.get().is_none() {
@@ -850,7 +816,7 @@ mod other {
         pub fn set_volume(&self, _volume: f32) {}
     }
 
-    /// Qui il sistema non manda comandi: un flusso vuoto.
+    /// Here the system sends no commands: an empty stream.
     pub fn events() -> impl Stream<Item = Event> + Send + 'static {
         futures_util::stream::empty()
     }

@@ -1,4 +1,4 @@
-//! Sezioni della galleria: una funzione per famiglia di componenti.
+//! Gallery sections: one function per family of components.
 
 use gpui::{
     AnyElement, App, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString,
@@ -35,15 +35,15 @@ use crate::components::{Button, IconButton, Preview};
 use crate::pixel::{PixelSprite, SpriteStore};
 use crate::theme::{Ap, TypeStyle, cased, col, dp};
 
-/// Adatta una callback «con valore» dei componenti (`Fn(T, &mut Window, &mut App)`) a un metodo
-/// della galleria, tenendo solo un riferimento debole alla vista.
+/// Adapts a "with value" callback of the components (`Fn(T, &mut Window, &mut App)`) to a method
+/// of the gallery, keeping only a weak reference to the view.
 fn value_cb<T: 'static>(
     cx: &Context<Gallery>,
     f: impl Fn(&mut Gallery, T, &mut Context<Gallery>) + 'static,
 ) -> impl Fn(T, &mut Window, &mut App) + 'static {
     let this = cx.weak_entity();
     move |value, _window, app| {
-        // Se la vista è già chiusa non c'è nulla da aggiornare.
+        // If the view is already closed there is nothing to update.
         let _ = this.update(app, |gallery, cx| f(gallery, value, cx));
     }
 }
@@ -945,7 +945,7 @@ fn tiles() -> AnyElement {
     ])
 }
 
-/// Copertine di prova dello scaffale (12: tre pagine da quattro nella cornice).
+/// Test covers of the shelf (12: three pages of four in the frame).
 const SHELF_DEMO: [&str; 12] = [
     "Neon Harbour",
     "Paper Lanterns",
@@ -965,7 +965,7 @@ fn shelves(g: &Gallery, cx: &mut Context<Gallery>) -> AnyElement {
     use crate::components::shelf::{Shelf, ShelfPage};
     use crate::components::shortcut::Shortcut;
     use psytify_design::tokens::size::GRID_GAP;
-    // La cornice tiene quattro copertine da 160: le frecce spostano di una pagina, la rotella di una.
+    // The frame holds four covers of 160: the arrows move by a page, the wheel by one.
     let page = ShelfPage::new(g.shelf_start, 4, SHELF_DEMO.len());
     let tiles = page.range().map(|ix| {
         let mut tile = AlbumTile::new(("shelf-demo", ix), SHELF_DEMO[ix], "Album · Ada Vale").side(160.0);

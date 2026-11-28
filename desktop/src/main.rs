@@ -1,6 +1,6 @@
-//! Psytify desktop (GPUI). Senza argomenti apre l'app vera, collegata al core (`psytify-core`): ricerca,
-//! coda e barra «in riproduzione». Con `--gallery` apre la galleria dei componenti (nessun core, nessuna
-//! rete). Home, Libreria e Scaricati arrivano con i passi successivi del piano di migrazione.
+//! Psytify desktop (GPUI). Without arguments it opens the real app, connected to the core (`psytify-core`): search,
+//! queue and the «in riproduzione» bar. With `--gallery` it opens the component gallery (no core, no
+//! network). Home, Libreria and Scaricati arrive with the next steps of the migration plan.
 
 mod actions;
 mod app;
@@ -36,30 +36,30 @@ enum Mode {
     Gallery,
 }
 
-const USAGE: &str = "psytify [--gallery] [--search TESTO] [--now] [--queue] [--lyrics] [--video] [--focus] [--play-first-official] [--page PAGINA] [--fixture NOME]\n\n\
-    Senza argomenti apre l'app, con la stessa configurazione del client Iced.\n\
-    --gallery        apre la galleria dei componenti (nessun core, nessuna rete)\n\
-    --search TESTO   apre la ricerca già compilata e la lancia\n\
-    --now            apre il pannello laterale su «In riproduzione»\n\
-    --queue          apre il pannello laterale sulla coda\n\
-    --lyrics         apre il pannello laterale sul testo\n\
-    --video          solo con la feature `video`: accende il videoclip nella copertina di «In riproduzione»;\n\
-                     con --focus, in quella del palco\n\
-    --focus          apre il palco (se c'è un brano in coda)\n\
-    --play-first-official  con --search: quando arrivano i risultati del catalogo ufficiale suona il\n\
-                     primo (serve a provare lo stato «Apro…» senza toccare niente)\n\
-    --page PAGINA    apre home, news, search, library, liked, downloads, playlist (la prima della libreria),\n\
-                     album (il primo album salvato), artist (il primo artista seguito), settings, signin,\n\
-                     friends, profile (il proprio profilo) o jam\n\
-    --fixture NOME   solo con la feature `fixtures`: dati sociali, della jam o dell'aggiornamento di prova al\n\
-                     posto di quelli del core (signin-code, signin-waiting, signin-error, signin-busy, social,\n\
+const USAGE: &str = "psytify [--gallery] [--search TEXT] [--now] [--queue] [--lyrics] [--video] [--focus] [--play-first-official] [--page PAGE] [--fixture NAME]\n\n\
+    Without arguments it opens the app.\n\
+    --gallery        opens the component gallery (no core, no network)\n\
+    --search TEXT    opens the search already filled in and runs it\n\
+    --now            opens the side panel on «In riproduzione»\n\
+    --queue          opens the side panel on the queue\n\
+    --lyrics         opens the side panel on the lyrics\n\
+    --video          only with the `video` feature: turns the clip on in the «In riproduzione» media slot;\n\
+                     with --focus, in the stage's\n\
+    --focus          opens the stage (if a track is queued)\n\
+    --play-first-official  with --search: plays the first official catalogue result when it arrives\n\
+                     (to try the «Apro…» state without touching anything)\n\
+    --page PAGE      opens home, news, search, library, liked, downloads, playlist (the library's first),\n\
+                     album (the first saved album), artist (the first followed artist), settings, signin,\n\
+                     friends, profile (your own) or jam\n\
+    --fixture NAME   only with the `fixtures` feature: fake social, jam or update data in place of the\n\
+                     core's (signin-code, signin-waiting, signin-error, signin-busy, social,\n\
                      social-own, social-private, social-empty, jam-invites, jam-connecting, jam-host,\n\
                      jam-guest, jam-error, update-offered, update-downloading, update-ready, update-error,\n\
-                     update-check-failed; con la feature `video` anche video-loading, video-ready (il file\n\
-                     di PSYTIFY_VIDEO_FIXTURE) e video-failed); i comandi sociali, della jam,\n\
-                     dell'aggiornamento e del videoclip non partono\n\n\
-    PSYTIFY_API_URL cambia il backend; PSYTIFY_REDUCE_MOTION=1 riduce il movimento (sprite fermi, nessuno\n\
-    scorrimento), come l'interruttore delle impostazioni, che però non lo toglie.";
+                     update-check-failed; with the `video` feature also video-loading, video-ready (the file\n\
+                     in PSYTIFY_VIDEO_FIXTURE) and video-failed); social, jam, update and clip commands\n\
+                     do not run\n\n\
+    PSYTIFY_API_URL changes the backend; PSYTIFY_REDUCE_MOTION=1 reduces motion (still sprites, no\n\
+    scrolling), like the settings switch, which does not turn it off.";
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
     let mut args = args.into_iter();
@@ -110,13 +110,13 @@ fn window_options(cx: &App) -> WindowOptions {
         window_decorations: Some(WindowDecorations::Client),
         window_background: WindowBackgroundAppearance::Opaque,
         window_min_size: Some(size(px(WINDOW_MIN_W), px(WINDOW_MIN_H))),
-        // L'`app_id` di Wayland (e la classe di X11) coincide con `client/psytify.desktop` (`StartupWMClass`):
-        // così il menu e la barra delle applicazioni associano icona e finestra.
+        // The Wayland `app_id` (and the X11 class) matches `desktop/psytify.desktop` (`StartupWMClass`):
+        // so the menu and the taskbar pair the icon with the window.
         app_id: Some("psytify".to_owned()),
-        // Senza fuoco GPUI disegna al più ogni 33 ms (il suo default): con il passo di 16 ms di X11 un
-        // videoclip a 30 fps ne mostrava 20,8 al secondo mentre si lavora in un'altra finestra (BACKLOG 44).
-        // Qui ogni ridisegno viene da un timer o da un dato che cambia, mai da un ciclo per fotogramma, quindi
-        // senza limite una finestra ferma resta ferma e una che anima va al ritmo del suo contenuto
+        // Without focus GPUI draws at most every 33 ms (its default): with X11's 16 ms step a
+        // video at 30 fps showed 20.8 per second while working in another window (BACKLOG 44).
+        // Here every redraw comes from a timer or from data that changes, never from a per-frame loop, so
+        // without a limit a still window stays still and an animating one runs at the pace of its content
         // (docs/PERFORMANCE.md, «QA 1»).
         inactive_frame_interval: None,
         ..WindowOptions::default()
@@ -131,8 +131,8 @@ fn main() {
             std::process::exit(2);
         }
     };
-    // Prima di tutto: su Linux si rilancia una volta con un ambiente più leggero (arene di malloc, driver
-    // Vulkan). Lo stesso del client Iced (`core/src/launch.rs`).
+    // First of all: on Linux it is relaunched once with a lighter environment (malloc arenas, driver
+    // Vulkan). See `core/src/launch.rs`.
     #[cfg(target_os = "linux")]
     psytify_core::launch::relaunch_with_lean_env();
     let reduce_motion = std::env::var_os("PSYTIFY_REDUCE_MOTION").is_some();
@@ -179,12 +179,12 @@ fn main() {
                     }
                 }
                 covers::Covers::install(cx, core.clone());
-                // «Riduci il movimento» delle impostazioni, prima del primo disegno, e poi dal vivo quando
-                // cambia ciò che il sistema chiede.
+                // The settings' «Riduci il movimento», before the first draw, and then live when
+                // what the system asks changes.
                 app::settings_page::follow_motion(&core, cx);
                 cx.open_window(options, move |window, cx| {
                     let shell = cx.new(|cx| app::Shell::new(core, launch, window, cx));
-                    // Chiudere dal gestore di finestre passa dallo stesso salvataggio del pulsante.
+                    // Closing from the window manager goes through the same save as the button.
                     let close = app::Shell::close_handler(&shell);
                     window.on_window_should_close(cx, move |window, cx| {
                         close(window, cx);

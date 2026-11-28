@@ -63,7 +63,7 @@ open = "5"
 # since QA 1: souvlaki 0.8, which did it before with this same zbus, polled its channel
 # every 10 ms and woke the process 100 times a second even at rest (docs/PERFORMANCE.md, «QA 1»).
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = "3"
+zbus = "6"
 
 [dev-dependencies]
 # `test-util`: the host tests pause the tokio clock (`start_paused`) and fast-forward fake seconds

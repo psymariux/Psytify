@@ -421,10 +421,12 @@ fn a_sign_in_against_a_clerk_that_does_not_answer_ends_in_an_error_under_the_for
     let (core, rx) = start(&dir);
     let first = account_until(&rx, |_| true);
     assert_eq!((first.state, first.step), (AccountState::SignedOut, SignInStep::Form));
-    core.sign_in("ada".into(), "not-a-real-password".into());
+    // A random secret, so no fixed value looks like a credential.
+    let secret = uuid::Uuid::new_v4().simple().to_string();
+    core.sign_in("ada".into(), secret.clone());
     let failed = account_until(&rx, |account| account.error.is_some());
     assert!(!failed.busy && failed.state == AccountState::SignedOut);
-    assert!(!format!("{failed:?}").contains("not-a-real-password"));
+    assert!(!format!("{failed:?}").contains(&secret));
     core.dismiss_sign_in_error();
     account_until(&rx, |account| account.error.is_none());
     drop(core);

@@ -4,7 +4,7 @@
 # Do not run `makepkg` here by hand: by default it uses `desktop/src` (the code!) as the working directory.
 # Use `scripts/arch-package.sh`, which moves BUILDDIR and also creates the repository database.
 pkgname=psytify
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Player musicale desktop per il catalogo Psytify"
 arch=('x86_64')

@@ -1,6 +1,6 @@
 [package]
 name = "psytify-mobile-gen"
-version = "0.1.0"
+version = "0.2.0"
 description = "Build-time generators for the Kotlin app: the UniFFI bindings and the design tokens"
 edition.workspace = true
 rust-version.workspace = true

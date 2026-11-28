@@ -2,7 +2,7 @@
 # From step 7 this is the Psytify desktop: package and binary `psytify`, the one the PKGBUILD
 # (`desktop/PKGBUILD`) and the releases install.
 name = "psytify"
-version = "0.1.0"
+version = "0.2.0"
 description = "Player musicale desktop per il catalogo Psytify (GPUI)"
 edition.workspace = true
 rust-version.workspace = true

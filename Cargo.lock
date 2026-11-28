@@ -4486,7 +4486,7 @@ dependencies = [
 
 [[package]]
 name = "psytify"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "gpui",
  "gpui_platform",
@@ -4504,7 +4504,7 @@ dependencies = [
 
 [[package]]
 name = "psytify-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "dirs 7.0.0",
@@ -4527,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "psytify-design"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "image",
  "serde",
@@ -4536,7 +4536,7 @@ dependencies = [
 
 [[package]]
 name = "psytify-mobile"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "jni-sys 0.4.1",
@@ -4552,7 +4552,7 @@ dependencies = [
 
 [[package]]
 name = "psytify-mobile-gen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "psytify-design",
  "uniffi",
